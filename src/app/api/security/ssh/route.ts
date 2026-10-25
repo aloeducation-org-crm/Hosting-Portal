@@ -3,7 +3,8 @@ import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession, requirePermission, ROLES } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { createAuditLog } from '@/lib/audit';
-import { callHelper } from '@/lib/helpers';
+import { callHelper, classifyHelperFailure } from '@/lib/helpers';
+import { getSshPublicKeyFingerprint } from '@/lib/ssh-key';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -23,16 +24,14 @@ function parseHelperJson(stdout: string): Record<string, unknown> {
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await requireSession(request);
+    const user = await requirePermission(request, 'SYSTEM_MANAGE');
 
     // === REAL: List SSH keys from authorized_keys ===
     const result = await callHelper('alo-ssh-helper', ['list-keys']);
 
     if (!result.success) {
-      return NextResponse.json(
-        apiError(`Failed to list SSH keys: ${result.stderr}`),
-        { status: 500 },
-      );
+      const failure = classifyHelperFailure('alo-ssh-helper', result);
+      return NextResponse.json(apiError(failure.message, failure.code), { status: failure.status });
     }
 
     const serverKeys = parseHelperJson(result.stdout);
@@ -54,20 +53,34 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requirePermission(request, 'SSH_MANAGE');
-    const body = await request.json();
+    const user = await requirePermission(request, 'SYSTEM_MANAGE');
+    const body: unknown = await request.json();
+    if (!body || typeof body !== 'object') {
+      throw apiError('Invalid request body', 'VALIDATION_ERROR', undefined, 400);
+    }
     const { publicKey, label, name } = body as {
-      publicKey: string;
-      label?: string;
-      name?: string;
+      publicKey?: unknown;
+      label?: unknown;
+      name?: unknown;
     };
 
-    if (!publicKey) {
+    if (!publicKey || typeof publicKey !== 'string') {
       throw apiError('publicKey is required', 'VALIDATION_ERROR', undefined, 400);
     }
 
-    if (publicKey.length > 16384) {
-      throw apiError('SSH key too long (max 16384 chars)', 'VALIDATION_ERROR', undefined, 400);
+    if ((label !== undefined && typeof label !== 'string') || (name !== undefined && typeof name !== 'string')) {
+      throw apiError('name and label must be strings', 'VALIDATION_ERROR', undefined, 400);
+    }
+    if (typeof name === 'string' && name.length > 128) {
+      throw apiError('name must be at most 128 characters', 'VALIDATION_ERROR', undefined, 400);
+    }
+
+    let fingerprint: string;
+    try {
+      fingerprint = getSshPublicKeyFingerprint(publicKey);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid SSH public key';
+      throw apiError(message, 'VALIDATION_ERROR', undefined, 400);
     }
 
     // === REAL: Add SSH key to authorized_keys ===
@@ -77,17 +90,11 @@ export async function POST(request: NextRequest) {
     const result = await callHelper('alo-ssh-helper', helperArgs);
 
     if (!result.success) {
-      throw apiError(
-        `Failed to add SSH key: ${result.stderr}`,
-        'SSH_ADD_FAILED',
-        undefined,
-        500,
-      );
+      const failure = classifyHelperFailure('alo-ssh-helper', result);
+      throw apiError(failure.message, failure.code, undefined, failure.status);
     }
 
-    // Extract fingerprint from the key for DB storage
-    const fingerprint = '';
-    const keyType = publicKey.trimStart().split(/       +|      /)[0] || 'unknown';
+    const keyType = publicKey.trim().split(/\s+/, 1)[0] || 'unknown';
 
     // Save to DB for tracking
     const keyRecord = await db.sshKey.create({
@@ -121,7 +128,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const user = await requirePermission(request, 'SSH_MANAGE');
+    const user = await requirePermission(request, 'SYSTEM_MANAGE');
     const { searchParams } = new URL(request.url);
     const keyId = searchParams.get('keyId');
     const fingerprint = searchParams.get('fingerprint');
@@ -146,14 +153,23 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    // === REAL: Remove SSH key from authorized_keys ===
-    if (targetFingerprint) {
-      await callHelper('alo-ssh-helper', ['remove-key', targetFingerprint]).catch(() => {
-        // Non-fatal if helper fails (key may not exist on server)
-      });
+    if (!targetFingerprint) {
+      throw apiError(
+        'The saved SSH key has no fingerprint; it cannot be safely removed from the host.',
+        'SSH_FINGERPRINT_MISSING',
+        undefined,
+        409,
+      );
     }
 
-    // Remove from DB
+    // Remove the host key first. Keep the DB record if host removal fails so
+    // the operator can retry and the UI never reports a false success.
+    const result = await callHelper('alo-ssh-helper', ['remove-key', targetFingerprint]);
+    if (!result.success) {
+      const failure = classifyHelperFailure('alo-ssh-helper', result);
+      throw apiError(failure.message, failure.code, undefined, failure.status);
+    }
+
     if (keyId) {
       await db.sshKey.delete({ where: { id: keyId } });
     }

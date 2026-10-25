@@ -175,7 +175,12 @@ head_ "2. Runtime & process manager"
 
 if have node; then
   nv=$(node -v); major=${nv#v}; major=${major%%.*}
-  [[ "$major" -ge 22 ]] && pass "node $nv (>= 22 required)" || fail "node $nv is too old (need >= 22)"
+  if (( major > 20 )) || { (( major == 20 )) && [[ "${nv#v20.}" != "$nv" ]]; }; then
+    minor=${nv#v}; minor=${minor#20.}; minor=${minor%%.*}
+    if (( major >= 21 )) || (( major == 20 && minor >= 9 )); then pass "node $nv (>= 20.9 required by Next.js 16)"; else fail "node $nv is too old (need >= 20.9)"; fi
+  else
+    fail "node $nv is too old (need >= 20.9)"
+  fi
 else
   fail "node not on PATH in this shell"
   fix "export NVM_DIR=\"\$HOME/.nvm\"; . \"\$NVM_DIR/nvm.sh\"   (and see check 2b)"
@@ -186,7 +191,7 @@ if have node; then
   sudo_node=$(sudo -n bash -lc 'command -v node' 2>/dev/null || true)
   if [[ -z "$sudo_node" ]]; then
     warn "node is NOT visible to sudo (secure_path excludes nvm) — systemd units and CI steps that call 'node' will fail"
-    fix "use an absolute ExecStart, or install node system-wide: curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs"
+    fix "use an absolute ExecStart, or install node system-wide: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs"
   else
     pass "node visible to sudo ($sudo_node)"
   fi
@@ -544,6 +549,59 @@ if [[ -n "$runner" ]]; then
 else
   warn "no actions.runner.* service found — push-to-main deploys will queue forever"
   fix "re-register the runner (Settings → Actions → Runners → New self-hosted runner) with labels: self-hosted, linux, production"
+fi
+
+# ═══ 12. Explicit proxy, database and helper authorization checks ═════════════
+head_ "12. Proxy service, live DB access & privileged helper policy"
+
+proxy_ok=false
+for proxy in nginx caddy; do
+  if systemctl is-active --quiet "$proxy" 2>/dev/null; then
+    proxy_ok=true
+    pass "$proxy is active"
+  fi
+done
+if [[ "$proxy_ok" == false ]]; then warn "neither nginx nor caddy is active"; fi
+for p in 80 443; do
+  if ss -H -tln sport = ":$p" 2>/dev/null | grep -q .; then
+    pass "TCP port $p has a listener"
+  else
+    warn "no process is listening on TCP port $p"
+  fi
+done
+
+if [[ -f "$DB_PATH" ]]; then
+  if [[ -r "$DB_PATH" && -w "$DB_PATH" ]]; then pass "SQLite database is readable and writable by $(whoami)"; else warn "SQLite DB lacks read/write access for $(whoami): $DB_PATH"; fi
+  if id alo-panel >/dev/null 2>&1 && sudo -n -u alo-panel test -r "$DB_PATH" -a -w "$DB_PATH" 2>/dev/null; then
+    pass "alo-panel can read and write $DB_PATH"
+  else
+    warn "alo-panel cannot verify read/write access to $DB_PATH (check ownership/mode and sudo availability)"
+  fi
+else
+  warn "expected absolute production SQLite file does not exist: $DB_PATH"
+fi
+
+if ss -H -tln sport = ":3051" 2>/dev/null | grep -q .; then
+  pass "upstream port 3051 is bound"
+  curl --fail --silent --max-time 3 http://127.0.0.1:3051/api/health >/dev/null 2>&1 && pass "upstream health endpoint responds on 3051" || warn "port 3051 listens but health endpoint did not return success"
+else
+  if have python3 && python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",3051)); s.close()' >/dev/null 2>&1; then
+    pass "internal port 3051 is free and bindable (no upstream process currently active)"
+  else
+    fail "internal port 3051 cannot be bound (check port conflict or permissions)"
+  fi
+fi
+
+policy=/etc/sudoers.d/alo-helpers
+if [[ -f "$policy" ]] && have visudo && sudo -n visudo -c -f "$policy" >/dev/null 2>&1; then
+  pass "sudoers policy parses cleanly"
+  if sudo -n -l -U alo-panel 2>/dev/null | grep -qE '/usr/local/sbin/(provision-site\.sh|ssl-lifecycle\.sh)'; then
+    pass "alo-panel is authorized for site provisioning and SSL helpers"
+  else
+    warn "sudoers policy does not visibly grant the requested site helpers to alo-panel"
+  fi
+else
+  warn "sudoers policy missing, invalid, or not inspectable: $policy"
 fi
 
 # ═══ SUMMARY ══════════════════════════════════════════════════════════════════

@@ -68,8 +68,8 @@ apt-get install -y -qq \
   >/dev/null 2>&1
 log_ok "System packages installed"
 
-log_step "Installing Node.js 22.x..."
-if command -v node &>/dev/null && node --version | grep -q 'v22'; then
+log_step "Installing Node.js 20.x..."
+if command -v node &>/dev/null && node --version | grep -q 'v20'; then
   log_ok "Node.js $(node --version) already installed"
 else
   # Remove any existing Node.js to avoid conflicts
@@ -80,7 +80,7 @@ else
   mkdir -p /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
     | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list
   apt-get update -qq
   apt-get install -y -qq nodejs >/dev/null 2>&1

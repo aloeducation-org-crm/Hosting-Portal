@@ -26,12 +26,54 @@ const ALLOWED_HELPERS = [
 
 type HelperName = (typeof ALLOWED_HELPERS)[number];
 
-type HelperResult = {
+export type HelperResult = {
   success: boolean;
   exitCode: number | null;
   stdout: string;
   stderr: string;
 };
+
+export type HelperFailure = {
+  status: 502 | 503 | 504;
+  code: "HOST_HELPER_FAILED" | "HOST_HELPER_UNAVAILABLE" | "HOST_HELPER_TIMEOUT";
+  message: string;
+};
+
+/** Keep helper diagnostics safe for callers that attach stderr to API errors. */
+export function sanitizeHelperStderr(stderr: string, code?: string | number | null): string {
+  const detail = stderr.toLowerCase();
+  if (/timed out|timeout/.test(detail)) return "Helper timed out";
+  if (code === "ENOENT" || /no such file|not found/.test(detail)) return "Host helper executable not found (ENOENT)";
+  if (code === "EACCES" || /permission denied/.test(detail)) return "Host helper executable is not permitted (EACCES)";
+  if (/sudoers|not allowed|not permitted|a password is required/.test(detail)) return "Sudoers policy does not authorize non-interactive helper execution";
+  if (/must be run as root|requires root/.test(detail)) return "Host helper requires root privileges";
+  if (stderr.trim()) return "Host helper returned a diagnostic message";
+  return "";
+}
+
+/** Convert a privileged-helper failure into a safe, actionable API error. */
+export function classifyHelperFailure(helperName: HelperName, result: HelperResult): HelperFailure {
+  const detail = result.stderr.toLowerCase();
+  if (/timed out|timeout/.test(detail)) {
+    return {
+      status: 504,
+      code: "HOST_HELPER_TIMEOUT",
+      message: `Host helper ${helperName} timed out.`,
+    };
+  }
+  if (/not found|no such file|enoent|not permitted|sudoers|must be run as root/.test(detail)) {
+    return {
+      status: 503,
+      code: "HOST_HELPER_UNAVAILABLE",
+      message: `Host helper ${helperName} is unavailable or not authorized. Install the host helpers and validate the sudoers policy.`,
+    };
+  }
+  return {
+    status: 502,
+    code: "HOST_HELPER_FAILED",
+    message: `Host helper ${helperName} failed. Review the host helper logs.`,
+  };
+}
 
 const HELPER_BASE = "/usr/local/sbin/";
 
@@ -100,7 +142,7 @@ export function callHelper(
     );
 
     const child = execFile(
-      cmd,
+      /*turbopackIgnore: true*/ cmd,
       cmdArgs,
       {
         timeout,
@@ -115,7 +157,7 @@ export function callHelper(
               success: false,
               exitCode: null,
               stdout: stdout || "",
-              stderr: stderr || "Helper timed out",
+              stderr: sanitizeHelperStderr(stderr || "Helper timed out", error.code),
             });
           } else {
             // stderr can contain credentials or user-controlled content; keep it out of logs.
@@ -127,7 +169,7 @@ export function callHelper(
               success: false,
               exitCode: typeof error.code === 'number' ? error.code : null,
               stdout: stdout || "",
-              stderr: stderr || error.message,
+              stderr: sanitizeHelperStderr(stderr || error.message, error.code),
             });
           }
           return;
@@ -138,7 +180,7 @@ export function callHelper(
           success: true,
           exitCode: 0,
           stdout: stdout || "",
-          stderr: stderr || "",
+          stderr: sanitizeHelperStderr(stderr || ""),
         });
       },
     );
@@ -152,7 +194,7 @@ export function callHelper(
         success: false,
         exitCode: null,
         stdout: "",
-        stderr: `Failed to spawn helper: ${err.message}`,
+        stderr: sanitizeHelperStderr(err.message, (err as NodeJS.ErrnoException).code),
       });
     });
   });

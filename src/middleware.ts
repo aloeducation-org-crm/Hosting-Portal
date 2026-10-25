@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 const RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
+const RATE_MAX_CLIENTS = 10_000;
 const RATE_MAX = 100;
 const RATE_WINDOW_MS = 60_000;
 
@@ -9,12 +10,28 @@ const RATE_WINDOW_MS = 60_000;
 const LOGIN_RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const LOGIN_RATE_MAX = 10;
 const LOGIN_RATE_WINDOW_MS = 60_000;
+let lastRateLimitCleanup = 0;
+
+function cleanupRateLimitState(now: number): void {
+  if (now - lastRateLimitCleanup < 30_000) return;
+  lastRateLimitCleanup = now;
+  for (const [key, value] of RATE_LIMIT) {
+    if (value.resetAt <= now) RATE_LIMIT.delete(key);
+  }
+  for (const [key, value] of LOGIN_RATE_LIMIT) {
+    if (value.resetAt <= now) LOGIN_RATE_LIMIT.delete(key);
+  }
+  // Keep memory bounded if a burst creates many distinct client keys.
+  while (RATE_LIMIT.size > RATE_MAX_CLIENTS) RATE_LIMIT.delete(RATE_LIMIT.keys().next().value!);
+  while (LOGIN_RATE_LIMIT.size > RATE_MAX_CLIENTS) LOGIN_RATE_LIMIT.delete(LOGIN_RATE_LIMIT.keys().next().value!);
+}
 
 const PUBLIC_API_PATHS = [
   "/api/auth",
   "/api/health",
   "/api/pricing",
   "/api/deploy/webhook",
+  "/api/internal/sites/ssl-status",
   "/api/contact",
   "/api/newsletter",
 ];
@@ -81,14 +98,38 @@ export function canAccessRoute(
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const origin = request.headers.get("origin");
+  const corsOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const requestHost = ((request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "").split(",")[0] ?? "").trim();
+  const requestProtocol = ((request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol).split(",")[0] ?? "").trim().replace(/:$/, "");
+  const sameOrigin = !!origin && `${requestProtocol}://${requestHost}` === origin;
+  const corsOrigin = origin && (sameOrigin || corsOrigins.includes(origin)) ? origin : null;
+
+  // No wildcard origins are allowed. A configured origin must match exactly.
+  if (pathname.startsWith("/api/") && origin && !corsOrigin) {
+    return NextResponse.json({ success: false, message: "Origin not allowed" }, { status: 403 });
+  }
+  if (request.method === "OPTIONS" && pathname.startsWith("/api/")) {
+    const preflight = new NextResponse(null, { status: 204 });
+    if (corsOrigin) {
+      preflight.headers.set("Access-Control-Allow-Origin", corsOrigin);
+      preflight.headers.set("Access-Control-Allow-Credentials", "true");
+      preflight.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      preflight.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID");
+      preflight.headers.set("Vary", "Origin");
+    }
+    return preflight;
+  }
 
   // --- Rate limiting (applies to ALL requests) ---
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
-
+  // Nginx/Caddy are configured to overwrite X-Real-IP from the actual peer.
+  // Do not trust the client-controlled leftmost X-Forwarded-For value for limits.
+  const ip = request.headers.get("x-real-ip")?.trim() || "unknown";
   const now = Date.now();
+  cleanupRateLimitState(now);
 
   // Stricter rate limit for login endpoint
   if (pathname === "/api/auth/login") {
@@ -149,6 +190,14 @@ export async function middleware(request: NextRequest) {
     "Strict-Transport-Security",
     "max-age=31536000; includeSubDomains"
   );
+  response.headers.set("Cross-Origin-Opener-Policy", process.env.CROSS_ORIGIN_OPENER_POLICY || "same-origin");
+  response.headers.set("Cross-Origin-Resource-Policy", process.env.CROSS_ORIGIN_RESOURCE_POLICY || "same-site");
+  response.headers.set("X-Permitted-Cross-Domain-Policies", "none");
+  if (corsOrigin && pathname.startsWith("/api/")) {
+    response.headers.set("Access-Control-Allow-Origin", corsOrigin);
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+    response.headers.set("Vary", "Origin");
+  }
 
   // --- Authentication & Role Guard for Protected UI Paths ---
   if (isProtectedDashboardPath(pathname)) {

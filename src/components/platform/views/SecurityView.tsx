@@ -56,12 +56,82 @@ function getToken() {
   return typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
 }
 
+function normalizeAuditLogs(payload: unknown): AuditLog[] {
+  if (!payload || typeof payload !== 'object') return []
+  const envelope = payload as Record<string, unknown>
+  const data = envelope.data
+  const logs = data && typeof data === 'object' ? (data as Record<string, unknown>).logs : undefined
+  if (!Array.isArray(logs)) return []
+  return logs.flatMap((value): AuditLog[] => {
+    if (!value || typeof value !== 'object') return []
+    const log = value as Record<string, unknown>
+    if (typeof log.id !== 'string') return []
+    return [{
+      id: log.id,
+      action: String(log.action ?? 'unknown'),
+      resource: String(log.resourceType ?? ''),
+      resourceName: String(log.domain ?? log.resourceId ?? ''),
+      ip: String(log.ipAddress ?? ''),
+      date: String(log.timestamp ?? log.createdAt ?? new Date(0).toISOString()),
+    }]
+  })
+}
+
+function normalizeSshKeys(payload: unknown): SshKey[] {
+  if (!payload || typeof payload !== 'object') return []
+  const envelope = payload as Record<string, unknown>
+  const data = envelope.data
+  const managedKeys = data && typeof data === 'object' ? (data as Record<string, unknown>).managedKeys : undefined
+  if (!Array.isArray(managedKeys)) return []
+  return managedKeys.flatMap((value): SshKey[] => {
+    if (!value || typeof value !== 'object') return []
+    const key = value as Record<string, unknown>
+    if (typeof key.id !== 'string') return []
+    const publicKey = typeof key.publicKey === 'string' ? key.publicKey : ''
+    const keyType = publicKey.trim().split(/\s+/, 1)[0] ?? ''
+    return [{
+      id: key.id,
+      name: String(key.name ?? 'Unnamed key'),
+      type: keyType.includes('ed25519') ? 'ED25519' : keyType.startsWith('ecdsa-') ? 'ECDSA' : keyType === 'ssh-rsa' ? 'RSA' : 'UNKNOWN',
+      fingerprint: String(key.fingerprint ?? '').replace(/^SHA256:/, ''),
+      createdAt: String(key.createdAt ?? ''),
+    }]
+  })
+}
+
+function normalizeFirewallRules(payload: unknown): FirewallRule[] {
+  if (!payload || typeof payload !== 'object') return []
+  const envelope = payload as Record<string, unknown>
+  const data = envelope.data
+  const managedRules = data && typeof data === 'object' ? (data as Record<string, unknown>).managedRules : undefined
+  if (!Array.isArray(managedRules)) return []
+  return managedRules.flatMap((value): FirewallRule[] => {
+    if (!value || typeof value !== 'object') return []
+    const rule = value as Record<string, unknown>
+    if (typeof rule.id !== 'string') return []
+    return [{
+      id: rule.id,
+      name: String(rule.name ?? 'Unnamed rule'),
+      protocol: String(rule.protocol ?? '').toUpperCase(),
+      port: String(rule.port ?? rule.portRange ?? 'All'),
+      source: String(rule.source ?? 'Any'),
+      action: String(rule.action ?? 'allow'),
+      enabled: Boolean(rule.isActive ?? rule.enabled),
+    }]
+  })
+}
+
 const ACTION_COLORS: Record<string, string> = {
   create: 'bg-emerald-500/15 text-emerald-700 border-emerald-500/30',
   delete: 'bg-red-500/15 text-red-700 border-red-500/30',
   update: 'bg-amber-500/15 text-amber-700 border-amber-500/30',
   login: 'bg-blue-500/15 text-blue-700 border-blue-500/30',
   deploy: 'bg-purple-500/15 text-purple-700 border-purple-500/30',
+}
+
+function actionCategory(action: string): string {
+  const normalized = action.toLowerCase()
+  return ['create', 'delete', 'update', 'login', 'deploy'].find((category) => normalized.includes(category)) ?? ''
 }
 
 const KEY_TYPE_COLORS: Record<string, string> = {
@@ -88,18 +158,18 @@ export default function SecurityView() {
   // Firewall
   const [firewallRules, setFirewallRules] = useState<FirewallRule[]>([])
   const [addRuleOpen, setAddRuleOpen] = useState(false)
-  const [ruleForm, setRuleForm] = useState({ name: '', protocol: 'TCP', port: '', source: '0.0.0.0/0', action: 'allow' })
+  const [ruleForm, setRuleForm] = useState({ name: '', protocol: 'tcp', port: '', source: '0.0.0.0/0', action: 'allow' })
 
   const fetchSshKeys = async () => {
     const token = getToken()
     if (!token) return
     try {
-      const res = await fetch('/api/security/ssh-keys', {
+      const res = await fetch('/api/security/ssh', {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error('Failed to fetch SSH keys')
       const data = await res.json()
-      setSshKeys(data)
+      setSshKeys(normalizeSshKeys(data))
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error')
@@ -115,7 +185,7 @@ export default function SecurityView() {
       })
       if (!res.ok) throw new Error('Failed to fetch firewall rules')
       const data = await res.json()
-      setFirewallRules(data)
+      setFirewallRules(normalizeFirewallRules(data))
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error')
@@ -135,7 +205,7 @@ export default function SecurityView() {
           if (auditFilter !== 'all') params.set('action', auditFilter)
           url = `/api/security/audit-logs?${params}`
         } else if (activeTab === 'ssh') {
-          url = '/api/security/ssh-keys'
+          url = '/api/security/ssh'
         } else {
           url = '/api/security/firewall'
         }
@@ -143,9 +213,9 @@ export default function SecurityView() {
         if (!res.ok) throw new Error('Failed to fetch')
         const data = await res.json()
         if (!cancelled) {
-          if (activeTab === 'audit') setAuditLogs(data)
-          else if (activeTab === 'ssh') setSshKeys(data)
-          else setFirewallRules(data)
+          if (activeTab === 'audit') setAuditLogs(normalizeAuditLogs(data))
+          else if (activeTab === 'ssh') setSshKeys(normalizeSshKeys(data))
+          else setFirewallRules(normalizeFirewallRules(data))
           setError(null)
           setLoading(false)
         }
@@ -163,7 +233,7 @@ export default function SecurityView() {
     const token = getToken()
     if (!token || !keyForm.name.trim() || !keyForm.publicKey.trim()) return
     try {
-      const res = await fetch('/api/security/ssh-keys', {
+      const res = await fetch('/api/security/ssh', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(keyForm),
@@ -182,7 +252,7 @@ export default function SecurityView() {
     const token = getToken()
     if (!token) return
     try {
-      const res = await fetch(`/api/security/ssh-keys?id=${id}`, {
+      const res = await fetch(`/api/security/ssh?keyId=${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -201,12 +271,17 @@ export default function SecurityView() {
       const res = await fetch('/api/security/firewall', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(ruleForm),
+        body: JSON.stringify({
+          ...ruleForm,
+          protocol: ruleForm.protocol.toLowerCase(),
+          port: Number(ruleForm.port),
+          source: ruleForm.source.trim() || undefined,
+        }),
       })
       if (!res.ok) throw new Error('Failed to add firewall rule')
       toast.success('Firewall rule added')
       setAddRuleOpen(false)
-      setRuleForm({ name: '', protocol: 'TCP', port: '', source: '0.0.0.0/0', action: 'allow' })
+      setRuleForm({ name: '', protocol: 'tcp', port: '', source: '0.0.0.0/0', action: 'allow' })
       fetchFirewall()
     } catch {
       toast.error('Failed to add firewall rule')
@@ -307,7 +382,7 @@ export default function SecurityView() {
                     {auditLogs.map((log) => (
                       <TableRow key={log.id}>
                         <TableCell>
-                          <Badge variant="outline" className={ACTION_COLORS[log.action] || 'bg-gray-100 text-gray-600'}>
+                          <Badge variant="outline" className={ACTION_COLORS[actionCategory(log.action)] || 'bg-gray-100 text-gray-600'}>
                             {log.action}
                           </Badge>
                         </TableCell>
@@ -510,15 +585,14 @@ export default function SecurityView() {
                 <Select value={ruleForm.protocol} onValueChange={(v) => setRuleForm({ ...ruleForm, protocol: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="TCP">TCP</SelectItem>
-                    <SelectItem value="UDP">UDP</SelectItem>
-                    <SelectItem value="ICMP">ICMP</SelectItem>
+                    <SelectItem value="tcp">TCP</SelectItem>
+                    <SelectItem value="udp">UDP</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="rule-port">Port *</Label>
-                <Input id="rule-port" value={ruleForm.port} onChange={(e) => setRuleForm({ ...ruleForm, port: e.target.value })} placeholder="80, 443" />
+                <Input id="rule-port" type="number" min={1} max={65535} step={1} value={ruleForm.port} onChange={(e) => setRuleForm({ ...ruleForm, port: e.target.value })} placeholder="80" />
               </div>
             </div>
             <div className="grid gap-2">

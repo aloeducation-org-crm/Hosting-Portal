@@ -84,7 +84,7 @@ in the same step.
 ## Local development
 
 ```bash
-npm ci                 # Node >= 22
+npm ci                 # Node >= 20.9
 npm run db:generate    # prisma generate with engine downloads stubbed
 cp .env.example .env   # then edit secrets
 npm run dev            # http://localhost:3101
@@ -145,7 +145,7 @@ on every push/PR and asserts `.next/standalone/server.js` exists. It never sets
 | Layer | Technology |
 |---|---|
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, shadcn/ui, Framer Motion |
-| Backend | Next.js route handlers + server actions, Node.js 22 LTS |
+| Backend | Next.js route handlers + server actions, Node.js 20 LTS |
 | Database | SQLite via libSQL driver adapter, Prisma 6.19 (`engineType = "client"`) |
 | Auth | NextAuth 4, JWT, RBAC (7 roles / 30 permissions), bcrypt, MFA (TOTP) |
 | Cache | Redis (ioredis, optional) |

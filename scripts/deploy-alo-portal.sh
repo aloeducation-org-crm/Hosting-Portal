@@ -192,17 +192,23 @@ phase_1_server_preparation() {
     run "Install essential base packages" \
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl wget git build-essential python3 python3-pip uuid-runtime jq htop apt-transport-https ca-certificates gnupg lsb-release software-properties-common"
 
-    # ── 1.2 Node.js 22.x ────────────────────────────────────────────────────────
-    section "Node.js 22.x Installation"
-    if command -v node &>/dev/null && [[ "$(node -v | cut -d. -f1 | tr -d 'v')" -ge 22 ]]; then
+    # ── 1.2 Node.js 20.x ────────────────────────────────────────────────────────
+    section "Node.js 20.x Installation"
+    node_major=0
+    node_minor=0
+    if command -v node &>/dev/null; then
+        IFS=. read -r node_major node_minor _ <<< "$(node -v | sed 's/^v//')"
+        node_minor=$((10#${node_minor:-0}))
+    fi
+    if (( node_major == 20 )) && (( node_minor >= 9 )); then
         skip "Node.js $(node -v) already installed"
     else
-        info "Installing Node.js 22.x via NodeSource..."
+        info "Installing Node.js 20.x via NodeSource..."
         run "Add NodeSource GPG key" \
             "curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg"
-        run "Add NodeSource 22.x repo" \
-            "echo 'deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main' > /etc/apt/sources.list.d/nodesource.list"
-        run "Install Node.js 22.x" \
+        run "Add NodeSource 20.x repo" \
+            "echo 'deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main' > /etc/apt/sources.list.d/nodesource.list"
+        run "Install Node.js 20.x" \
             "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs"
     fi
 

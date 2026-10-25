@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# ALO Labs Hosting Portal — Install Shell Helpers
-# Copies all 19 helper scripts to /usr/local/sbin/ and sets permissions.
-# Must be run as root.
-#
-set -euo pipefail
+# Install the privileged, allowlisted host helpers. Must run as root.
+set -Eeuo pipefail
+umask 077
 
 HELPER_SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 HELPER_DST_DIR="/usr/local/sbin"
+SUDOERS_SRC="${HELPER_SRC_DIR}/../server-config/alo-hosting-portal.sudoers"
+SUDOERS_DST="/etc/sudoers.d/alo-helpers"
 
 HELPERS=(
   alo-hosting-helper
@@ -28,6 +28,8 @@ HELPERS=(
   alo-deploy-helper
   alo-dns-helper
   alo-docker-helper
+  provision-site.sh
+  ssl-lifecycle.sh
 )
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -35,42 +37,43 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-echo "Installing ALO Labs shell helpers to ${HELPER_DST_DIR}..."
-
-# Ensure alo-panel user exists
-if ! id alo-panel &>/dev/null; then
-  echo "Creating system user: alo-panel"
-  useradd -r -s /bin/bash -d /opt/alo-hosting-portal -m alo-panel
+missing=()
+for helper in "${HELPERS[@]}"; do
+  [[ -f "${HELPER_SRC_DIR}/${helper}" ]] || missing+=("${helper}")
+done
+if ((${#missing[@]} > 0)); then
+  printf 'ERROR: Required helper source files are missing: %s\n' "${missing[*]}" >&2
+  exit 1
 fi
 
-installed=0
-skipped=0
+[[ -f "$SUDOERS_SRC" ]] || { echo "ERROR: sudoers source not found: $SUDOERS_SRC" >&2; exit 1; }
+command -v visudo >/dev/null || { echo "ERROR: visudo is required to validate the privileged policy" >&2; exit 69; }
+visudo -c -f "$SUDOERS_SRC"
 
+if ! id alo-panel >/dev/null 2>&1; then
+  echo "Creating system user: alo-panel"
+  useradd --system --create-home --home-dir /opt/alo-hosting-portal --shell /usr/sbin/nologin alo-panel
+fi
+APP_HOME="$(getent passwd alo-panel | cut -d: -f6)"
+[[ -n "$APP_HOME" && "$APP_HOME" == /* && ! -L "$APP_HOME" ]] || { echo "ERROR: alo-panel has an invalid or symlinked home directory" >&2; exit 1; }
+[[ -d "$APP_HOME" ]] || { echo "ERROR: alo-panel home directory does not exist: $APP_HOME" >&2; exit 1; }
+chown root:alo-panel "$APP_HOME"
+chmod 0750 "$APP_HOME"
+install -d -o root -g root -m 0700 "$APP_HOME/.ssh"
+
+install -d -o root -g root -m 0755 "$HELPER_DST_DIR"
 for helper in "${HELPERS[@]}"; do
-  src="${HELPER_SRC_DIR}/${helper}"
-  dst="${HELPER_DST_DIR}/${helper}"
-
-  if [[ ! -f "$src" ]]; then
-    echo "  SKIP: ${helper} (source not found)"
-    skipped=$((skipped + 1))
-    continue
-  fi
-
-  cp "$src" "$dst"
-  chmod 755 "$dst"
-  echo "  OK: ${helper}"
-  installed=$((installed + 1))
+  install -o root -g root -m 0755 "${HELPER_SRC_DIR}/${helper}" "${HELPER_DST_DIR}/${helper}"
 done
 
-echo ""
-echo "Installed: ${installed} helpers"
-echo "Skipped:  ${skipped} helpers"
+# Install sudoers atomically and only after validating the exact installed file.
+sudoers_tmp=$(mktemp /etc/sudoers.d/.alo-helpers.XXXXXX)
+cleanup() { rm -f -- "$sudoers_tmp"; }
+trap cleanup EXIT
+install -o root -g root -m 0440 "$SUDOERS_SRC" "$sudoers_tmp"
+visudo -c -f "$sudoers_tmp"
+mv -f -- "$sudoers_tmp" "$SUDOERS_DST"
+trap - EXIT
 
-# Install sudoers
-if [[ -f "${HELPER_SRC_DIR}/../server-config/alo-hosting-portal.sudoers" ]]; then
-  cp "${HELPER_SRC_DIR}/../server-config/alo-hosting-portal.sudoers" /etc/sudoers.d/alo-helpers
-  chmod 440 /etc/sudoers.d/alo-helpers
-  echo "Sudoers policy installed to /etc/sudoers.d/alo-helpers"
-fi
-
-echo "Done."
+printf 'Installed and validated %d host helpers in %s.\n' "${#HELPERS[@]}" "$HELPER_DST_DIR"
+printf 'Validated and installed sudo policy at %s.\n' "$SUDOERS_DST"

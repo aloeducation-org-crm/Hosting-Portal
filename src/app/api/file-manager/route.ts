@@ -44,8 +44,13 @@ function handleErr(e: unknown): NextResponse {
 
 // Path traversal protection
 function sanitizePath(p: string): string {
-  const normalized = path.posix.normalize(p);
-  if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+  if (p.includes('\0')) throw new Error('Invalid path');
+  // The UI represents the site root as `/`; strip only leading separators,
+  // then keep every resolved path relative to the site's document root.
+  const relative = p.trim().replace(/^\/+/, '');
+  const normalized = path.posix.normalize(relative);
+  if (normalized === '.' || normalized === '') return '/';
+  if (normalized === '..' || normalized.startsWith('../') || path.posix.isAbsolute(normalized)) {
     throw new Error('Invalid path');
   }
   return normalized;

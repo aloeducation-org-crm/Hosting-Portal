@@ -2,7 +2,9 @@
 # Install to: /etc/sudoers.d/alo-helpers
 # Permissions: root:root 0440
 
-# Allow alo-panel to execute all 15 shell helpers as root (NOPASSWD)
+# Allow alo-panel to execute all 19 shell helpers as root (NOPASSWD)
+# These helpers are installed to /usr/local/sbin/ and contain their own
+# argument validation, path traversal protection, and domain format checks.
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-hosting-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-lifecycle
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-backup
@@ -15,12 +17,24 @@ alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-log-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-health-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-firewall-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssl-helper
+# Site helpers validate inputs internally and do not expose a generic shell.
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/provision-site.sh
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/ssl-lifecycle.sh
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-email-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-cron-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssh-helper
 
-# Allow alo-panel to reload system services managed by helpers
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload caddy
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload postfix
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload dovecot
+# Encryption helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-encryption-helper
+
+# Deploy helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-deploy-helper
+
+# DNS helper (advanced)
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-dns-helper
+
+# Docker helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-docker-helper
+
+# Helpers are the only privileged entry points. Do not grant direct systemctl
+# access; the helpers validate service names and perform their own operations.

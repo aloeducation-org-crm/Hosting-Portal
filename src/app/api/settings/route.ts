@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSuperAdmin } from '@/lib/auth';
 import { env } from '@/lib/env';
-import { db } from '@/lib/db';
-import { z } from 'zod';
-
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
     const a = e as ApiResponse;
@@ -13,11 +10,10 @@ function handleErr(e: unknown): NextResponse {
   return NextResponse.json(apiError('Internal server error'), { status: 500 });
 }
 
-const SECRET_KEYS = ['NEXTAUTH_SECRET', 'JWT_SECRET', 'DATABASE_URL'] as const;
+const SECRET_KEY_PATTERN = /(?:SECRET|PASSWORD|_PASS(?:WORD)?$|TOKEN|API_KEY|_KEY$|DATABASE_URL)/i;
 
-function maskSecret(value: string): string {
-  if (value.length <= 4) return '****';
-  return value.slice(0, 4) + '*'.repeat(value.length - 4);
+function maskSecret(): string {
+  return '********';
 }
 
 function getPlatformSettings() {
@@ -25,8 +21,8 @@ function getPlatformSettings() {
   const masked: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(raw)) {
-    if (SECRET_KEYS.includes(key as (typeof SECRET_KEYS)[number]) && typeof value === 'string') {
-      masked[key] = maskSecret(value);
+    if (SECRET_KEY_PATTERN.test(key) && typeof value === 'string' && value.length > 0) {
+      masked[key] = maskSecret();
     } else {
       masked[key] = value;
     }
@@ -34,10 +30,6 @@ function getPlatformSettings() {
 
   return masked;
 }
-
-const updateSettingsSchema = z.object({
-  settings: z.record(z.string(), z.unknown()).optional(),
-});
 
 export async function GET(request: NextRequest) {
   try {
@@ -51,33 +43,15 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    const user = await requireSuperAdmin(request);
-
-    const body = await request.json();
-    const parsed = updateSettingsSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        apiError('Validation failed', 'VALIDATION_ERROR', parsed.error.flatten().fieldErrors),
-        { status: 400 },
-      );
-    }
-
-    // Placeholder: settings would be written to .env in production
-    const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
-    await db.auditLog.create({
-      data: {
-        actorUserId: user.id,
-        actorEmail: user.email,
-        actorRole: user.role,
-        action: 'SETTINGS_UPDATE',
-        resourceType: 'Settings',
-        result: 'SUCCESS',
-        ipAddress: ip,
-      },
-    });
-
+    await requireSuperAdmin(request);
     return NextResponse.json(
-      apiSuccess(null, 'Settings saved to .env. Restart the server for changes to take effect.'),
+      apiError(
+        'Runtime configuration is deployment-managed. Update the service environment and restart the service.',
+        'RUNTIME_CONFIGURATION_MANAGED_BY_DEPLOYMENT',
+        undefined,
+        501,
+      ),
+      { status: 501 },
     );
   } catch (e) {
     return handleErr(e);

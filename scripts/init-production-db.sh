@@ -26,12 +26,15 @@
 # Idempotent: an existing live database is never overwritten (use --force).
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
+umask 077
+[[ "$EUID" -eq 0 ]] || { echo "Run as root (sudo bash scripts/init-production-db.sh)" >&2; exit 77; }
 
 DB_DIR="${ALO_DB_DIR:-/var/lib/alo-hosting}"
+ADMIN_CREDENTIAL_FILE="${ADMIN_CREDENTIAL_FILE:-/root/alo-hosting-admin-credentials}"
 DB_FILE="${DB_DIR}/alo.db"
 APP_USER="${ALO_APP_USER:-alamin}"
-# Default to the account's own primary group so this also works for the
-# `alo-panel` service account used by scripts/deploy-alo-portal.sh.
+# Keep the current production workflow's account as the backward-compatible default.
+# New alo-panel units should pass ALO_APP_USER=alo-panel explicitly.
 APP_GROUP="${ALO_APP_GROUP:-$(id -gn "${ALO_APP_USER:-alamin}" 2>/dev/null || echo "${ALO_APP_USER:-alamin}")}"
 SEED_RELATIVE="db/custom.db"
 
@@ -128,7 +131,20 @@ ok "modules: ${MODULES_DIR}/node_modules"
 # Counting tables is not enough: the seed database has previously shipped 74
 # tables while being 10 COLUMNS behind prisma/schema.prisma, which turns every
 # login into a 500 (`prisma:error SQLITE_ERROR: no such column: operationJobId`)
-# with nothing wrong-looking in `prisma migrate status`. Compare columns too.
+# with nothing wrong-looking in `prisma migrate status`. Apply Prisma's safe
+# default (no --accept-data-loss), then independently compare every column.
+[[ -f "${APP_DIR}/prisma/schema.prisma" ]] || die "Prisma schema missing at ${APP_DIR}/prisma/schema.prisma"
+[[ -f "${MODULES_DIR}/node_modules/prisma/build/index.js" ]] || die "Prisma CLI missing under ${MODULES_DIR}/node_modules"
+echo "  applying Prisma schema to ${DB_FILE} (no --accept-data-loss)"
+if ! sudo -u "${APP_USER}" env \
+  PATH="$(dirname "$NODE_BIN"):/usr/local/bin:/usr/bin:/bin" \
+  DATABASE_URL="file:${DB_FILE}" \
+  "$NODE_BIN" "${MODULES_DIR}/node_modules/prisma/build/index.js" db push \
+  --schema "${APP_DIR}/prisma/schema.prisma" --skip-generate; then
+  die "Prisma schema update failed; refusing to continue with a drifted production database"
+fi
+ok "Prisma schema applied safely"
+
 drift=$(sudo -u "${APP_USER}" python3 - "$DB_FILE" "${APP_DIR}/prisma/schema.prisma" <<'PY' 2>/dev/null || echo "ERROR"
 import re, sqlite3, sys
 db_file, schema_file = sys.argv[1], sys.argv[2]
@@ -195,7 +211,8 @@ HARDEN_LOG="$(mktemp)"      # 0600, so the user list never lands in a world-read
 trap 'rm -f "$HARDEN_LOG"' EXIT
 GENERATED=""
 if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-  ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
+  # 16 random bytes rendered as hex: exactly 32 cryptographically random characters.
+  ADMIN_PASSWORD="$(openssl rand -hex 16)"
   GENERATED="yes"
 fi
 
@@ -287,14 +304,14 @@ if [[ "$ROTATED" != "yes" ]]; then
 fi
 
 if [[ -n "$GENERATED" ]]; then
-  echo -e "${RED}${BOLD}  ⚠ SUPER-ADMIN CREDENTIALS — shown once, not stored anywhere:${NC}"
-  echo ""
-  echo "      email:    ${ADMIN_EMAIL}"
-  echo "      password: ${ADMIN_PASSWORD}"
-  echo ""
-  echo -e "  Save them in a password manager now. This output is also in your"
-  echo -e "  shell scrollback and, if run in CI, in the job log — clear it or"
-  echo -e "  re-run with ADMIN_PASSWORD set to a value of your own."
+  install -d -m 0700 "$(dirname "$ADMIN_CREDENTIAL_FILE")"
+  printf 'ADMIN_EMAIL=%s\nADMIN_PASSWORD=%s\n' "$ADMIN_EMAIL" "$ADMIN_PASSWORD" >"$ADMIN_CREDENTIAL_FILE"
+  chmod 0600 "$ADMIN_CREDENTIAL_FILE"
+  chown root:root "$ADMIN_CREDENTIAL_FILE"
+  echo -e "${RED}${BOLD}  SUPER-ADMIN CREDENTIALS generated and stored securely.${NC}"
+  echo "  credential file: ${ADMIN_CREDENTIAL_FILE} (root:root, mode 0600)"
+  echo "  Read it locally as root and transfer the password to an approved password manager."
+  echo "  The password is deliberately not printed to this terminal or CI logs."
 else
   echo "  Admin password set from \$ADMIN_PASSWORD (not echoed)."
 fi

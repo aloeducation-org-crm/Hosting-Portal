@@ -127,18 +127,23 @@ install_core_packages() {
 }
 
 # ============================================================================
-# 2 — Node.js 22 via NodeSource
+# 2 — Node.js 20 via NodeSource
 # ============================================================================
 install_nodejs() {
-    log_step "STEP 2: Node.js 22 (NodeSource)"
+    log_step "STEP 2: Node.js 20 (NodeSource)"
 
-    local target_major=22
+    local target_major=20
 
     # Check if Node.js is installed and matches version
     if command -v node &>/dev/null; then
         local installed_version
-        installed_version=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
-        if [[ "$installed_version" == "$target_major" ]]; then
+        installed_version=$(node --version 2>/dev/null | sed 's/^v//')
+        local installed_major installed_minor
+        installed_major=${installed_version%%.*}
+        installed_minor=${installed_version#*.}
+        installed_minor=${installed_minor%%.*}
+        installed_minor=$((10#${installed_minor:-0}))
+        if [[ "$installed_major" == "$target_major" ]] && (( installed_minor >= 9 )); then
             ALREADY_PRESENT+=("nodejs v$(node --version)")
             log_skip "Node.js $(node --version) is already installed (major matches v${target_major})."
             return 0
@@ -157,9 +162,7 @@ install_nodejs() {
     curl -fsSL "$NODESOURCE_KEY" | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null
     chmod 644 /etc/apt/keyrings/nodesource.gpg
 
-    local codename
-    codename=$(lsb_release -sc)
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${target_major}.x nodistro_main ${codename}" \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${target_major}.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list
 
     log_info "Updating apt and installing nodejs..."

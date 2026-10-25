@@ -1,0 +1,15 @@
+[Unit]
+Description=ALO Hosting port 8080 health and RSS validator
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/alo-hosting/monitor.env
+ExecStart=/opt/alo-hosting/current/scripts/validate-port-8080.sh
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/alo-hosting-monitor
