@@ -5,17 +5,9 @@ async function callLLM(
   systemPrompt: string,
   userMessage: string,
 ): Promise<{ text: string; model: string; tokensUsed: number }> {
-  const apiKey = process.env.AI_GATEWAY_KEY || process.env.OPENAI_API_KEY;
-  const baseUrl = process.env.AI_GATEWAY_URL || process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
-  const model = (process.env.AI_MODEL as string) || 'gpt-4o-mini';
-
-  if (!apiKey || apiKey.includes('YOUR_') || apiKey === 'sk-demo') {
-    return {
-      text: `🤖 [ALO AI Assistant - Demo Mode]: Received message "${userMessage}". Connect your AI Provider in Settings to activate real-time LLM responses.`,
-      model: 'demo-nova',
-      tokensUsed: 0,
-    };
-  }
+  const baseUrl = process.env.AI_GATEWAY_URL || 'http://127.0.0.1:11434/v1';
+  const model = process.env.AI_MODEL || 'llama3.2:1b';
+  const apiKey = process.env.AI_GATEWAY_KEY || 'ollama';
 
   const url = baseUrl.endsWith('/') ? `${baseUrl}chat/completions` : `${baseUrl}/chat/completions`;
 
@@ -28,46 +20,45 @@ async function callLLM(
       },
       body: JSON.stringify({
         model,
-        temperature: 0.5,
-        max_tokens: 4096,
+        temperature: 0.7,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage },
         ],
       }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {
       const body = await res.text();
       return {
-        text: `🤖 [ALO AI Warning]: AI Gateway returned HTTP ${res.status}. Error details: ${body.slice(0, 150)}`,
-        model: 'gateway-error',
+        text: `AI Gateway error ${res.status}: ${body.slice(0, 150)}`,
+        model,
         tokensUsed: 0,
       };
     }
 
     const data = await res.json();
     return {
-      text: data.choices?.[0]?.message?.content ?? '',
+      text: data.choices?.[0]?.message?.content ?? 'No response',
       model: data.model ?? model,
       tokensUsed: data.usage?.total_tokens ?? 0,
     };
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return {
-      text: `🤖 [ALO AI Fallback]: Gateway connection pending (${errMsg}). Reply for: "${userMessage}"`,
-      model: 'system-fallback',
+      text: `Ollama connection error: ${errMsg}`,
+      model,
       tokensUsed: 0,
     };
   }
 }
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  'nova': 'You are Nova, a helpful AI assistant for ALO Labs hosting platform.',
-  'code-assistant': 'You are a code assistant for ALO Labs server configuration.',
-  'website-builder': 'You are a website builder assistant for ALO Labs.',
-  'domain-advisor': 'You are a domain advisor for ALO Labs DNS and SSL.',
+  'nova': 'You are Nova, an AI assistant for the ALO Labs cloud hosting platform. Help users with cloud hosting, domains, and servers.',
+  'code-assistant': 'You are an expert DevOps engineer for ALO Labs. Assist with Docker, Node.js, Linux, Nginx, and server configuration.',
+  'website-builder': 'You are an AI website builder assistant. Help users design and construct web applications.',
+  'domain-advisor': 'You are a DNS and SSL specialist for ALO Labs. Help users configure domain routing.',
 };
 
 export async function POST(request: NextRequest) {
@@ -80,8 +71,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(apiError('Message is required', 'VALIDATION_ERROR', undefined, 400), { status: 400 });
     }
 
-    const systemPrompt: string = SYSTEM_PROMPTS[agentType] ?? SYSTEM_PROMPTS['nova'] ?? '';
-
+    const systemPrompt: string = (SYSTEM_PROMPTS[agentType] || SYSTEM_PROMPTS['nova'] || '') as string;
     const result = await callLLM(systemPrompt, message.trim());
 
     return NextResponse.json({
@@ -97,6 +87,6 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (e) {
-    return NextResponse.json({ success: false, error: 'Internal error', message: 'Something went wrong' }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Internal error' }, { status: 500 });
   }
 }
