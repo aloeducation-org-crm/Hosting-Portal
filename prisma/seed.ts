@@ -1,7 +1,8 @@
-import { PrismaClient, UserRole } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
+import { createPrismaClient } from "../src/lib/db";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 // ─── Permissions ─────────────────────────────────────────────────────────────
 
@@ -51,7 +52,9 @@ const PERMISSIONS = [
 
 const ROLES: Array<{ name: UserRole; description: string }> = [
   { name: "SUPER_ADMIN", description: "Full system access with all permissions" },
-  { name: "ADMIN", description: "Administrative access with most permissions" },
+  { name: "ADMIN", description: "Administrative access for users, servers, and plans" },
+  { name: "RESELLER", description: "Reseller partner access with client management and commissions" },
+  { name: "CLIENT", description: "Client access to manage websites, domains, databases, AI tools, and billing" },
   { name: "DEVOPS", description: "DevOps access for deployment and infrastructure" },
   { name: "SUPPORT", description: "Support access for viewing and basic operations" },
   { name: "VIEWER", description: "Read-only access" },
@@ -62,39 +65,42 @@ const ROLES: Array<{ name: UserRole; description: string }> = [
 const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   SUPER_ADMIN: PERMISSIONS.map((p) => p.name),
   ADMIN: [
-    // All website
     "WEBSITE_CREATE", "WEBSITE_READ", "WEBSITE_UPDATE", "WEBSITE_DELETE",
     "WEBSITE_SUSPEND", "WEBSITE_RESUME", "WEBSITE_DEPLOY", "WEBSITE_RESTART",
-    // All domain + SSL
     "DOMAIN_CREATE", "DOMAIN_READ", "DOMAIN_UPDATE", "DOMAIN_DELETE", "SSL_MANAGE",
-    // All database
     "DATABASE_CREATE", "DATABASE_READ", "DATABASE_UPDATE", "DATABASE_DELETE",
-    // All backup
     "BACKUP_CREATE", "BACKUP_READ", "BACKUP_RESTORE",
-    // File, logs
     "FILE_MANAGE", "LOGS_READ",
-    // User (no delete or role manage)
     "USER_CREATE", "USER_READ", "USER_UPDATE",
-    // Audit
-    "AUDIT_READ",
+    "AUDIT_READ", "SERVER_MANAGE",
+  ],
+  RESELLER: [
+    "WEBSITE_CREATE", "WEBSITE_READ", "WEBSITE_UPDATE", "WEBSITE_DELETE",
+    "WEBSITE_SUSPEND", "WEBSITE_RESUME", "WEBSITE_DEPLOY", "WEBSITE_RESTART",
+    "DOMAIN_CREATE", "DOMAIN_READ", "DOMAIN_UPDATE", "DOMAIN_DELETE", "SSL_MANAGE",
+    "DATABASE_CREATE", "DATABASE_READ", "DATABASE_UPDATE", "DATABASE_DELETE",
+    "BACKUP_CREATE", "BACKUP_READ", "BACKUP_RESTORE",
+    "FILE_MANAGE", "LOGS_READ",
+    "USER_CREATE", "USER_READ",
+  ],
+  CLIENT: [
+    "WEBSITE_CREATE", "WEBSITE_READ", "WEBSITE_UPDATE", "WEBSITE_DELETE",
+    "WEBSITE_DEPLOY", "WEBSITE_RESTART",
+    "DOMAIN_CREATE", "DOMAIN_READ", "DOMAIN_UPDATE", "DOMAIN_DELETE", "SSL_MANAGE",
+    "DATABASE_CREATE", "DATABASE_READ", "DATABASE_UPDATE", "DATABASE_DELETE",
+    "BACKUP_CREATE", "BACKUP_READ", "BACKUP_RESTORE",
+    "FILE_MANAGE", "LOGS_READ",
   ],
   DEVOPS: [
-    // Website: create, read, update, deploy, restart
     "WEBSITE_CREATE", "WEBSITE_READ", "WEBSITE_UPDATE",
     "WEBSITE_DEPLOY", "WEBSITE_RESTART",
-    // Domain: read only
     "DOMAIN_READ",
-    // Database: create, read, update
     "DATABASE_CREATE", "DATABASE_READ", "DATABASE_UPDATE",
-    // Backup: create, read, restore
     "BACKUP_CREATE", "BACKUP_READ", "BACKUP_RESTORE",
-    // File, logs
     "FILE_MANAGE", "LOGS_READ",
-    // System
     "SERVER_MANAGE",
   ],
   SUPPORT: [
-    // Read-only access to core resources
     "WEBSITE_READ",
     "DOMAIN_READ",
     "DATABASE_READ",
@@ -103,7 +109,6 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     "AUDIT_READ",
   ],
   VIEWER: [
-    // Minimal read access
     "WEBSITE_READ",
     "DOMAIN_READ",
     "DATABASE_READ",
@@ -115,51 +120,80 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
 const PLANS = [
   {
     name: "Starter",
+    slug: "starter",
     description: "Perfect for personal projects and experimentation",
     priceCents: 0,
     interval: "monthly",
+    maxSites: 5,
+    maxBandwidthGb: 100,
+    maxStorageGb: 1,
+    maxDatabases: 1,
+    maxAiTokens: 10000,
+    resellerCommissionPct: 0,
+    isPopular: false,
     features: JSON.stringify([
       "Up to 5 websites",
-      "1 GB storage",
-      "100 GB bandwidth",
-      "Static hosting",
+      "1 GB SSD storage",
+      "100 GB monthly bandwidth",
+      "1 PostgreSQL/MySQL database",
+      "10,000 AI tokens / month",
+      "Free Cloudflare SSL",
       "Community support",
     ]),
     isActive: true,
   },
   {
     name: "Business",
+    slug: "business",
     description: "Ideal for growing businesses and professionals",
     priceCents: 2999, // $29.99
     interval: "monthly",
+    maxSites: 25,
+    maxBandwidthGb: 1000,
+    maxStorageGb: 10,
+    maxDatabases: 10,
+    maxAiTokens: 100000,
+    resellerCommissionPct: 15,
+    isPopular: true,
     features: JSON.stringify([
       "Up to 25 websites",
-      "10 GB storage",
-      "1 TB bandwidth",
+      "10 GB NVMe storage",
+      "1 TB monthly bandwidth",
+      "10 Managed databases",
+      "100,000 AI tokens / month",
       "Free SSL certificates",
-      "Automated backups",
-      "PHP / Node.js / Next.js runtimes",
+      "Automated daily backups",
+      "Next.js / Node.js / PHP / Static runtimes",
       "Priority email support",
     ]),
     isActive: true,
   },
   {
     name: "Enterprise",
-    description: "For organizations that need unlimited power and support",
+    slug: "enterprise",
+    description: "For organizations and resellers that need unlimited power and support",
     priceCents: 9999, // $99.99
     interval: "monthly",
+    maxSites: 999,
+    maxBandwidthGb: 10000,
+    maxStorageGb: 100,
+    maxDatabases: 50,
+    maxAiTokens: 1000000,
+    resellerCommissionPct: 25,
+    isPopular: false,
     features: JSON.stringify([
       "Unlimited websites",
-      "100 GB storage",
-      "10 TB bandwidth",
-      "Free SSL certificates",
-      "Automated backups",
+      "100 GB NVMe storage",
+      "10 TB monthly bandwidth",
+      "50 Managed databases + Redis",
+      "1,000,000 AI tokens / month",
+      "Free wildcard SSL certificates",
+      "Real-time & daily backups",
       "All runtimes (Static, PHP, Node.js, Next.js)",
       "Priority 24/7 support",
-      "Custom domains",
-      "Database hosting",
-      "CI/CD pipelines",
-      "Firewall management",
+      "White-label reseller portal (25% commission)",
+      "CI/CD preview deployments",
+      "Dedicated firewall & DDoS protection",
     ]),
     isActive: true,
   },
@@ -245,16 +279,13 @@ async function seedRoles() {
 
     const desiredPerms = ROLE_PERMISSIONS[roleDef.name] ?? [];
 
-    // Fetch current permission names linked to this role
     const currentLinks = await prisma.rolePermission.findMany({
       where: { roleId: role.id },
       include: { permission: true },
     });
     const currentPermNames = new Set(currentLinks.map((l) => l.permission.name));
-
     const desiredPermSet = new Set(desiredPerms);
 
-    // Add missing permissions
     for (const permName of desiredPerms) {
       if (!currentPermNames.has(permName)) {
         const perm = await prisma.permission.findUnique({ where: { name: permName } });
@@ -266,7 +297,6 @@ async function seedRoles() {
       }
     }
 
-    // Remove permissions no longer desired
     for (const link of currentLinks) {
       if (!desiredPermSet.has(link.permission.name)) {
         await prisma.rolePermission.delete({
@@ -279,45 +309,74 @@ async function seedRoles() {
   }
 }
 
-async function seedAdminUser() {
-  console.log("\n👤 Seeding admin user...");
+async function seedUsers() {
+  console.log("\n👤 Seeding default users (Admin, Reseller, Client)...");
 
-  const superAdminRole = await prisma.role.findUnique({
-    where: { name: "SUPER_ADMIN" },
-  });
-  if (!superAdminRole) {
-    console.error("   ❌ SUPER_ADMIN role not found");
-    return;
-  }
+  const defaultUsers: Array<{
+    email: string;
+    name: string;
+    password: string;
+    roleName: UserRole;
+    companyName: string;
+  }> = [
+    {
+      email: "admin@alolabs.net",
+      name: "ALO Super Admin",
+      password: "admin123",
+      roleName: "SUPER_ADMIN",
+      companyName: "ALO Labs",
+    },
+    {
+      email: "reseller@alolabs.net",
+      name: "ALO Partner Reseller",
+      password: "reseller123",
+      roleName: "RESELLER",
+      companyName: "ALO Partner Agency",
+    },
+    {
+      email: "client@alolabs.net",
+      name: "ALO Demo Client",
+      password: "client123",
+      roleName: "CLIENT",
+      companyName: "Acme Cloud Apps",
+    },
+  ];
 
-  const email = "admin@alolabs.net";
-  const password = "admin123";
-  const passwordHash = await hashPassword(password);
+  for (const u of defaultUsers) {
+    const role = await prisma.role.findUnique({ where: { name: u.roleName } });
+    if (!role) continue;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+    const passwordHash = await hashPassword(u.password);
+    const existing = await prisma.user.findUnique({ where: { email: u.email } });
 
-  if (existing) {
-    // Update password hash and role if needed
-    await prisma.user.update({
-      where: { email },
-      data: {
-        passwordHash,
-        roleId: superAdminRole.id,
-        emailVerified: existing.emailVerified ?? new Date(),
-      },
-    });
-    console.log(`   ✅ Admin user updated: ${email}`);
-  } else {
-    await prisma.user.create({
-      data: {
-        email,
-        name: "ALO Super Admin",
-        passwordHash,
-        roleId: superAdminRole.id,
-        emailVerified: new Date(),
-      },
-    });
-    console.log(`   ✅ Admin user created: ${email} / ${password}`);
+    if (existing) {
+      await prisma.user.update({
+        where: { email: u.email },
+        data: {
+          passwordHash,
+          roleId: role.id,
+          companyName: u.companyName,
+          onboardingCompleted: true,
+          onboardingStep: 4,
+          emailVerified: existing.emailVerified ?? new Date(),
+        },
+      });
+      console.log(`   ✅ User updated: ${u.email} (${u.roleName})`);
+    } else {
+      await prisma.user.create({
+        data: {
+          email: u.email,
+          name: u.name,
+          passwordHash,
+          roleId: role.id,
+          companyName: u.companyName,
+          onboardingCompleted: true,
+          onboardingStep: 4,
+          emailVerified: new Date(),
+        },
+      });
+      console.log(`   ✅ User created: ${u.email} / ${u.password} (${u.roleName})`);
+    }
   }
 }
 
@@ -337,6 +396,40 @@ async function seedPlans() {
     count++;
   }
   console.log(`   ✅ ${count} plans upserted (Starter, Business, Enterprise)`);
+}
+
+async function seedDefaultOrganization() {
+  console.log("\n🏢 Seeding default organization...");
+  const admin = await prisma.user.findUnique({ where: { email: "admin@alolabs.net" } });
+  if (!admin) return;
+
+  const org = await prisma.organization.upsert({
+    where: { slug: "alo-labs" },
+    update: { name: "ALO Labs Hosting", ownerId: admin.id },
+    create: {
+      name: "ALO Labs Hosting",
+      slug: "alo-labs",
+      ownerId: admin.id,
+      customDomain: "hosting.alolabs.net",
+    },
+  });
+
+  await prisma.membership.upsert({
+    where: {
+      userId_organizationId: {
+        userId: admin.id,
+        organizationId: org.id,
+      },
+    },
+    update: { role: "OWNER" },
+    create: {
+      userId: admin.id,
+      organizationId: org.id,
+      role: "OWNER",
+      acceptedAt: new Date(),
+    },
+  });
+  console.log(`   ✅ Organization ready: ${org.name} (${org.slug})`);
 }
 
 async function seedCrmPipeline() {
@@ -370,8 +463,6 @@ async function seedCrmPipeline() {
 
 async function seedAlertRules() {
   console.log("\n🚨 Seeding alert rules...");
-  let count = 0;
-
   for (const rule of ALERT_RULES) {
     const existing = await prisma.alertRule.findFirst({
       where: { name: rule.name },
@@ -382,12 +473,10 @@ async function seedAlertRules() {
         where: { id: existing.id },
         data: rule,
       });
-      console.log(`   ✅ Alert rule updated: ${rule.name}`);
     } else {
       await prisma.alertRule.create({ data: rule });
-      console.log(`   ✅ Alert rule created: ${rule.name}`);
     }
-    count++;
+    console.log(`   ✅ Alert rule ready: ${rule.name}`);
   }
 }
 
@@ -395,16 +484,36 @@ async function seedServer() {
   console.log("\n🖥️  Seeding server...");
 
   await prisma.server.upsert({
-    where: { hostname: "alolabs.net" },
-    update: {},
-    create: {
-      hostname: "alolabs.net",
+    where: { hostname: "hosting.alolabs.net" },
+    update: {
+      name: "Primary Edge & App Node",
       ip: "100.85.239.114",
       tailscaleIp: "100.85.239.114",
       os: "Ubuntu 22.04.5 LTS",
+      cpuCores: 4,
+      ramGb: 15,
+      diskGb: 100,
+      status: "ONLINE",
+      role: "WEB",
+      region: "ap-south-1",
+      maxSites: 250,
+    },
+    create: {
+      name: "Primary Edge & App Node",
+      hostname: "hosting.alolabs.net",
+      ip: "100.85.239.114",
+      tailscaleIp: "100.85.239.114",
+      os: "Ubuntu 22.04.5 LTS",
+      cpuCores: 4,
+      ramGb: 15,
+      diskGb: 100,
+      status: "ONLINE",
+      role: "WEB",
+      region: "ap-south-1",
+      maxSites: 250,
     },
   });
-  console.log("   ✅ Server registered: alolabs.net");
+  console.log("   ✅ Server registered: hosting.alolabs.net (Ubuntu 22.04, 15GB RAM)");
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
@@ -416,13 +525,13 @@ async function main() {
 
   await seedPermissions();
   await seedRoles();
-  await seedAdminUser();
+  await seedUsers();
   await seedPlans();
+  await seedDefaultOrganization();
   await seedCrmPipeline();
   await seedAlertRules();
   await seedServer();
 
-  // Summary counts
   const [permCount, roleCount, userCount, planCount, pipelineCount, alertCount] =
     await Promise.all([
       prisma.permission.count(),

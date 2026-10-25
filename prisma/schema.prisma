@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "client"
 }
 
 datasource db {
@@ -12,6 +13,8 @@ datasource db {
 enum UserRole {
   SUPER_ADMIN
   ADMIN
+  RESELLER
+  CLIENT
   DEVOPS
   SUPPORT
   VIEWER
@@ -145,9 +148,14 @@ model User {
   id                  String       @id @default(uuid())
   email               String       @unique
   name                String?
+  image               String?
+  companyName         String?
+  useCase             String?
   passwordHash        String?
   roleId              String
   isActive            Boolean      @default(true)
+  onboardingCompleted Boolean      @default(false)
+  onboardingStep      Int          @default(0)
   failedLoginAttempts Int          @default(0)
   isLocked            Boolean      @default(false)
   lockedUntil         DateTime?
@@ -156,39 +164,147 @@ model User {
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
-  role              Role             @relation(fields: [roleId], references: [id])
-  sessions          Session[]
-  auditLogs         AuditLog[]
-  websites          Website[]        @relation("WebsiteOwner")
+  role               Role                @relation(fields: [roleId], references: [id])
+  accounts           Account[]
+  verificationTokens VerificationToken[]
+  memberships        Membership[]
+  aiConversations    AIConversation[]
+  sessions           Session[]
+  auditLogs          AuditLog[]
+  websites           Website[]           @relation("WebsiteOwner")
   notifications      Notification[]
-  apiKeys           ApiKey[]
-  backups           Backup[]         @relation("BackupCreator")
-  restoreJobs       RestoreJob[]
-  fileOperations    FileOperation[]
-  deployments       Deployment[]     @relation("DeploymentActor")
-  operationJobs     OperationJob[]
+  apiKeys            ApiKey[]
+  backups            Backup[]            @relation("BackupCreator")
+  restoreJobs        RestoreJob[]
+  fileOperations     FileOperation[]
+  deployments        Deployment[]        @relation("DeploymentActor")
+  operationJobs      OperationJob[]
   subscriptions      Subscription[]
-  aiAgentRuns       AiAgentRun[]
-  sshKeys           SshKey[]
-  invoices          Invoice[]
-  crmContacts       CrmContact[]
-  crmDeals          CrmDeal[]
-  crmPipelines      CrmPipeline[]
-  crmActivities     CrmActivity[]
-  ciPipelines       CiPipeline[]
-  firewallRules     FirewallRule[]
-  storageBuckets    StorageBucket[]
-  orders            Order[]
-  emailCampaigns    EmailCampaign[]
-  alertRules        AlertRule[]
-  usageRecords      UsageRecord[]
-  applications      Application[]
-  mfa               UserMfa?
+  aiAgentRuns        AiAgentRun[]
+  sshKeys            SshKey[]
+  invoices           Invoice[]
+  crmContacts        CrmContact[]
+  crmDeals           CrmDeal[]
+  crmPipelines       CrmPipeline[]
+  crmActivities      CrmActivity[]
+  ciPipelines        CiPipeline[]
+  firewallRules      FirewallRule[]
+  storageBuckets     StorageBucket[]
+  orders             Order[]
+  emailCampaigns     EmailCampaign[]
+  alertRules         AlertRule[]
+  usageRecords       UsageRecord[]
+  applications       Application[]
+  mfa                UserMfa?
 
   @@index([email])
   @@index([roleId])
   @@index([isActive])
   @@map("users")
+}
+
+// ─── OAuth Account & Email Verification ──────────────────────────────────────
+
+model Account {
+  id                String   @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model VerificationToken {
+  id         String    @id @default(uuid())
+  identifier String
+  token      String    @unique
+  type       String    @default("EMAIL_VERIFICATION")
+  expiresAt  DateTime
+  usedAt     DateTime?
+  userId     String?
+  createdAt  DateTime  @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([identifier, token])
+  @@index([identifier])
+  @@index([token])
+  @@map("verification_tokens")
+}
+
+// ─── Organization, Team & Membership ─────────────────────────────────────────
+
+model Organization {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  logoUrl      String?
+  planId       String?
+  ownerId      String
+  isWhiteLabel Boolean  @default(false)
+  customDomain String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  teams       Team[]
+  memberships Membership[]
+  websites    Website[]
+
+  @@index([ownerId])
+  @@index([slug])
+  @@map("organizations")
+}
+
+model Team {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberships  Membership[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("teams")
+}
+
+model Membership {
+  id             String    @id @default(uuid())
+  userId         String
+  organizationId String
+  teamId         String?
+  role           String    @default("MEMBER")
+  invitedBy      String?
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team         Team?        @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([teamId])
+  @@map("memberships")
 }
 
 // ─── Session ──────────────────────────────────────────────────────────────────
@@ -246,21 +362,28 @@ model AuditLog {
 
 model Website {
   id                 String          @id @default(uuid())
+  name               String?
   domain             String
   runtime            WebsiteRuntime
   documentRoot       String?
   status             WebsiteStatus   @default(ACTIVE)
   applicationPort    Int?
   startupCommand     String?
+  buildCommand       String?
+  outputDirectory    String?
+  gitRepo            String?
+  gitBranch          String          @default("main")
   healthPath         String?
   healthStatus       String?
   currentReleasePath String?
   ownerId            String?
+  organizationId     String?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   deletedAt          DateTime?
 
   owner              User?              @relation("WebsiteOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  organization       Organization?      @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   environments       WebsiteEnvironment[]
   domains            Domain[]
   databaseInstances  DatabaseInstance[]
@@ -283,6 +406,7 @@ model Website {
 
   @@unique([domain])
   @@index([ownerId])
+  @@index([organizationId])
   @@index([status])
   @@index([runtime])
   @@map("websites")
@@ -669,9 +793,14 @@ model ApiKey {
 
 model Server {
   id          String   @id @default(uuid())
+  name        String?
   hostname    String   @unique
   ip          String?
   tailscaleIp String?
+  region      String   @default("us-east-1")
+  status      String   @default("ONLINE")
+  role        String   @default("WEB")
+  maxSites    Int      @default(100)
   os          String?
   cpuCores    Int?
   ramGb       Int?
@@ -680,9 +809,29 @@ model Server {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  ports ServerPort[]
+  ports   ServerPort[]
+  metrics ServerMetric[]
 
   @@map("servers")
+}
+
+model ServerMetric {
+  id             String   @id @default(uuid())
+  serverId       String
+  cpuPercent     Float    @default(0)
+  memoryUsedMb   Float    @default(0)
+  memoryTotalMb  Float    @default(15360)
+  diskUsedGb     Float    @default(0)
+  diskTotalGb    Float    @default(100)
+  networkInKbps  Float    @default(0)
+  networkOutKbps Float    @default(0)
+  loadAvg1m      Float    @default(0)
+  recordedAt     DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, recordedAt])
+  @@map("server_metrics")
 }
 
 // ─── ServerPort ───────────────────────────────────────────────────────────────
@@ -741,15 +890,23 @@ model SystemdService {
 // ─── Subscription & Billing ───────────────────────────────────────────────────
 
 model Plan {
-  id          String        @id @default(uuid())
-  name        String        @unique
-  description String?
-  priceCents  Int           @default(0)
-  interval    String        @default("monthly") // monthly, yearly
-  features    String   // JSON-encoded feature list
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id                    String         @id @default(uuid())
+  name                  String         @unique
+  slug                  String?        @unique
+  description           String?
+  priceCents            Int            @default(0)
+  interval              String         @default("monthly") // monthly, yearly
+  maxSites              Int            @default(5)
+  maxBandwidthGb        Int            @default(100)
+  maxStorageGb          Int            @default(1)
+  maxDatabases          Int            @default(1)
+  maxAiTokens           Int            @default(10000)
+  resellerCommissionPct Float          @default(0)
+  isPopular             Boolean        @default(false)
+  features              String         // JSON-encoded feature list
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   subscriptions Subscription[]
 
@@ -1358,6 +1515,40 @@ model PromptTemplate {
 
   @@index([userId])
   @@map("prompt_templates")
+}
+
+// ─── AIConversation & AIMessage ─────────────────────────────────────────────
+
+model AIConversation {
+  id        String   @id @default(uuid())
+  userId    String
+  websiteId String?
+  title     String   @default("New Conversation")
+  mode      String   @default("assistant") // builder, assistant, log_analyzer, seo, support
+  model     String   @default("gemini-2.0-flash")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages AIMessage[]
+
+  @@index([userId])
+  @@index([websiteId])
+  @@map("ai_conversations")
+}
+
+model AIMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  role           String   // system, user, assistant
+  content        String
+  tokensUsed     Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  conversation AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("ai_messages")
 }
 
 // ─── TokenUsage ─────────────────────────────────────────────────────────────

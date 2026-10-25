@@ -99,13 +99,15 @@ function LoginForm({
 
         const data = await res.json();
 
-        if (!res.ok) {
-          setErrors({ password: data.error || 'Invalid credentials' });
+        if (!res.ok || data.success === false) {
+          setErrors({ password: data.message || data.error?.message || data.error || 'Invalid credentials' });
           return;
         }
 
-        setAuth(data.user, data.token);
-        toast.success(`Welcome back, ${data.user.name}!`);
+        const user = data.data || data.user;
+        const token = data.data?.token || data.token || 'session';
+        setAuth(user, token);
+        toast.success(`Welcome back, ${user?.name || 'User'}!`);
         onClose();
       } catch {
         setErrors({ password: 'Something went wrong. Please try again.' });
@@ -261,13 +263,15 @@ function SignupForm({
 
         const data = await res.json();
 
-        if (!res.ok) {
-          setErrors({ email: data.error || 'Signup failed' });
+        if (!res.ok || data.success === false) {
+          setErrors({ email: data.message || data.error?.message || data.error || 'Signup failed' });
           return;
         }
 
-        setAuth(data.user, data.token);
-        toast.success(`Account created! Welcome, ${data.user.name}!`);
+        const user = data.data || data.user;
+        const token = data.data?.token || data.token || 'session';
+        setAuth(user, token);
+        toast.success(`Account created! Welcome, ${user?.name || 'User'}!`);
         onClose();
       } catch {
         setErrors({ email: 'Something went wrong. Please try again.' });

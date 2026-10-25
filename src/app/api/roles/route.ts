@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(apiError('name is required', 'VALIDATION_ERROR', undefined, 400), { status: 400 });
     }
 
-    const validRoles = ['SUPER_ADMIN', 'ADMIN', 'DEVOPS', 'SUPPORT', 'VIEWER'];
+    const validRoles = ['SUPER_ADMIN', 'ADMIN', 'RESELLER', 'CLIENT', 'DEVOPS', 'SUPPORT', 'VIEWER'];
     if (!validRoles.includes(body.name)) {
       return NextResponse.json(apiError(`name must be one of: ${validRoles.join(', ')}`, 'VALIDATION_ERROR', undefined, 400), { status: 400 });
     }
