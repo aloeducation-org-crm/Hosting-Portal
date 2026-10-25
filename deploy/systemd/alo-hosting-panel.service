@@ -67,7 +67,14 @@ LockPersonality=true
 # The panel provisions customer sites, writes backups and owns its database, so
 # these paths must stay writable. Add /srv/alo-sites and /var/backups/alo-sites
 # once the helper layer (helpers/install-helpers.sh) and Caddy are in place.
-ReadWritePaths=/var/lib/alo-hosting /home/alamin/alo-hosting/logs
+#
+# The "-" prefixes matter: without them a path that does not exist yet makes
+# systemd abort the whole unit at namespace setup with status=226/NAMESPACE,
+# before ExecStart ever runs — which is what happens if this unit is installed
+# before the first deploy has created <app-root>/logs. scripts/bootstrap-server.sh
+# and the Deploy workflow both create these directories, so the prefix is only
+# there to turn a cryptic start failure into a normal runtime error.
+ReadWritePaths=-/var/lib/alo-hosting -/home/alamin/alo-hosting/logs
 
 [Install]
 WantedBy=multi-user.target
