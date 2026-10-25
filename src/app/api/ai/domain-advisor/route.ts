@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import ZAI from '@/lib/ai-sdk'
 import { AIProviderError } from '@/lib/ai-provider'
-import { verifyToken } from '@/lib/auth'
+import { requireSession } from '@/lib/auth'
 
 const advisorSchema = z.object({
   business: z.string().min(1, 'Business description is required'),
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const payload = verifyToken(authHeader.slice(7));
+    const payload = await requireSession(request);
     const userId = payload && typeof payload === 'object' && 'id' in payload ? (payload as { id: string }).id : null;
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

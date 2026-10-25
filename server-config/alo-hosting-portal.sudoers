@@ -17,6 +17,9 @@ alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-log-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-health-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-firewall-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssl-helper
+# Site helpers validate inputs internally and do not expose a generic shell.
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/provision-site.sh
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/ssl-lifecycle.sh
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-email-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-cron-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssh-helper
@@ -33,8 +36,5 @@ alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-dns-helper
 # Docker helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-docker-helper
 
-# Allow alo-panel to reload system services managed by helpers
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload caddy
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload postfix
-alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload dovecot
+# Helpers are the only privileged entry points. Do not grant direct systemctl
+# access; the helpers validate service names and perform their own operations.

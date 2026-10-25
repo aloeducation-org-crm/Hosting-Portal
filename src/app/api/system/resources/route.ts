@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession } from '@/lib/auth';
-import { callHelper } from '@/lib/helpers';
+import { callHelper, classifyHelperFailure } from '@/lib/helpers';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -17,10 +17,8 @@ export async function GET(request: NextRequest) {
 
     const result = await callHelper('alo-health-helper', ['resources']);
     if (!result.success) {
-      return NextResponse.json(
-        apiError('Failed to retrieve system resources', 'HELPER_ERROR', { stderr: result.stderr }),
-        { status: 500 },
-      );
+      const failure = classifyHelperFailure('alo-health-helper', result);
+      return NextResponse.json(apiError(failure.message, failure.code), { status: failure.status });
     }
 
     let data;

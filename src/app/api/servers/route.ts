@@ -12,7 +12,7 @@ const createServerSchema = z.object({
   tailscaleIp: z.string().optional(),
   region: z.string().default("ap-south-1"),
   role: z.enum(["WEB", "DATABASE", "AI", "LOAD_BALANCER"]).default("WEB"),
-  status: z.enum(["ONLINE", "OFFLINE", "MAINTENANCE", "PROVISIONING"]).default("ONLINE"),
+  status: z.enum(["ACTIVE", "ERROR", "PROVISIONING", "ONLINE", "OFFLINE", "MAINTENANCE"]).default("ONLINE"),
   os: z.string().default("Ubuntu 22.04.5 LTS"),
   cpuCores: z.coerce.number().int().min(1).default(4),
   ramGb: z.coerce.number().int().min(1).default(15),
@@ -145,15 +145,15 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const admin = await requireAdmin(request);
-    const body = await request.json();
-    const { id, status, name, maxSites, role, region } = body as {
-      id: string;
-      status?: string;
-      name?: string;
-      maxSites?: number;
-      role?: string;
-      region?: string;
-    };
+    const patchSchema = z.object({
+      id: z.string().uuid(),
+      status: z.enum(["ACTIVE", "ERROR", "PROVISIONING", "ONLINE", "OFFLINE", "MAINTENANCE"]).optional(),
+      name: z.string().min(1).max(120).optional(),
+      maxSites: z.number().int().min(1).max(100000).optional(),
+      role: z.string().min(1).max(64).optional(),
+      region: z.string().min(1).max(64).optional(),
+    });
+    const { id, status, name, maxSites, role, region } = patchSchema.parse(await request.json());
 
     if (!id) {
       return NextResponse.json(

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession } from '@/lib/auth';
-import { callHelper } from '@/lib/helpers';
+import { callHelper, classifyHelperFailure } from '@/lib/helpers';
 import { db } from '@/lib/db';
 import { createAuditLog } from '@/lib/audit';
 
@@ -27,13 +27,8 @@ export async function GET(request: NextRequest) {
     const result = await callHelper('alo-health-helper', ['system-info'], 30_000);
 
     if (!result.success) {
-      return NextResponse.json(
-        apiError('Server discovery failed', 'DISCOVERY_FAILED', {
-          stderr: result.stderr,
-          exitCode: result.exitCode,
-        }),
-        { status: 500 },
-      );
+      const failure = classifyHelperFailure('alo-health-helper', result);
+      return NextResponse.json(apiError(failure.message, failure.code), { status: failure.status });
     }
 
     let systemInfo: Record<string, unknown>;

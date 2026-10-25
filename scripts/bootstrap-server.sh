@@ -117,7 +117,7 @@ ok "panel port : 127.0.0.1:${PORT}"
 ok "database   : ${DB_FILE}"
 [[ $DRY_RUN -eq 1 ]] && warn "dry run — nothing will be written"
 
-# ── 1. Find a Node >= 22 that systemd can launch by absolute path ──────────
+# ── 1. Find a Node >= 20.9 that systemd can launch by absolute path ──────────
 # systemd does not source your shell profile, so an nvm-only Node is invisible
 # to it. Writing the resolved absolute path into the unit avoids needing a
 # system-wide Node install at all.
@@ -128,9 +128,11 @@ for candidate in /usr/bin/node /usr/local/bin/node /usr/local/nodejs/bin/node \
   [[ -x "$candidate" ]] || continue
   ver="$("$candidate" -v 2>/dev/null || true)"
   major="${ver#v}"; major="${major%%.*}"
-  if [[ "${major:-0}" -ge 22 ]]; then NODE_BIN="$candidate"; NODE_VER="$ver"; break; fi
+  minor=0
+  if (( ${major:-0} == 20 )); then minor="${ver#v20.}"; minor="${minor%%.*}"; minor=$((10#${minor:-0})); fi
+  if (( ${major:-0} > 20 )) || { (( ${major:-0} == 20 )) && (( minor >= 9 )); }; then NODE_BIN="$candidate"; NODE_VER="$ver"; break; fi
 done
-[[ -n "$NODE_BIN" ]] || die "no Node >= 22 found (looked in /usr/bin, /usr/local/bin, ~/.nvm). Install it, then re-run."
+[[ -n "$NODE_BIN" ]] || die "no Node >= 20.9 found (looked in /usr/bin, /usr/local/bin, ~/.nvm). Install it, then re-run."
 ok "using ${NODE_BIN} (${NODE_VER})"
 
 # ── 2. /etc/alo-hosting/panel.env ──────────────────────────────────────────

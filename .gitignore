@@ -45,6 +45,7 @@ Thumbs.db
 *.log
 
 # Secrets and environment configuration
+deploy/env/*.env
 .env
 .env.*
 !.env.example

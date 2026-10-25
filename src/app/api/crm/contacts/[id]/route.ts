@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { requireSession } from '@/lib/auth'
 
 export async function GET(
   request: NextRequest,
@@ -12,7 +12,7 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const payload = verifyToken(authHeader.slice(7))
+    const payload = await requireSession(request)
     if (!payload || typeof payload !== 'object' || !('id' in payload)) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
@@ -53,7 +53,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const payload = verifyToken(authHeader.slice(7))
+    const payload = await requireSession(request)
     if (!payload || typeof payload !== 'object' || !('id' in payload)) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }
@@ -101,7 +101,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const payload = verifyToken(authHeader.slice(7))
+    const payload = await requireSession(request)
     if (!payload || typeof payload !== 'object' || !('id' in payload)) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 })
     }

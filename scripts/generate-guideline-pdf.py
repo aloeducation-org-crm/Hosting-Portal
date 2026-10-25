@@ -128,7 +128,7 @@ def build_pdf(output_path):
     for item in [
         'Ubuntu 22.04.5 LTS (or later 22.04.x patch release)',
         'Minimum 2 CPU cores, 4 GB RAM, 20 GB disk (SSD recommended)',
-        'Node.js 22.x LTS (must be the system Node, not via nvm)',
+        'Node.js 20.x LTS (must be the system Node, not via nvm)',
         'PostgreSQL 14+ for the portal database',
         'MariaDB 10.6+ for hosted site databases (optional)',
         'Caddy web server (latest stable via apt or xcaddy)',
@@ -142,7 +142,7 @@ def build_pdf(output_path):
     story.append(Paragraph('1.2 Software Versions', h2_style))
     versions = [
         ['Component', 'Version', 'Purpose'],
-        ['Node.js', '22.x', 'Portal runtime'],
+        ['Node.js', '20.x', 'Portal runtime'],
         ['Next.js', '16.x', 'Web framework (standalone output)'],
         ['PostgreSQL', '14+', 'Portal database'],
         ['MariaDB', '10.6+', 'Hosted PHP site databases'],
@@ -182,7 +182,7 @@ def build_pdf(output_path):
     story.append(code_block('sudo mkdir -p /srv/alo-sites /var/backups/alo-sites \\\n  /etc/caddy/sites-enabled /var/log/caddy/alo-sites \\\n  /opt/alo-hosting-portal\nsudo chown -R aloedu:aloedu /srv/alo-sites /var/backups/alo-sites\nsudo chmod 755 /srv/alo-sites /var/backups/alo-sites'))
 
     story.append(Paragraph('2.3 Install Base Packages', h2_style))
-    story.append(code_block('sudo apt update\nsudo apt install -y postgresql postgresql-contrib \\\n  mariadb-server php8.2-fpm php8.2-cli \\\n  caddy curl unzip jq fail2ban ufw\ncurl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -\nsudo apt install -y nodejs'))
+    story.append(code_block('sudo apt update\nsudo apt install -y postgresql postgresql-contrib \\\n  mariadb-server php8.2-fpm php8.2-cli \\\n  caddy curl unzip jq fail2ban ufw\ncurl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -\nsudo apt install -y nodejs'))
 
     story.append(Paragraph('2.4 Configure PostgreSQL', h2_style))
     story.append(Paragraph(

@@ -100,6 +100,23 @@ enum SslStatus {
   RENEWING
 }
 
+// Server states retained by the existing portal plus the hosting lifecycle
+// states used by automated provisioning.
+enum ServerStatus {
+  ACTIVE
+  ERROR
+  PROVISIONING
+  ONLINE
+  OFFLINE
+  MAINTENANCE
+}
+
+enum SiteSslStatus {
+  ACTIVE
+  EXPIRED
+  PENDING
+}
+
 // ─── Role & Permission ────────────────────────────────────────────────────────
 
 model Role {
@@ -792,27 +809,50 @@ model ApiKey {
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 model Server {
-  id          String   @id @default(uuid())
+  id          String       @id @default(uuid())
   name        String?
-  hostname    String   @unique
+  hostname    String       @unique
   ip          String?
+  // Explicit infrastructure fields used by the hosting lifecycle API.
+  ipAddress   String?
+  status      ServerStatus @default(ONLINE)
+  cpuUsage    Float        @default(0)
+  memoryUsage Float        @default(0)
+  diskUsage   Float        @default(0)
   tailscaleIp String?
-  region      String   @default("us-east-1")
-  status      String   @default("ONLINE")
-  role        String   @default("WEB")
-  maxSites    Int      @default(100)
+  region      String       @default("us-east-1")
+  role        String       @default("WEB")
+  maxSites    Int          @default(100)
   os          String?
   cpuCores    Int?
   ramGb       Int?
   diskGb      Int?
   uptime      Int?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
   ports   ServerPort[]
   metrics ServerMetric[]
+  sites   Site[]
 
   @@map("servers")
+}
+
+model Site {
+  id         String       @id @default(uuid())
+  domainName String       @unique
+  sslStatus  SiteSslStatus @default(PENDING)
+  provisioningStatus String @default("PENDING")
+  vhostPath  String
+  serverId   String
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+  @@index([sslStatus])
+  @@map("hosting_sites")
 }
 
 model ServerMetric {

@@ -1,47 +1,26 @@
-FROM node:22-alpine AS base
+# Isolated Node.js 20 runtime/build image. Use a persistent host volume for SQLite.
+FROM node:20-alpine AS base
+WORKDIR /app
 
-# Install dependencies only when needed
 FROM base AS deps
 RUN apk add --no-cache libc6-compat
-WORKDIR /app
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 RUN npm ci
 
-# Rebuild the source code only when needed
 FROM base AS builder
-WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-# Production image
 FROM base AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/prisma ./prisma
-
-# Set the correct permission for prerender cache
-RUN mkdir .next
-RUN chown nextjs:nodejs .next
-
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=8080 HOSTNAME=0.0.0.0
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs \
+  && mkdir -p /var/lib/alo-hosting && chown nextjs:nodejs /var/lib/alo-hosting
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 USER nextjs
-
-# PORT is configurable: `docker run -e PORT=3051 -p 3051:3051 ...`
-# 3101 is only the documented default (matches src/lib/env.ts).
-ARG PORT=3101
-ENV PORT=${PORT}
-ENV HOSTNAME=0.0.0.0
-
-EXPOSE ${PORT}
-
+EXPOSE 8080
 CMD ["node", "server.js"]

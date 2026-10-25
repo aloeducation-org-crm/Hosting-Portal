@@ -171,7 +171,7 @@ story.append(tbl([
     ['Authentication', 'Auth.js (NextAuth v4)', 'JWT Strategy'],
     ['State Management', 'Zustand', '5+'],
     ['Charts', 'Recharts', '2+'],
-    ['Runtime', 'Node.js LTS', '22'],
+    ['Runtime', 'Node.js LTS', '20'],
 ]))
 story.append(sp(6))
 story.append(h2('1.2 Key Features'))
@@ -214,7 +214,7 @@ story.append(sp(6))
 story.append(h2('2.3 Required Software'))
 story.append(tbl([
     ['Software', 'Version', 'Quick Install (Ubuntu)'],
-    ['Node.js', '22.x LTS', 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs'],
+    ['Node.js', '20.x LTS', 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs'],
     ['npm', '10.x', '(installed with Node.js)'],
     ['PostgreSQL', '17', 'sudo apt install postgresql-17'],
     ['Docker', '24+', 'curl -fsSL https://get.docker.com | sh'],
@@ -241,10 +241,10 @@ story.append(p('Creating a dedicated non-root user is critical for security. Thi
 story.append(c('sudo useradd -m -s /bin/bash hosting'))
 story.append(c('sudo usermod -aG docker hosting'))
 story.append(sp(4))
-story.append(h2('3.3 Install Node.js 22 LTS'))
-story.append(c('curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -'))
+story.append(h2('3.3 Install Node.js 20 LTS'))
+story.append(c('curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'))
 story.append(c('sudo apt install -y nodejs'))
-story.append(c('node --version   # v22.x.x'))
+story.append(c('node --version   # v20.x.x'))
 story.append(c('npm --version    # 10.x.x'))
 story.append(sp(4))
 story.append(h2('3.4 Install PostgreSQL 17'))
@@ -707,7 +707,7 @@ files = [
     ['postcss.config.mjs', 'PostCSS configuration'],
     ['eslint.config.mjs', 'ESLint configuration'],
     ['components.json', 'shadcn/UI component config'],
-    ['Dockerfile', 'Multi-stage Docker build (node:22-alpine)'],
+    ['Dockerfile', 'Multi-stage Docker build (node:20-alpine)'],
     ['docker-compose.yml', 'Docker Compose: app + PostgreSQL + Redis'],
     ['Caddyfile', 'Caddy reverse proxy config'],
     ['DEPLOY.md', 'Deployment documentation'],
@@ -763,7 +763,7 @@ arch = '''
                            v
 +----------------------------------------------------------+
 |  Next.js 16 Application (Standalone Output)               |
-|  Port 3101  |  Node.js 22 LTS                             |
+|  Port 3101  |  Node.js 20 LTS                             |
 |  +----------------------------------------------------+  |
 |  | Middleware: CSP, Rate Limiting, Auth Guard          |  |
 |  +----------------------------------------------------+  |
@@ -797,7 +797,7 @@ story.append(Paragraph('<b>Quick Start Checklist</b>', S('ChkTitle', fontName=BO
 story.append(sp(4))
 for i, item in enumerate([
     'Server provisioned with Ubuntu 22.04+ and 2GB+ RAM',
-    'Node.js 22, PostgreSQL 17, Docker, and Caddy installed',
+    'Node.js 20, PostgreSQL 17, Docker, and Caddy installed',
     'Production archive extracted to /opt/hosting-platform',
     '.env file configured with all required variables',
     'NEXTAUTH_SECRET generated: openssl rand -base64 48',

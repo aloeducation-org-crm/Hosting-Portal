@@ -10,8 +10,9 @@ const querySchema = z.object({
   action: z.string().optional(),
   resourceType: z.string().optional(),
   actorEmail: z.string().optional(),
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
+  startDate: z.string().datetime({ offset: true }).optional(),
+  endDate: z.string().datetime({ offset: true }).optional(),
+  search: z.string().trim().max(100).optional(),
 });
 
 export async function GET(request: NextRequest) {
@@ -21,9 +22,18 @@ export async function GET(request: NextRequest) {
     const input = querySchema.parse(Object.fromEntries(searchParams));
 
     const where: any = {};
-    if (input.action) where.action = input.action;
-    if (input.resourceType) where.resourceType = input.resourceType;
+    if (input.action) where.action = { contains: input.action.toUpperCase() };
+    if (input.resourceType) where.resourceType = { contains: input.resourceType };
     if (input.actorEmail) where.actorEmail = { contains: input.actorEmail };
+    if (input.search) {
+      where.OR = [
+        { action: { contains: input.search } },
+        { resourceType: { contains: input.search } },
+        { resourceId: { contains: input.search } },
+        { actorEmail: { contains: input.search } },
+        { ipAddress: { contains: input.search } },
+      ];
+    }
     if (input.startDate || input.endDate) {
       where.timestamp = {};
       if (input.startDate) where.timestamp.gte = new Date(input.startDate);

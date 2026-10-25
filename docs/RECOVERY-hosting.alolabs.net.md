@@ -88,17 +88,17 @@ test -f 'src/app/(auth)/login/page.tsx' && echo "✅ right directory (repo root)
 
 > Your `.env` files are gitignored and survive the reset. `bun.lock` comes back.
 
-### 1.2 Install Node 22 system-wide
+### 1.2 Install Node 20 system-wide
 
 nvm's node is invisible to `sudo`, to systemd and to the Actions runner (their
 `PATH` is the bare `secure_path`). That is why `pm2`/`npm` kept "not found"
 inside scripts while working in your shell.
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
-node -v          # v22.x
-sudo node -v     # must also print v22.x  ← this is the check that matters
+node -v          # v20.9+
+sudo node -v     # must also print v20.9+  ← this is the check that matters
 ```
 
 Keep nvm if you like it for interactive work; the system node is what services

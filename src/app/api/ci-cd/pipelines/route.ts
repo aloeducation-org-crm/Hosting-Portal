@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyToken } from '@/lib/auth'
+import { requireSession } from '@/lib/auth'
 
 async function getUser(req: NextRequest) {
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) return null
-  const payload = verifyToken(authHeader.slice(7))
-  if (!payload || typeof payload !== 'object' || !('id' in payload)) return null
-  return payload as { id: string }
+  try {
+    return await requireSession(req);
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(req: NextRequest) {

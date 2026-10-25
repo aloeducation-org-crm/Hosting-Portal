@@ -101,8 +101,8 @@ sudo apt update && sudo apt upgrade -y
 # Install essential tools
 sudo apt install -y curl wget git build-essential ufw
 
-# Install Node.js 22 LTS
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+# Install Node.js 20 LTS
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 
 # Verify installations

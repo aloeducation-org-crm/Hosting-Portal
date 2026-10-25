@@ -1,0 +1,58 @@
+services:
+  db-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.node20
+      target: builder
+    image: alo-hosting-panel:node20-builder
+    command: ["sh", "-c", "npx prisma db push --skip-generate && chown -R 1001:1001 /var/lib/alo-hosting && npx tsx scripts/bootstrap-super-admin.ts"]
+    environment:
+      DATABASE_URL: file:/var/lib/alo-hosting/alo.db
+    volumes:
+      - alo-hosting-data:/var/lib/alo-hosting
+    restart: "no"
+
+  alo-hosting-panel:
+    build:
+      context: .
+      dockerfile: Dockerfile.node20
+    image: alo-hosting-panel:node20
+    container_name: alo-hosting-panel-node20
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: ./deploy/env/alo-hosting-panel.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: file:/var/lib/alo-hosting/alo.db
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - alo-hosting-data:/var/lib/alo-hosting
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+      - /app/.next/cache:size=256m,uid=1001,gid=1001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+volumes:
+  alo-hosting-data:
+    name: alo-hosting-node20-data
