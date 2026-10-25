@@ -1,0 +1,265 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — SSH Helper
+# Manages SSH authorized_keys, user creation, and password changes.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+APP_USER="alo-panel"
+AUTHORIZED_KEYS_DIR="/home/${APP_USER}/.ssh"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-ssh-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-ssh-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_username() {
+  # System username: alphanumeric + underscores + hyphens, 1-32 chars
+  if [[ ! "$1" =~ ^[a-zA-Z_][a-zA-Z0-9_-]{0,31}$ ]]; then
+    die "arg-validation" "Invalid username: $1"
+  fi
+}
+
+validate_ssh_key() {
+  # Basic SSH key validation: must start with valid key type
+  local key="$1"
+  local valid_types=("ssh-rsa" "ssh-ed25519" "ecdsa-sha2-nistp256" "ecdsa-sha2-nistp384" "ecdsa-sha2-nistp521" "sk-ssh-ed25519@openssh.com" "sk-ecdsa-sha2-nistp256@openssh.com")
+  local key_type=""
+  key_type=$(echo "$key" | awk '{print $1}')
+
+  local found=false
+  for vt in "${valid_types[@]}"; do
+    if [[ "$key_type" == "$vt" ]]; then
+      found=true
+      break
+    fi
+  done
+
+  if [[ "$found" == "false" ]]; then
+    die "arg-validation" "Invalid or unsupported SSH key type: ${key_type}"
+  fi
+
+  # Basic length check
+  if [[ ${#key} -lt 100 ]]; then
+    die "arg-validation" "SSH key appears too short to be valid"
+  fi
+  if [[ ${#key} -gt 16384 ]]; then
+    die "arg-validation" "SSH key too long (max 16384 chars)"
+  fi
+}
+
+validate_label() {
+  # Key label: alphanumeric, dots, hyphens, underscores, @, spaces; max 128 chars
+  if [[ ! "$1" =~ ^[a-zA-Z0-9._ @-]{1,128}$ ]]; then
+    die "arg-validation" "Invalid key label: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-ssh-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: add-key ─────────────────────────────────────────────────────────
+action_add_key() {
+  if [[ $# -lt 2 ]]; then
+    die "add-key" "Usage: add-key <public-key> [label]"
+  fi
+
+  local public_key="$1"
+  local label="${2:-}"
+
+  validate_ssh_key "$public_key"
+  if [[ -n "$label" ]]; then
+    validate_label "$label"
+  fi
+
+  local auth_keys="${AUTHORIZED_KEYS_DIR}/authorized_keys"
+
+  # Ensure .ssh directory exists
+  mkdir -p "$AUTHORIZED_KEYS_DIR"
+  chown "${APP_USER}:${APP_USER}" "$AUTHORIZED_KEYS_DIR"
+  chmod 700 "$AUTHORIZED_KEYS_DIR"
+
+  # Check for duplicate key
+  local key_fingerprint
+  key_fingerprint=$(echo "$public_key" | ssh-keygen -l -f - 2>/dev/null | awk '{print $2}')
+
+  if [[ -f "$auth_keys" ]] && [[ -n "$key_fingerprint" ]]; then
+    if ssh-keygen -l -f "$auth_keys" 2>/dev/null | grep -q "$key_fingerprint"; then
+      die "add-key" "This SSH key is already authorized"
+    fi
+  fi
+
+  # Append key with optional comment
+  if [[ -n "$label" ]]; then
+    printf '%s %s\n' "$public_key" "$label" >> "$auth_keys"
+  else
+    printf '%s\n' "$public_key" >> "$auth_keys"
+  fi
+
+  # Set permissions
+  touch "$auth_keys"
+  chown "${APP_USER}:${APP_USER}" "$auth_keys"
+  chmod 600 "$auth_keys"
+
+  log_info "Added SSH key with label: ${label:-none}"
+
+  json_out "{\"success\":true,\"step\":\"add-key\",\"label\":\"${label:-}\",\"message\":\"SSH key added\"}"
+}
+
+# ── action: remove-key ──────────────────────────────────────────────────────
+action_remove_key() {
+  if [[ $# -lt 1 ]]; then
+    die "remove-key" "Usage: remove-key <fingerprint>"
+  fi
+
+  local fingerprint="$1"
+  local auth_keys="${AUTHORIZED_KEYS_DIR}/authorized_keys"
+
+  if [[ ! -f "$auth_keys" ]]; then
+    die "remove-key" "No authorized_keys file found"
+  fi
+
+  # Find and remove the key by fingerprint
+  local line_number=""
+  line_number=$(ssh-keygen -l -f "$auth_keys" 2>/dev/null | grep -n "$fingerprint" | head -1 | cut -d: -f1 || echo "")
+
+  if [[ -z "$line_number" ]]; then
+    die "remove-key" "SSH key not found with fingerprint: ${fingerprint}"
+  fi
+
+  sed -i "${line_number}d" "$auth_keys"
+  log_info "Removed SSH key with fingerprint: ${fingerprint}"
+
+  json_out "{\"success\":true,\"step\":\"remove-key\",\"fingerprint\":\"${fingerprint}\",\"message\":\"SSH key removed\"}"
+}
+
+# ── action: list-keys ───────────────────────────────────────────────────────
+action_list_keys() {
+  local auth_keys="${AUTHORIZED_KEYS_DIR}/authorized_keys"
+  local keys_json="["
+  local first=true
+
+  if [[ -f "$auth_keys" ]]; then
+    local line_num=0
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      line_num=$((line_num + 1))
+
+      local key_type key_comment key_fingerprint key_bits
+      key_type=$(echo "$line" | awk '{print $1}')
+      key_comment=$(echo "$line" | awk '{print $NF}')
+      key_bits=$(echo "$line" | awk '{print $2}')
+
+      local temp_key
+      temp_key=$(mktemp)
+      echo "$line" > "$temp_key"
+      key_fingerprint=$(ssh-keygen -l -f "$temp_key" 2>/dev/null | awk '{print $2}' || echo "unknown")
+      key_bits=$(ssh-keygen -l -f "$temp_key" 2>/dev/null | awk '{print $1}' || echo "0")
+      rm -f "$temp_key"
+
+      if [[ "$first" == true ]]; then first=false; else keys_json+=","; fi
+      keys_json+="{\"lineNumber\":${line_num},\"type\":\"${key_type}\",\"bits\":${key_bits},\"fingerprint\":\"${key_fingerprint}\",\"comment\":\"${key_comment}\"}"
+    done < "$auth_keys"
+  fi
+
+  keys_json+="]"
+
+  json_out "{\"success\":true,\"step\":\"list-keys\",\"keys\":${keys_json}}"
+}
+
+# ── action: create-user ─────────────────────────────────────────────────────
+action_create_user() {
+  if [[ $# -lt 1 ]]; then
+    die "create-user" "Usage: create-user <username>"
+  fi
+
+  local username="$1"
+  validate_username "$username"
+
+  # Check if user already exists
+  if id "$username" &>/dev/null; then
+    die "create-user" "User already exists: ${username}"
+  fi
+
+  # Create system user with no login shell by default
+  useradd -r -s /usr/sbin/nologin -d "/home/${username}" -m "$username" 2>/dev/null || \
+    die "create-user" "Failed to create user: ${username}"
+
+  log_info "Created system user: ${username}"
+
+  json_out "{\"success\":true,\"step\":\"create-user\",\"username\":\"${username}\",\"message\":\"User created\"}"
+}
+
+# ── action: set-password ─────────────────────────────────────────────────────
+action_set_password() {
+  if [[ $# -lt 2 ]]; then
+    die "set-password" "Usage: set-password <username> <password>"
+  fi
+
+  local username="$1"
+  local password="$2"
+
+  validate_username "$username"
+
+  if ! id "$username" &>/dev/null; then
+    die "set-password" "User does not exist: ${username}"
+  fi
+
+  # Use chpasswd with stdin to avoid password in process list
+  echo "${username}:${password}" | chpasswd 2>/dev/null || \
+    die "set-password" "Failed to set password for ${username}"
+
+  # Ensure shell is enabled for SSH access
+  chsh -s /bin/bash "$username" 2>/dev/null || true
+
+  log_info "Password updated for: ${username}"
+
+  json_out "{\"success\":true,\"step\":\"set-password\",\"username\":\"${username}\",\"message\":\"Password updated\"}"
+}
+
+# ── action: disable-user ────────────────────────────────────────────────────
+action_disable_user() {
+  if [[ $# -lt 1 ]]; then
+    die "disable-user" "Usage: disable-user <username>"
+  fi
+
+  local username="$1"
+  validate_username "$username"
+
+  if ! id "$username" &>/dev/null; then
+    die "disable-user" "User does not exist: ${username}"
+  fi
+
+  # Lock the account
+  usermod -L "$username" 2>/dev/null || die "disable-user" "Failed to lock user: ${username}"
+  # Set shell to nologin
+  chsh -s /usr/sbin/nologin "$username" 2>/dev/null || true
+
+  log_info "User disabled: ${username}"
+
+  json_out "{\"success\":true,\"step\":\"disable-user\",\"username\":\"${username}\",\"message\":\"User disabled\"}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  add-key)       action_add_key "$@" ;;
+  remove-key)    action_remove_key "$@" ;;
+  list-keys)     action_list_keys "$@" ;;
+  create-user)   action_create_user "$@" ;;
+  set-password)  action_set_password "$@" ;;
+  disable-user)  action_disable_user "$@" ;;
+  *)             die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

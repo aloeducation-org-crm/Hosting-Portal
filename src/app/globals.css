@@ -1,0 +1,263 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* ALO Labs brand colors — Orange #E8501A + Blue #0A5CFF */
+  --color-alo-orange: #E8501A;
+  --color-alo-orange-dark: #C73D12;
+  --color-alo-blue: #0A5CFF;
+  --color-alo-blue-light: #3B82F6;
+  --color-alo-orange-50: #FFF7ED;
+  --color-alo-orange-100: #FEE2E2;
+  --color-alo-navy: #1E3A5F;
+  --color-alo-yellow: #F59E0B;
+  --color-alo-green: #22C55E;
+  --color-alo-dark: #0A1628;
+  --color-alo-dark-2: #0F172A;
+  --color-alo-gray: #F1F1F4;
+  --color-alo-text: #1E293B;
+  --color-alo-text-muted: #475569;
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: #FFFFFF;
+  --foreground: #1E293B;
+  --card: #FFFFFF;
+  --card-foreground: #1E293B;
+  --popover: #FFFFFF;
+  --popover-foreground: #1E293B;
+  --primary: #E8501A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #FFF7ED;
+  --secondary-foreground: #E8501A;
+  --muted: #FFF7ED;
+  --muted-foreground: #475569;
+  --accent: #FFF7ED;
+  --accent-foreground: #E8501A;
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: #E2E8F0;
+  --input: #E2E8F0;
+  --ring: #E8501A;
+  --chart-1: #E8501A;
+  --chart-2: #0A5CFF;
+  --chart-3: #3B82F6;
+  --chart-4: #60A5FA;
+  --chart-5: #93C5FD;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+  }
+}
+
+/* ALO Labs Custom Styles */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* Gradient backgrounds */
+.alo-gradient {
+  background: linear-gradient(135deg, #E8501A 0%, #0A5CFF 50%, #3B82F6 100%);
+}
+
+.alo-gradient-dark {
+  background: linear-gradient(135deg, #0A1628 0%, #0F172A 50%, #1E3A5F 100%);
+}
+
+.alo-gradient-text {
+  background: linear-gradient(135deg, #E8501A, #0A5CFF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.alo-hero-gradient {
+  background: linear-gradient(180deg, #FFF7ED 0%, #FFFFFF 100%);
+}
+
+.alo-card-hover {
+  transition: all 0.3s ease;
+}
+.alo-card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(232, 80, 26, 0.12);
+}
+
+.alo-glow {
+  box-shadow: 0 0 40px rgba(232, 80, 26, 0.3);
+}
+
+.alo-btn-primary {
+  background-color: #E8501A;
+  color: white;
+  transition: all 0.2s ease;
+}
+.alo-btn-primary:hover {
+  background-color: #C73D12;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(232, 80, 26, 0.4);
+}
+
+.alo-btn-secondary {
+  background-color: transparent;
+  color: #E8501A;
+  border: 2px solid #E8501A;
+  transition: all 0.2s ease;
+}
+.alo-btn-secondary:hover {
+  background-color: #E8501A;
+  color: white;
+}
+
+/* Domain search bar */
+.alo-search-bar {
+  border: 2px solid #E2E8F0;
+  transition: border-color 0.2s ease;
+}
+.alo-search-bar:focus-within {
+  border-color: #E8501A;
+  box-shadow: 0 0 0 3px rgba(232, 80, 26, 0.1);
+}
+
+/* Pricing card styles */
+.alo-pricing-popular {
+  border: 2px solid #E8501A;
+  position: relative;
+}
+.alo-pricing-popular::before {
+  content: "MOST POPULAR";
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #E8501A;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 16px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+}
+
+/* Testimonial carousel */
+.alo-testimonial-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.alo-testimonial-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Animated gradient border */
+.alo-animated-border {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.alo-animated-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  padding: 2px;
+  background: linear-gradient(135deg, #E8501A, #0A5CFF, #3B82F6, #E8501A);
+  background-size: 300% 300%;
+  animation: gradientShift 4s ease infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.alo-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* Fade in animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.alo-fade-in {
+  animation: fadeInUp 0.6s ease-out forwards;
+}
+
+/* Mega menu styles */
+.alo-mega-menu {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px);
+  transition: all 0.2s ease;
+}
+.alo-mega-trigger:hover .alo-mega-menu,
+.alo-mega-menu:hover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}

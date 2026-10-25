@@ -1,0 +1,254 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Site Lifecycle Helper
+# Suspend, resume, and delete hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
+CADDY_LOG_DIR="/var/log/caddy/alo-sites"
+BACKUP_BASE="/var/backups/alo-sites"
+APP_USER="alo-panel"
+APP_GROUP="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-site-lifecycle] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-site-lifecycle] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-site-lifecycle <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-site-lifecycle <action> <domain>"
+fi
+
+DOMAIN="$1"
+shift
+validate_domain "$DOMAIN"
+
+SITE_DIR="${SITE_BASE}/${DOMAIN}"
+SERVICE_NAME="alo-site-${DOMAIN}"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+CADDY_FRAGMENT="${CADDY_CONFIG_DIR}/${DOMAIN}.caddy"
+SUSPENDED_MARKER="${SITE_DIR}/.suspended"
+
+# ── action: suspend ──────────────────────────────────────────────────────────
+action_suspend() {
+  log_info "Suspending site: ${DOMAIN}"
+
+  if [[ ! -d "$SITE_DIR" ]]; then
+    die "suspend" "Site directory not found: ${DOMAIN}"
+  fi
+
+  # Stop the service if running
+  if systemctl is-active "${SERVICE_NAME}.service" &>/dev/null; then
+    systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
+    log_info "Stopped service: ${SERVICE_NAME}"
+  fi
+
+  # Replace Caddy config with a suspended page
+  local suspended_dir="${SITE_DIR}/suspended"
+  mkdir -p "$suspended_dir"
+
+  cat > "${suspended_dir}/index.html" <<SUSPENDEDHTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Suspended — ${DOMAIN}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        .container { text-align: center; padding: 2rem; }
+        h1 { color: #E8501A; font-size: 2.5rem; margin-bottom: 1rem; }
+        p { color: #999; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Site Suspended</h1>
+        <p>This site (${DOMAIN}) has been temporarily suspended by the administrator.</p>
+        <p>Please contact support for more information.</p>
+    </div>
+</body>
+</html>
+SUSPENDEDHTML
+
+  chown -R "${APP_USER}:${APP_GROUP}" "${suspended_dir}"
+
+  # Back up the original Caddy config if it exists
+  if [[ -f "$CADDY_FRAGMENT" ]]; then
+    cp "$CADDY_FRAGMENT" "${SITE_DIR}/.caddy-backup"
+  fi
+
+  # Write suspended Caddy config
+  cat > "$CADDY_FRAGMENT" <<CADDYCONF
+# ALO Labs Hosting - ${DOMAIN} (SUSPENDED)
+${DOMAIN} {
+    root * ${suspended_dir}
+    file_server
+    encode gzip
+
+    log {
+        output file ${CADDY_LOG_DIR}/${DOMAIN}-access.log
+    }
+}
+CADDYCONF
+
+  # Validate and reload Caddy
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || {
+    # Restore original config if validation fails
+    if [[ -f "${SITE_DIR}/.caddy-backup" ]]; then
+      cp "${SITE_DIR}/.caddy-backup" "$CADDY_FRAGMENT"
+    fi
+    die "suspend" "Caddy config validation failed"
+  }
+
+  systemctl reload caddy || die "suspend" "Failed to reload Caddy"
+
+  # Create suspended marker
+  touch "$SUSPENDED_MARKER"
+
+  json_out "{\"success\":true,\"step\":\"suspend\",\"domain\":\"${DOMAIN}\",\"message\":\"Site suspended\"}"
+}
+
+# ── action: resume ───────────────────────────────────────────────────────────
+action_resume() {
+  log_info "Resuming site: ${DOMAIN}"
+
+  if [[ ! -d "$SITE_DIR" ]]; then
+    die "resume" "Site directory not found: ${DOMAIN}"
+  fi
+
+  # Restore original Caddy config if backup exists
+  if [[ -f "${SITE_DIR}/.caddy-backup" ]]; then
+    cp "${SITE_DIR}/.caddy-backup" "$CADDY_FRAGMENT"
+    log_info "Restored original Caddy config"
+  fi
+
+  # Validate and reload Caddy
+  if [[ -f "$CADDY_FRAGMENT" ]]; then
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || {
+      die "resume" "Caddy config validation failed after restore"
+    }
+    systemctl reload caddy || die "resume" "Failed to reload Caddy"
+  fi
+
+  # Restart the service if it exists
+  if [[ -f "$SERVICE_FILE" ]]; then
+    systemctl daemon-reload
+    systemctl start "${SERVICE_NAME}.service" 2>/dev/null || log_err "Service failed to start (non-fatal)"
+    log_info "Started service: ${SERVICE_NAME}"
+  fi
+
+  # Remove suspended marker and backup
+  rm -f "$SUSPENDED_MARKER" "${SITE_DIR}/.caddy-backup"
+
+  json_out "{\"success\":true,\"step\":\"resume\",\"domain\":\"${DOMAIN}\",\"message\":\"Site resumed\"}"
+}
+
+# ── action: delete ───────────────────────────────────────────────────────────
+action_delete() {
+  local skip_backup="${1:-false}"
+  log_info "Deleting site: ${DOMAIN}"
+
+  if [[ ! -d "$SITE_DIR" ]]; then
+    die "delete" "Site directory not found: ${DOMAIN}"
+  fi
+
+  # Stop service if running
+  if systemctl is-active "${SERVICE_NAME}.service" &>/dev/null; then
+    systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
+  fi
+
+  # Remove systemd service
+  if [[ -f "$SERVICE_FILE" ]]; then
+    systemctl disable "${SERVICE_NAME}.service" 2>/dev/null || true
+    rm -f "$SERVICE_FILE"
+    systemctl daemon-reload
+    log_info "Removed systemd service"
+  fi
+
+  # Remove Caddy config
+  if [[ -f "$CADDY_FRAGMENT" ]]; then
+    rm -f "$CADDY_FRAGMENT"
+    log_info "Removed Caddy config"
+  fi
+
+  # Reload Caddy
+  systemctl reload caddy 2>/dev/null || true
+
+  # Create final backup before deletion (unless skip_backup is true)
+  if [[ "$skip_backup" != "true" ]]; then
+    local backup_dir="${BACKUP_BASE}/${DOMAIN}/pre-delete-$(date +%Y%m%d%H%M%S)"
+    mkdir -p "$(dirname "$backup_dir")"
+    cp -a "$SITE_DIR" "$backup_dir" 2>/dev/null || true
+    log_info "Pre-delete backup saved to ${backup_dir}"
+  fi
+
+  # Remove site directory
+  rm -rf "${SITE_DIR:?}"
+  log_info "Removed site directory"
+
+  # Remove logs
+  rm -f "${CADDY_LOG_DIR}/${DOMAIN}-access.log" "${CADDY_LOG_DIR}/${DOMAIN}-error.log" 2>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"delete\",\"domain\":\"${DOMAIN}\",\"message\":\"Site deleted\"}"
+}
+
+# ── action: status ───────────────────────────────────────────────────────────
+action_status() {
+  local is_suspended="false"
+  [[ -f "$SUSPENDED_MARKER" ]] && is_suspended="true"
+
+  local service_state="not-found"
+  if systemctl list-unit-files "${SERVICE_NAME}.service" &>/dev/null; then
+    service_state=$(systemctl is-active "${SERVICE_NAME}.service" 2>/dev/null || echo "inactive")
+  fi
+
+  local has_dir="false"
+  local has_caddy="false"
+  [[ -d "$SITE_DIR" ]] && has_dir="true"
+  [[ -f "$CADDY_FRAGMENT" ]] && has_caddy="true"
+
+  json_out "{\"success\":true,\"step\":\"status\",\"domain\":\"${DOMAIN}\",\"suspended\":${is_suspended},\"serviceState\":\"${service_state}\",\"hasDirectory\":${has_dir},\"hasCaddyConfig\":${has_caddy}}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  suspend) action_suspend "$@" ;;
+  resume)  action_resume "$@" ;;
+  delete)  action_delete "$@" ;;
+  status)  action_status "$@" ;;
+  *)      die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

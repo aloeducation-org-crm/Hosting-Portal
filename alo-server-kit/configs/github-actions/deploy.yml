@@ -1,0 +1,30 @@
+name: deploy-to-alo-server
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+concurrency:
+  group: deploy-alo-server
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install SSH key
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_rsa
+          echo "${{ secrets.ALA_SERVER_SSH_KEY }}" > ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.ALA_SERVER_PORT }} ${{ secrets.ALA_SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Trigger deploy script on server
+        run: |
+          ssh -p ${{ secrets.ALA_SERVER_PORT }} \
+              -o StrictHostKeyChecking=accept-new \
+              -o ConnectTimeout=10 \
+              alamin@${{ secrets.ALA_SERVER_HOST }} \
+              'sudo /usr/local/sbin/alo-deploy.sh'
+      - name: Verify deploy
+        run: |
+          ssh -p ${{ secrets.ALA_SERVER_PORT }} \
+              alamin@${{ secrets.ALA_SERVER_HOST }} \
+              'pm2 list && curl -fsS http://127.0.0.1:3000/healthz || echo "healthcheck skipped"'

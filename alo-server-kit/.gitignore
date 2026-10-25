@@ -1,0 +1,16 @@
+config.env
+*.key
+*.pem
+.env
+.env.local
+secrets/
+*.log
+logs/
+run-state/
+backup/*.gz
+backup/*.tar
+demo-app/node_modules/
+demo-app/.next/
+demo-app/dist/
+.DS_Store
+Thumbs.db

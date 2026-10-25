@@ -1,0 +1,13 @@
+{
+  "models": [
+    {"title": "ALO LiteLLM (qwen2.5)", "provider": "openai", "model": "qwen2.5:7b",
+     "apiBase": "http://127.0.0.1:4000/v1", "apiKey": "REPLACE_VIA_rotate-litellm-key.sh"},
+    {"title": "ALO LiteLLM (llama3.1)", "provider": "openai", "model": "llama3.1:8b",
+     "apiBase": "http://127.0.0.1:4000/v1", "apiKey": "REPLACE_VIA_rotate-litellm-key.sh"},
+    {"title": "ALO LiteLLM (gemini)", "provider": "openai", "model": "gemini-1.5-flash",
+     "apiBase": "http://127.0.0.1:4000/v1", "apiKey": "REPLACE_VIA_rotate-litellm-key.sh"}
+  ],
+  "tabAutocompleteModel": {"title": "ALO Codellama", "provider": "openai", "model": "codellama:7b",
+    "apiBase": "http://127.0.0.1:4000/v1", "apiKey": "REPLACE_VIA_rotate-litellm-key.sh"},
+  "allowAnonymousTelemetry": false
+}

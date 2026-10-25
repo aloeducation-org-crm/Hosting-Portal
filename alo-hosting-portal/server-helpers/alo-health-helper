@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# ALO Labs - Health Check Helper
+# Checks website and system health
+# Usage: alo-health-helper <command> [args...]
+
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    echo '{"success":false,"error":"Invalid domain name"}'
+    exit 1
+  fi
+}
+
+check_single_site() {
+  local DOMAIN="$1"
+  local SITE_DIR="$SITE_BASE/$DOMAIN"
+
+  local SYSTEMD_STATE="unknown"
+  local PORT_LISTENING=false
+  local HTTP_STATUS=0
+  local DISK_USAGE_MB=0
+  local PROCESS_MEMORY_MB=0
+  local OVERALL="UNKNOWN"
+
+  # Check systemd
+  local UNIT_NAME="alo-site-$DOMAIN"
+  if systemctl list-unit-files "$UNIT_NAME.service" &>/dev/null; then
+    SYSTEMD_STATE=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "unknown")
+  else
+    # For static/PHP sites, check if site dir exists and Caddy serves it
+    if [[ -d "$SITE_DIR" ]]; then
+      SYSTEMD_STATE="active"
+    fi
+  fi
+
+  # Check port
+  local PORT=""
+  if [[ -f "$SITE_DIR/.alo-port" ]]; then
+    PORT=$(cat "$SITE_DIR/.alo-port")
+  fi
+
+  if [[ -n "$PORT" ]]; then
+    if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+      PORT_LISTENING=true
+    fi
+
+    # HTTP check
+    local HEALTH_PATH="/"
+    if [[ -f "$SITE_DIR/.alo-health" ]]; then
+      HEALTH_PATH=$(cat "$SITE_DIR/.alo-health")
+    fi
+    HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${PORT}${HEALTH_PATH}" 2>/dev/null || echo 0)
+  else
+    # For static/PHP, check via Caddy on port 80/443
+    HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $DOMAIN" http://localhost:80/ 2>/dev/null || echo 0)
+    if [[ "$HTTP_STATUS" == "000" ]]; then
+      HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -k "https://$DOMAIN/" 2>/dev/null || echo 0)
+    fi
+    PORT_LISTENING=true  # Caddy is assumed running
+  fi
+
+  # Disk usage
+  if [[ -d "$SITE_DIR" ]]; then
+    DISK_KB=$(du -sk "$SITE_DIR" 2>/dev/null | awk '{print $1}')
+    DISK_USAGE_MB=$((DISK_KB / 1024))
+  fi
+
+  # Process memory
+  if [[ -n "$PORT" ]]; then
+    PID=$(ss -tlnp 2>/dev/null | grep ":${PORT} " | grep -oP 'pid=\K[0-9]+' | head -1 || echo "")
+    if [[ -n "$PID" && -f "/proc/$PID/status" ]]; then
+      VMRSS_KB=$(grep VmRSS "/proc/$PID/status" 2>/dev/null | awk '{print $2}')
+      PROCESS_MEMORY_MB=$((VMRSS_KB / 1024))
+    fi
+  fi
+
+  # Determine overall status
+  if [[ "$SYSTEMD_STATE" == "active" ]]; then
+    if [[ $HTTP_STATUS -ge 200 && $HTTP_STATUS -lt 400 ]]; then
+      OVERALL="HEALTHY"
+    elif [[ $HTTP_STATUS -ge 500 ]]; then
+      OVERALL="DEGRADED"
+    else
+      OVERALL="DEGRADED"
+    fi
+  elif [[ "$SYSTEMD_STATE" == "failed" ]]; then
+    OVERALL="DOWN"
+  elif [[ "$SYSTEMD_STATE" == "inactive" ]]; then
+    OVERALL="SUSPENDED"
+  else
+    OVERALL="UNKNOWN"
+  fi
+
+  echo "{\"domain\":\"$DOMAIN\",\"systemd\":\"$SYSTEMD_STATE\",\"portListening\":$PORT_LISTENING,\"httpStatus\":$HTTP_STATUS,\"diskUsageMb\":$DISK_USAGE_MB,\"processMemoryMb\":$PROCESS_MEMORY_MB,\"overall\":\"$OVERALL\",\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+}
+
+COMMAND="${1:?Usage: alo-health-helper <command> [args...]}
+shift
+
+case "$COMMAND" in
+  check)
+    DOMAIN="${1:?Usage: check <domain>}"
+    validate_domain "$DOMAIN"
+    check_single_site "$DOMAIN"
+    ;;
+
+  check-all)
+    SITES_JSON="[]"
+    ITEMS=""
+    for site_dir in "$SITE_BASE"/*/; do
+      [[ -d "$site_dir" ]] || continue
+      DOMAIN=$(basename "$site_dir")
+      [[ "$DOMAIN" == "*" ]] && continue
+
+      RESULT=$(check_single_site "$DOMAIN")
+      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
+      ITEMS="${ITEMS}${RESULT}"
+    done
+    SITES_JSON="[$ITEMS]"
+    echo "{\"success\":true,\"sites\":$SITES_JSON,\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  system-info)
+    CPU_CORES=$(nproc 2>/dev/null || echo 1)
+    RAM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+    RAM_USED_KB=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}')
+    RAM_USED_KB=$((RAM_TOTAL_KB - RAM_USED_KB))
+    RAM_TOTAL_MB=$((RAM_TOTAL_KB / 1024))
+    RAM_USED_MB=$((RAM_USED_KB / 1024))
+
+    DISK_INFO=$(df / | tail -1)
+    DISK_TOTAL_KB=$(echo "$DISK_INFO" | awk '{print $2}')
+    DISK_USED_KB=$(echo "$DISK_INFO" | awk '{print $3}')
+    DISK_TOTAL_GB=$((DISK_TOTAL_KB / 1024 / 1024))
+    DISK_USED_GB=$((DISK_USED_KB / 1024 / 1024))
+
+    UPTIME_S=$(cat /proc/uptime 2>/dev/null | awk '{print $1}')
+    UPTIME_S=${UPTIME_S%.*}
+    UPTIME_HOURS=$((UPTIME_S / 3600))
+
+    LOAD_AVG=$(cat /proc/loadavg 2>/dev/null | awk '{print $1, $2, $3}')
+
+    echo "{\"success\":true,\"cpuCores\":$CPU_CORES,\"ramTotalMb\":$RAM_TOTAL_MB,\"ramUsedMb\":$RAM_USED_MB,\"ramUsagePercent\":$((RAM_USED_KB * 100 / RAM_TOTAL_KB)),\"diskTotalGb\":$DISK_TOTAL_GB,\"diskUsedGb\":$DISK_USED_GB,\"diskUsagePercent\":$((DISK_USED_KB * 100 / DISK_TOTAL_KB)),\"uptimeHours\":$UPTIME_HOURS,\"loadAverage\":\"$LOAD_AVG\",\"hostname\":\"$(hostname)\",\"os\":\"$(lsb_release -ds 2>/dev/null || echo 'Unknown')\",\"kernel\":\"$(uname -r)\",\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  *)
+    echo "Available commands: check, check-all, system-info" >&2
+    exit 1
+    ;;
+esac

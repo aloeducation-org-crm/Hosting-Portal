@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Domain Helper
+# Manages DNS verification, Caddy site configs, and SSL checks.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
+SITE_BASE="/srv/alo-sites"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-domain-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-domain-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+# Validate domain: alphanumeric, hyphens, dots only
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+# Get server's primary public IP
+get_server_ip() {
+  # Try primary IP first
+  local ip
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  if [[ -z "$ip" ]]; then
+    ip=$(ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+  fi
+  printf '%s' "${ip:-unknown}"
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-domain-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: add ──────────────────────────────────────────────────────────────
+action_add() {
+  if [[ $# -lt 1 ]]; then
+    die "add" "Usage: add <domain> [type] [port]"
+  fi
+
+  local domain="$1"
+  local site_type="${2:-static}"
+  local port="${3:-}"
+
+  validate_domain "$domain"
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
+
+  if [[ -f "$caddy_file" ]]; then
+    die "add" "Caddy config already exists for ${domain}"
+  fi
+
+  # Create Caddy site fragment based on type
+  cat > "$caddy_file" <<CADDYCONF
+# ALO Labs Hosting - ${domain}
+# Auto-managed by alo-domain-helper
+${domain} {
+CADDYCONF
+
+  if [[ "$site_type" == "node" && -n "$port" ]]; then
+    cat >> "$caddy_file" <<CADDYCONF
+    reverse_proxy localhost:${port}
+CADDYCONF
+  else
+    cat >> "$caddy_file" <<CADDYCONF
+    root * ${site_dir}/public
+    file_server
+    encode gzip
+CADDYCONF
+  fi
+
+  cat >> "$caddy_file" <<CADDYCONF
+
+    log {
+        output file /var/log/caddy/alo-sites/${domain}-access.log
+    }
+}
+CADDYCONF
+
+  log_info "Caddy fragment created at ${caddy_file}"
+
+  # Validate Caddy config
+  log_info "Validating Caddy configuration..."
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || {
+    rm -f "$caddy_file"
+    die "add" "Caddy config validation failed – fragment removed"
+  }
+
+  # Reload Caddy
+  log_info "Reloading Caddy..."
+  systemctl reload caddy || die "add" "Failed to reload Caddy"
+
+  json_out "{\"success\":true,\"step\":\"add\",\"domain\":\"${domain}\",\"type\":\"${site_type}\",\"caddyConfig\":\"${caddy_file}\"}"
+}
+
+# ── action: verify ──────────────────────────────────────────────────────────
+action_verify() {
+  if [[ $# -lt 1 ]]; then
+    die "verify" "Usage: verify <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local server_ip
+  server_ip=$(get_server_ip)
+
+  local dns_ip
+  dns_ip=$(dig +short "$domain" A 2>/dev/null | head -1)
+
+  local matches="false"
+  if [[ "$dns_ip" == "$server_ip" ]]; then
+    matches="true"
+  fi
+
+  json_out "{\"success\":true,\"domain\":\"${domain}\",\"dnsIp\":\"${dns_ip:-not found}\",\"serverIp\":\"${server_ip}\",\"matches\":${matches}}"
+}
+
+# ── action: remove ──────────────────────────────────────────────────────────
+action_remove() {
+  if [[ $# -lt 1 ]]; then
+    die "remove" "Usage: remove <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
+
+  if [[ ! -f "$caddy_file" ]]; then
+    die "remove" "Caddy config not found for ${domain}"
+  fi
+
+  rm -f "$caddy_file"
+  log_info "Removed Caddy fragment: ${caddy_file}"
+
+  # Validate and reload
+  log_info "Validating Caddy configuration..."
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || \
+    die "remove" "Caddy config validation failed after removal"
+
+  systemctl reload caddy || die "remove" "Failed to reload Caddy"
+
+  json_out "{\"success\":true,\"step\":\"remove\",\"domain\":\"${domain}\"}"
+}
+
+# ── action: dns-check ───────────────────────────────────────────────────────
+action_dns_check() {
+  if [[ $# -lt 1 ]]; then
+    die "dns-check" "Usage: dns-check <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local a_records
+  local aaaa_records
+
+  a_records=$(dig +short "$domain" A 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+  aaaa_records=$(dig +short "$domain" AAAA 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+
+  json_out "{\"success\":true,\"domain\":\"${domain}\",\"aRecords\":\"${a_records:-none}\",\"aaaaRecords\":\"${aaaa_records:-none}\"}"
+}
+
+# ── action: check-ssl ────────────────────────────────────────────────────────
+action_check_ssl() {
+  if [[ $# -lt 1 ]]; then
+    die "check-ssl" "Usage: check-ssl <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  # Use openssl to get certificate expiry
+  local expiry_date
+  local issuer
+  local days_remaining
+
+  expiry_date=$(echo | openssl s_client -servername "$domain" -connect "${domain}:443" 2>/dev/null | \
+    openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+
+  issuer=$(echo | openssl s_client -servername "$domain" -connect "${domain}:443" 2>/dev/null | \
+    openssl x509 -noout -issuer 2>/dev/null | sed 's/issuer=//')
+
+  if [[ -z "$expiry_date" ]]; then
+    json_out "{\"success\":true,\"domain\":\"${domain}\",\"sslValid\":false,\"expiry\":\"none\",\"issuer\":\"none\",\"daysRemaining\":0}"
+    return
+  fi
+
+  # Calculate days remaining
+  local expiry_epoch
+  local now_epoch
+  expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null || echo "0")
+  now_epoch=$(date +%s)
+  days_remaining=$(( (expiry_epoch - now_epoch) / 86400 ))
+
+  local ssl_valid="true"
+  if [[ "$days_remaining" -lt 0 ]]; then
+    ssl_valid="false"
+  fi
+
+  json_out "{\"success\":true,\"domain\":\"${domain}\",\"sslValid\":${ssl_valid},\"expiry\":\"${expiry_date}\",\"issuer\":\"${issuer:-unknown}\",\"daysRemaining\":${days_remaining}}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  add)        action_add "$@" ;;
+  verify)     action_verify "$@" ;;
+  remove)     action_remove "$@" ;;
+  dns-check)  action_dns_check "$@" ;;
+  check-ssl)  action_check_ssl "$@" ;;
+  *)          die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

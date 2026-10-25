@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Firewall Helper
+# Manages UFW firewall rules on the host system.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-firewall-helper] ERROR: %s\n' ""$*"" >&2; }
+log_info() { printf '[alo-firewall-helper] INFO: %s\n' ""$*"" >&2; }
+json_out() { printf '%s\n' ""$*""; }
+
+die() {
+  local step=""$1""
+  local msg=""$2""
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-firewall-helper <action> [args...]"
+fi
+
+ACTION=""$1""
+shift
+
+validate_port() {
+  if [[ ! "$1" =~ ^[0-9]+$ ]] || [[ "$1" -lt 1 ]] || [[ "$1" -gt 65535 ]]; then
+    die "arg-validation" "Invalid port: $1"
+  fi
+}
+
+validate_protocol() {
+  if [[ "$1" != "tcp" && "$1" != "udp" && "$1" != "icmp" && "$1" != "any" ]]; then
+    die "arg-validation" "Invalid protocol: $1 (must be tcp/udp/icmp/any)"
+  fi
+}
+
+validate_ip() {
+  # Simple IPv4 validation
+  if [[ ! "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    die "arg-validation" "Invalid IP address: $1"
+  fi
+  # Validate each octet
+  local IFS='.'
+  read -ra octets <<< "$1"
+  for octet in ""${octets[@]}""; do
+    if [[ "$octet" -gt 255 ]]; then
+      die "arg-validation" "Invalid IP address: $1"
+    fi
+  done
+}
+
+validate_rule_name() {
+  # Alphanumeric, hyphens, underscores, spaces only; max 64 chars
+  if [[ ! "$1" =~ ^[a-zA-Z0-9_ -]{1,64}$ ]]; then
+    die "arg-validation" "Invalid rule name: $1"
+  fi
+}
+
+# ── action: status ───────────────────────────────────────────────────────────
+action_status() {
+  local ufw_status
+  ufw_status=$(ufw status 2>/dev/null || echo "inactive")
+
+  # Parse UFW status into JSON
+  local status="inactive"
+  if echo "$ufw_status" | grep -qi "Status: active"; then
+    status="active"
+  fi
+
+  # Get numbered rules
+  local rules_json="[]"
+  if [[ "$status" == "active" ]]; then
+    rules_json=$(ufw status numbered 2>/dev/null | awk '
+      /^\[/{next}
+      /^Status:/{next}
+      /^--/{next}
+      NF > 0 {
+        gsub(/"/, "\\\"", $0);
+        printf "%s\"%s\"", (NR>1 ? "," : ""), $0;
+      }
+      END { printf "" }
+    ' | sed 's/^/["/' | sed 's/$/"]/')
+  fi
+
+  json_out "{\"success\":true,\"step\":\"status\",\"status\":\"${status}\",\"rules\":${rules_json}}"
+}
+
+# ── action: allow ────────────────────────────────────────────────────────────
+action_allow() {
+  if [[ $# -lt 1 ]]; then
+    die "allow" "Usage: allow <port> [protocol] [from-ip]"
+  fi
+
+  local port=""$1""
+  local protocol=""${2:-tcp}""
+  local from_ip=""${3:-}"
+
+  validate_port "$port"
+  validate_protocol "$protocol"
+
+  local cmd="ufw allow ${port}/${protocol}"
+  if [[ -n "$from_ip" ]]; then
+    validate_ip "$from_ip"
+    cmd="ufw allow from ${from_ip} to any port ${port} proto ${protocol}"
+  fi
+
+  log_info "Executing: ${cmd}"
+  local output
+  output=$($cmd 2>&1) || die "allow" "Failed to add allow rule: ${output}"
+
+  # Reload UFW
+  ufw reload &>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"allow\",\"port\":${port},\"protocol\":\"${protocol}\",\"from\":\"${from_ip:-any}\",\"message\":\"Rule added\"}"
+}
+
+# ── action: deny ─────────────────────────────────────────────────────────────
+action_deny() {
+  if [[ $# -lt 1 ]]; then
+    die "deny" "Usage: deny <port> [protocol] [from-ip]"
+  fi
+
+  local port=""$1""
+  local protocol=""${2:-tcp}""
+  local from_ip=""${3:-}"
+
+  validate_port "$port"
+  validate_protocol "$protocol"
+
+  local cmd="ufw deny ${port}/${protocol}"
+  if [[ -n "$from_ip" ]]; then
+    validate_ip "$from_ip"
+    cmd="ufw deny from ${from_ip} to any port ${port} proto ${protocol}"
+  fi
+
+  log_info "Executing: ${cmd}"
+  local output
+  output=$($cmd 2>&1) || die "deny" "Failed to add deny rule: ${output}"
+
+  ufw reload &>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"deny\",\"port\":${port},\"protocol\":\"${protocol}\",\"from\":\"${from_ip:-any}\",\"message\":\"Rule added\"}"
+}
+
+# ── action: delete ───────────────────────────────────────────────────────────
+action_delete() {
+  if [[ $# -lt 1 ]]; then
+    die "delete" "Usage: delete <rule-number>"
+  fi
+
+  local rule_num=""$1""
+  if ! [[ "$rule_num" =~ ^[0-9]+$ ]]; then
+    die "delete" "Rule number must be numeric"
+  fi
+
+  # Use 'yes' to auto-confirm deletion
+  local output
+  output=$(yes | ufw delete "$rule_num" 2>&1) || die "delete" "Failed to delete rule ${rule_num}: ${output}"
+
+  ufw reload &>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"delete\",\"ruleNumber\":${rule_num},\"message\":\"Rule deleted\"}"
+}
+
+# ── action: enable ───────────────────────────────────────────────────────────
+action_enable() {
+  # Ensure SSH is allowed before enabling to prevent lockout
+  ufw allow 22/tcp 2>/dev/null || true
+  ufw allow 3101/tcp 2>/dev/null || true  # Panel port
+  ufw allow 80/tcp 2>/dev/null || true   # HTTP
+  ufw allow 443/tcp 2>/dev/null || true  # HTTPS
+
+  local output
+  output=$(echo "y" | ufw enable 2>&1) || die "enable" "Failed to enable UFW: ${output}"
+
+  json_out "{\"success\":true,\"step\":\"enable\",\"status\":\"active\",\"message\":\"Firewall enabled\"}"
+}
+
+# ── action: disable ──────────────────────────────────────────────────────────
+action_disable() {
+  local output
+  output=$(ufw disable 2>&1) || die "disable" "Failed to disable UFW: ${output}"
+
+  json_out "{\"success\":true,\"step\":\"disable\",\"status\":\"inactive\",\"message\":\"Firewall disabled\"}"
+}
+
+# ── action: reset ────────────────────────────────────────────────────────────
+action_reset() {
+  local output
+  output=$(echo "y" | ufw reset 2>&1) || die "reset" "Failed to reset UFW: ${output}"
+
+  json_out "{\"success\":true,\"step\":\"reset\",\"message\":\"Firewall reset to defaults\"}"
+}
+
+# ── action: limit ────────────────────────────────────────────────────────────
+action_limit() {
+  if [[ $# -lt 1 ]]; then
+    die "limit" "Usage: limit <port> [protocol]"
+  fi
+
+  local port=""$1""
+  local protocol=""${2:-tcp}""
+
+  validate_port "$port"
+  validate_protocol "$protocol"
+
+  local output
+  output=$(ufw limit "${port}/${protocol}" 2>&1) || die "limit" "Failed to add rate-limit rule: ${output}"
+
+  ufw reload &>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"limit\",\"port\":${port},\"protocol\":\"${protocol}\",\"message\":\"Rate-limit rule added\"}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  status)  action_status "$@" ;;
+  allow)   action_allow "$@" ;;
+  deny)    action_deny "$@" ;;
+  delete)  action_delete "$@" ;;
+  enable)  action_enable "$@" ;;
+  disable) action_disable "$@" ;;
+  reset)   action_reset "$@" ;;
+  limit)   action_limit "$@" ;;
+  *)       die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Health Helper
+# Comprehensive health checks for hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+APP_USER="aloedu"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-health-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-health-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+validate_port() {
+  if [[ ! "$1" =~ ^[0-9]+$ || "$1" -lt 1024 || "$1" -gt 65535 ]]; then
+    die "arg-validation" "Invalid port number: $1"
+  fi
+}
+
+# Count issues for overall status
+ISSUE_COUNT=0
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-health-helper <domain> [port] [health-path]"
+fi
+
+DOMAIN="$1"
+PORT="${2:-}"
+HEALTH_PATH="${3:-/}"
+
+validate_domain "$DOMAIN"
+if [[ -n "$PORT" ]]; then
+  validate_port "$PORT"
+fi
+
+SERVICE_NAME="alo-site-${DOMAIN}"
+SITE_DIR="${SITE_BASE}/${DOMAIN}"
+
+# ── health checks ────────────────────────────────────────────────────────────
+
+# 1. systemd state
+SYSTEMD_STATE="unknown"
+if systemctl list-unit-files "${SERVICE_NAME}.service" &>/dev/null; then
+  SYSTEMD_STATE=$(systemctl is-active "${SERVICE_NAME}.service" 2>/dev/null || echo "inactive")
+  if [[ "$SYSTEMD_STATE" != "active" ]]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+else
+  SYSTEMD_STATE="not-found"
+  ISSUE_COUNT=$((ISSUE_COUNT + 1))
+fi
+
+# 2. Local port check
+LOCAL_PORT=false
+if [[ -n "$PORT" ]]; then
+  if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+    LOCAL_PORT=true
+  else
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+fi
+
+# 3. Local HTTP check
+LOCAL_HTTP=0
+if [[ -n "$PORT" ]]; then
+  LOCAL_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null || echo "000")
+  if [[ ! "$LOCAL_HTTP" =~ ^[23] ]]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+fi
+
+# 4. Public HTTP check
+PUBLIC_HTTP=0
+PUBLIC_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://${DOMAIN}" 2>/dev/null || echo "000")
+if [[ ! "$PUBLIC_HTTP" =~ ^[23] ]]; then
+  ISSUE_COUNT=$((ISSUE_COUNT + 1))
+fi
+
+# 5. SSL check
+SSL_STATUS="false"
+SSL_EXPIRY=""
+SSL_DAYS=0
+if curl -sk --max-time 10 "https://${DOMAIN}" -o /dev/null 2>&1; then
+  SSL_STATUS="true"
+  # Get certificate expiry
+  local expiry_date
+  expiry_date=$(echo | openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" 2>/dev/null | \
+    openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+  if [[ -n "$expiry_date" ]]; then
+    local expiry_epoch now_epoch
+    expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null || echo "0")
+    now_epoch=$(date +%s)
+    SSL_DAYS=$(( (expiry_epoch - now_epoch) / 86400 ))
+    SSL_EXPIRY="$expiry_date"
+  fi
+  if [[ "$SSL_DAYS" -lt 7 ]]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+else
+  ISSUE_COUNT=$((ISSUE_COUNT + 1))
+fi
+
+# 6. DNS check
+DNS_IP=$(dig +short "$DOMAIN" A 2>/dev/null | head -1 || echo "not found")
+if [[ -z "$DNS_IP" || "$DNS_IP" == "not found" ]]; then
+  ISSUE_COUNT=$((ISSUE_COUNT + 1))
+fi
+
+# 7. Disk usage
+DISK_USAGE="unknown"
+if [[ -d "$SITE_DIR" ]]; then
+  DISK_USAGE=$(df -h "$SITE_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%' || echo "unknown")
+  local disk_pct="${DISK_USAGE}"
+  if [[ "$disk_pct" =~ ^[0-9]+$ ]] && [[ "$disk_pct" -gt 90 ]]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+else
+  DISK_USAGE="site-not-found"
+fi
+
+# 8. Process memory
+PROCESS_MEMORY="0"
+PROCESS_RSS=""
+if [[ "$SYSTEMD_STATE" == "active" ]]; then
+  # Get the main process PID from the service
+  local main_pid
+  main_pid=$(systemctl show "${SERVICE_NAME}.service" --property=MainPID --value 2>/dev/null || echo "0")
+  if [[ -n "$main_pid" && "$main_pid" != "0" ]]; then
+    PROCESS_RSS=$(ps -p "$main_pid" -o rss= 2>/dev/null | tr -d ' ' || echo "0")
+    PROCESS_MEMORY="${PROCESS_RSS:-0}"
+  else
+    # Fallback: grep for node processes related to this domain
+    PROCESS_RSS=$(ps aux 2>/dev/null | grep "[n]ode.*${DOMAIN}" | awk '{print $6}' | head -1 || echo "0")
+    PROCESS_MEMORY="${PROCESS_RSS:-0}"
+  fi
+fi
+
+# Convert RSS from KB to MB for readability
+if [[ "$PROCESS_MEMORY" =~ ^[0-9]+$ ]] && [[ "$PROCESS_MEMORY" -gt 0 ]]; then
+  PROCESS_MEMORY_MB=$(( PROCESS_MEMORY / 1024 ))
+else
+  PROCESS_MEMORY_MB=0
+fi
+
+# ── overall status determination ─────────────────────────────────────────────
+OVERALL="UNKNOWN"
+
+if [[ "$SYSTEMD_STATE" == "active" && "$LOCAL_PORT" == true && "$LOCAL_HTTP" =~ ^[23] ]]; then
+  if [[ "$ISSUE_COUNT" -eq 0 ]]; then
+    OVERALL="HEALTHY"
+  elif [[ "$ISSUE_COUNT" -le 2 ]]; then
+    OVERALL="DEGRADED"
+  else
+    OVERALL="DEGRADED"
+  fi
+elif [[ "$SYSTEMD_STATE" == "inactive" || "$SYSTEMD_STATE" == "failed" ]]; then
+  OVERALL="DOWN"
+elif [[ "$SYSTEMD_STATE" == "not-found" ]]; then
+  OVERALL="UNKNOWN"
+else
+  if [[ "$ISSUE_COUNT" -gt 3 ]]; then
+    OVERALL="DOWN"
+  else
+    OVERALL="DEGRADED"
+  fi
+fi
+
+# ── output ───────────────────────────────────────────────────────────────────
+json_out "{\"success\":true,\"domain\":\"${DOMAIN}\",\"systemd\":\"${SYSTEMD_STATE}\",\"localPort\":${LOCAL_PORT},\"localHttp\":${LOCAL_HTTP},\"publicHttp\":${PUBLIC_HTTP},\"ssl\":${SSL_STATUS},\"sslExpiry\":\"${SSL_EXPIRY}\",\"sslDaysRemaining\":${SSL_DAYS},\"dns\":\"${DNS_IP}\",\"diskUsage\":\"${DISK_USAGE}%\",\"processMemoryKb\":${PROCESS_MEMORY:-0},\"processMemoryMb\":${PROCESS_MEMORY_MB},\"overall\":\"${OVERALL}\",\"issueCount\":${ISSUE_COUNT}}"

@@ -1,0 +1,1332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  DEVOPS
+  SUPPORT
+  VIEWER
+}
+
+enum WebsiteRuntime {
+  STATIC
+  PHP82
+  NODE
+  NEXTJS
+}
+
+enum WebsiteStatus {
+  ACTIVE
+  SUSPENDED
+  DEPLOYING
+  RESTARTING
+  DELETED
+}
+
+enum DeploymentStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  ROLLING_BACK
+  ROLLED_BACK
+}
+
+enum DatabaseEngine {
+  MARIADB
+  POSTGRESQL
+}
+
+enum HealthStatus {
+  HEALTHY
+  DEGRADED
+  DOWN
+  SUSPENDED
+  DEPLOYING
+  RESTORING
+  UNKNOWN
+}
+
+enum OperationJobStatus {
+  PENDING
+  VALIDATING
+  RUNNING
+  VERIFYING
+  SUCCESS
+  FAILED
+  ROLLING_BACK
+  ROLLED_BACK
+}
+
+enum BackupStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum BackupType {
+  MANUAL
+  SCHEDULED
+  PRE_DEPLOY
+}
+
+enum RestoreJobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum SslStatus {
+  NONE
+  PENDING
+  ISSUED
+  FAILED
+  EXPIRED
+  RENEWING
+}
+
+// ─── Role & Permission ────────────────────────────────────────────────────────
+
+model Role {
+  id          String          @id @default(uuid())
+  name        UserRole        @unique
+  description String?
+  createdAt   DateTime        @default(now())
+
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  category    String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@index([category])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+// ─── User ────────────────────────────────────────────────────────────────────
+
+model User {
+  id                  String       @id @default(uuid())
+  email               String       @unique
+  name                String?
+  passwordHash        String?
+  roleId              String
+  isActive            Boolean      @default(true)
+  failedLoginAttempts Int          @default(0)
+  isLocked            Boolean      @default(false)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  emailVerified       DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  role              Role             @relation(fields: [roleId], references: [id])
+  sessions          Session[]
+  auditLogs         AuditLog[]
+  websites          Website[]        @relation("WebsiteOwner")
+  notifications      Notification[]
+  apiKeys           ApiKey[]
+  backups           Backup[]         @relation("BackupCreator")
+  restoreJobs       RestoreJob[]
+  fileOperations    FileOperation[]
+  deployments       Deployment[]     @relation("DeploymentActor")
+  operationJobs     OperationJob[]
+  subscriptions      Subscription[]
+  aiAgentRuns       AiAgentRun[]
+  sshKeys           SshKey[]
+  invoices          Invoice[]
+  crmContacts       CrmContact[]
+  crmDeals          CrmDeal[]
+  crmPipelines      CrmPipeline[]
+  crmActivities     CrmActivity[]
+  ciPipelines       CiPipeline[]
+  firewallRules     FirewallRule[]
+  storageBuckets    StorageBucket[]
+  orders            Order[]
+  emailCampaigns    EmailCampaign[]
+  alertRules        AlertRule[]
+  usageRecords      UsageRecord[]
+  applications      Application[]
+  mfa               UserMfa?
+
+  @@index([email])
+  @@index([roleId])
+  @@index([isActive])
+  @@map("users")
+}
+
+// ─── Session ──────────────────────────────────────────────────────────────────
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ipAddress String?
+  userAgent String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ─── AuditLog ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorUserId  String?
+  actorEmail   String?
+  actorRole    String?
+  action       String
+  resourceType String?
+  resourceId   String?
+  domain       String?
+  result       String?
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  timestamp    DateTime @default(now())
+  metadata     Json?
+  errorCode    String?
+  durationMs   Int?
+
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([timestamp])
+  @@index([requestId])
+  @@map("audit_logs")
+}
+
+// ─── Website ──────────────────────────────────────────────────────────────────
+
+model Website {
+  id                 String          @id @default(uuid())
+  domain             String
+  runtime            WebsiteRuntime
+  documentRoot       String?
+  status             WebsiteStatus   @default(ACTIVE)
+  applicationPort    Int?
+  startupCommand     String?
+  healthPath         String?
+  healthStatus       String?
+  currentReleasePath String?
+  ownerId            String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  deletedAt          DateTime?
+
+  owner              User?              @relation("WebsiteOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  environments       WebsiteEnvironment[]
+  domains            Domain[]
+  databaseInstances  DatabaseInstance[]
+  deployments        Deployment[]
+  releases           Release[]
+  backups            Backup[]
+  fileOperations     FileOperation[]
+  serviceInstances   ServiceInstance[]
+  healthCheck        HealthCheck?
+  operationJobs      OperationJob[]
+  restoreJobs        RestoreJob[]
+  systemdServices    SystemdService[]
+  serverPorts        ServerPort[]
+  dockerContainers  DockerContainer[]
+  cronJobs          CronJob[]
+  resourceMetrics   ResourceMetric[]
+  usageRecords     UsageRecord[]
+  ciPipelines      CiPipeline[]
+  applications     Application[]
+
+  @@unique([domain])
+  @@index([ownerId])
+  @@index([status])
+  @@index([runtime])
+  @@map("websites")
+}
+
+// ─── WebsiteEnvironment ──────────────────────────────────────────────────────
+
+model WebsiteEnvironment {
+  id        String   @id @default(uuid())
+  websiteId String
+  key       String
+  value     String
+  isSecret  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, key])
+  @@index([websiteId])
+  @@map("website_environments")
+}
+
+// ─── Domain ───────────────────────────────────────────────────────────────────
+
+model Domain {
+  id               String    @id @default(uuid())
+  domain           String
+  websiteId        String
+  primary          Boolean   @default(false)
+  sslEnabled       Boolean   @default(false)
+  sslStatus        SslStatus @default(NONE)
+  certificateExpiry DateTime?
+  nameservers      String   // JSON-encoded nameserver array
+  dnsVerified      Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  website     Website        @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  certificate SslCertificate?
+  dnsRecords  DnsRecord[]
+
+  @@unique([domain])
+  @@index([websiteId])
+  @@index([sslStatus])
+  @@map("domains")
+}
+
+// ─── SslCertificate ───────────────────────────────────────────────────────────
+
+model SslCertificate {
+  id        String    @id @default(uuid())
+  domainId  String    @unique
+  issuer    String?
+  notBefore DateTime?
+  notAfter  DateTime?
+  autoRenew Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([notAfter])
+  @@map("ssl_certificates")
+}
+
+// ─── DatabaseInstance ─────────────────────────────────────────────────────────
+
+model DatabaseInstance {
+  id        String         @id @default(uuid())
+  websiteId String
+  engine    DatabaseEngine
+  name      String
+  host      String
+  port      Int
+  username  String
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+
+  website    Website              @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  credentials DatabaseCredential[]
+
+  @@unique([websiteId, name])
+  @@index([websiteId])
+  @@index([engine])
+  @@map("database_instances")
+}
+
+// ─── DatabaseCredential ───────────────────────────────────────────────────────
+
+model DatabaseCredential {
+  id           String   @id @default(uuid())
+  databaseId   String
+  username     String
+  passwordHash String
+  privileges   String   // JSON-encoded privilege array
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  database DatabaseInstance @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+
+  @@index([databaseId])
+  @@map("database_credentials")
+}
+
+// ─── Deployment ───────────────────────────────────────────────────────────────
+
+model Deployment {
+  id                String          @id @default(uuid())
+  websiteId         String
+  releaseId         String?   @unique
+  source            String?
+  commitHash        String?
+  status            DeploymentStatus @default(PENDING)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  buildOutput       String?
+  healthResult      Json?
+  previousReleaseId String?   @unique
+  actorId           String?
+  createdAt         DateTime        @default(now())
+
+  website     Website         @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  release     Release?        @relation("CurrentRelease", fields: [releaseId], references: [id])
+  logs        DeploymentLog[]
+  actor       User?           @relation("DeploymentActor", fields: [actorId], references: [id], onDelete: SetNull)
+  prevRelease Release?        @relation("PreviousRelease", fields: [previousReleaseId], references: [id])
+
+  @@index([websiteId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("deployments")
+}
+
+// ─── DeploymentLog ────────────────────────────────────────────────────────────
+
+model DeploymentLog {
+  id           String   @id @default(uuid())
+  deploymentId String
+  level        String
+  message      String
+  timestamp    DateTime @default(now())
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@index([timestamp])
+  @@map("deployment_logs")
+}
+
+// ─── Release ──────────────────────────────────────────────────────────────────
+
+model Release {
+  id         String   @id @default(uuid())
+  websiteId  String
+  version    Int
+  path       String
+  commitHash String?
+  createdAt  DateTime @default(now())
+
+  website    Website     @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  current   Deployment? @relation("CurrentRelease")
+  previous  Deployment? @relation("PreviousRelease")
+
+  @@unique([websiteId, version])
+  @@index([websiteId])
+  @@map("releases")
+}
+
+// ─── Backup ───────────────────────────────────────────────────────────────────
+
+model Backup {
+  id         String       @id @default(uuid())
+  websiteId  String
+  filename   String
+  filepath   String
+  fileSize   BigInt?
+  checksum   String?
+  status     BackupStatus @default(PENDING)
+  backupType BackupType   @default(MANUAL)
+  metadata   Json?
+  creatorId  String?
+  createdAt  DateTime     @default(now())
+
+  website      Website        @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  creator      User?          @relation("BackupCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  manifest     BackupManifest?
+  restoreJobs RestoreJob[]
+
+  @@index([websiteId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("backups")
+}
+
+// ─── BackupManifest ───────────────────────────────────────────────────────────
+
+model BackupManifest {
+  id              String   @id @default(uuid())
+  backupId        String   @unique
+  files           Json?
+  databaseDump    String?
+  caddyConfig     String?
+  systemdUnit     String?
+  environmentVars Json?
+  runtime         String?
+  applicationPort Int?
+  domain          String?
+  createdAt       DateTime @default(now())
+
+  backup Backup @relation(fields: [backupId], references: [id], onDelete: Cascade)
+
+  @@map("backup_manifests")
+}
+
+// ─── RestoreJob ───────────────────────────────────────────────────────────────
+
+model RestoreJob {
+  id         String           @id @default(uuid())
+  backupId   String
+  websiteId  String
+  status     RestoreJobStatus @default(PENDING)
+  startedAt  DateTime?
+  finishedAt DateTime?
+  result     Json?
+  error      String?
+  actorId    String?
+  createdAt  DateTime         @default(now())
+
+  backup  Backup  @relation(fields: [backupId], references: [id], onDelete: Cascade)
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([backupId])
+  @@index([websiteId])
+  @@index([status])
+  @@map("restore_jobs")
+}
+
+// ─── FileOperation ────────────────────────────────────────────────────────────
+
+model FileOperation {
+  id         String   @id @default(uuid())
+  websiteId  String
+  action     String
+  path       String
+  targetPath String?
+  fileSize   BigInt?
+  actorId    String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("file_operations")
+}
+
+// ─── ServiceInstance ──────────────────────────────────────────────────────────
+
+model ServiceInstance {
+  id          String   @id @default(uuid())
+  websiteId   String
+  name        String
+  type        String?
+  systemdUnit String?
+  status      String?
+  createdAt   DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, name])
+  @@index([websiteId])
+  @@map("service_instances")
+}
+
+// ─── HealthCheck ──────────────────────────────────────────────────────────────
+
+model HealthCheck {
+  id                   String       @id @default(uuid())
+  websiteId            String       @unique
+  systemdState         String?
+  localPort            Boolean?
+  localHttp            Boolean?
+  publicHttp           Boolean?
+  ssl                  Boolean?
+  dns                  Boolean?
+  diskUsage            Int?
+  processMemory        Int?
+  databaseConnectivity Boolean?
+  lastBackupAt         DateTime?
+  overallStatus        HealthStatus @default(UNKNOWN)
+  checkedAt            DateTime     @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([overallStatus])
+  @@index([checkedAt])
+  @@map("health_checks")
+}
+
+// ─── OperationJob ─────────────────────────────────────────────────────────────
+
+model OperationJob {
+  id         String             @id @default(uuid())
+  websiteId  String
+  type       String
+  status     OperationJobStatus @default(PENDING)
+  requestId  String?
+  exitCode   Int?
+  stdout     String?
+  stderr     String?
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  durationMs Int?
+  actorId    String?
+  createdAt  DateTime           @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId])
+  @@index([status])
+  @@index([type])
+  @@index([requestId])
+  @@index([createdAt])
+  @@map("operation_jobs")
+}
+
+// ─── Notification ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      String?
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ─── ApiKey ───────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  keyHash    String    @unique
+  prefix     String
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([prefix])
+  @@map("api_keys")
+}
+
+// ─── Server ───────────────────────────────────────────────────────────────────
+
+model Server {
+  id          String   @id @default(uuid())
+  hostname    String   @unique
+  ip          String?
+  tailscaleIp String?
+  os          String?
+  cpuCores    Int?
+  ramGb       Int?
+  diskGb      Int?
+  uptime      Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ports ServerPort[]
+
+  @@map("servers")
+}
+
+// ─── ServerPort ───────────────────────────────────────────────────────────────
+
+model ServerPort {
+  id        String   @id @default(uuid())
+  serverId  String
+  port      Int
+  websiteId String?
+  service   String?
+  createdAt DateTime @default(now())
+
+  server  Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+
+  @@unique([serverId, port])
+  @@index([serverId])
+  @@index([websiteId])
+  @@map("server_ports")
+}
+
+// ─── CaddySite ────────────────────────────────────────────────────────────────
+
+model CaddySite {
+  id            String    @id @default(uuid())
+  domain        String    @unique
+  configPath    String?
+  isActive      Boolean   @default(true)
+  lastValidated DateTime?
+  lastReloaded  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([isActive])
+  @@map("caddy_sites")
+}
+
+// ─── SystemdService ───────────────────────────────────────────────────────────
+
+model SystemdService {
+  id        String   @id @default(uuid())
+  websiteId String
+  unitName  String
+  status    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, unitName])
+  @@index([websiteId])
+  @@index([unitName])
+  @@map("systemd_services")
+}
+
+// ─── Subscription & Billing ───────────────────────────────────────────────────
+
+model Plan {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  description String?
+  priceCents  Int           @default(0)
+  interval    String        @default("monthly") // monthly, yearly
+  features    String   // JSON-encoded feature list
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id          String    @id @default(uuid())
+  userId      String
+  planId      String
+  status      String    @default("active") // active, cancelled, past_due, trialing
+  currentPeriodStart DateTime @default(now())
+  currentPeriodEnd   DateTime
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id          String   @id @default(uuid())
+  userId      String
+  subscriptionId String?
+  amountCents Int
+  currency    String   @default("USD")
+  status      String   @default("pending") // pending, paid, failed, refunded
+  dueDate     DateTime
+  paidAt      DateTime?
+  invoiceUrl  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("invoices")
+}
+
+// ─── AI Agents ────────────────────────────────────────────────────────────────
+
+model AiAgent {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  description String?
+  category    String?
+  icon        String?
+  config      Json?    // model, temperature, system prompt, etc.
+  isActive    Boolean  @default(true)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  runs  AiAgentRun[]
+
+  @@index([category])
+  @@index([isActive])
+  @@map("ai_agents")
+}
+
+model AiAgentRun {
+  id          String   @id @default(uuid())
+  agentId     String
+  userId      String?
+  input       String?
+  output      String?
+  model       String?
+  tokensUsed  Int?
+  durationMs  Int?
+  status      String   @default("completed") // completed, failed, running
+  createdAt   DateTime @default(now())
+
+  agent AiAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user  User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([agentId])
+  @@index([userId])
+  @@index([status])
+  @@map("ai_agent_runs")
+}
+
+// ─── Docker & Containers ─────────────────────────────────────────────────────
+
+model DockerContainer {
+  id          String   @id @default(uuid())
+  websiteId   String?
+  name        String
+  image       String
+  status      String   @default("stopped")
+  portMapping String?  // e.g. "3000:80"
+  envVars     Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+
+  @@unique([name])
+  @@index([websiteId])
+  @@index([status])
+  @@map("docker_containers")
+}
+
+// ─── Cron Jobs ────────────────────────────────────────────────────────────────
+
+model CronJob {
+  id          String   @id @default(uuid())
+  websiteId   String
+  name        String
+  schedule    String   // cron expression
+  command     String
+  isActive    Boolean  @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, name])
+  @@index([websiteId])
+  @@index([isActive])
+  @@map("cron_jobs")
+}
+
+// ─── SSH Keys ─────────────────────────────────────────────────────────────────
+
+model SshKey {
+  id          String   @id @default(uuid())
+  userId      String
+  name        String
+  publicKey   String
+  fingerprint String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ssh_keys")
+}
+
+// ─── Resource Metrics (time-series) ───────────────────────────────────────────
+
+model ResourceMetric {
+  id          String   @id @default(uuid())
+  websiteId   String?
+  serverId    String?
+  cpuPercent  Float?
+  memoryMb    Float?
+  diskPercent Float?
+  bandwidthKb Float?
+  createdAt   DateTime @default(now())
+
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId, createdAt])
+  @@index([serverId, createdAt])
+  @@index([createdAt])
+  @@map("resource_metrics")
+}
+
+// ─── Email Accounts ───────────────────────────────────────────────────────────
+
+model EmailAccount {
+  id          String   @id @default(uuid())
+  domain      String
+  address     String
+  password    String?  // encrypted
+  quotaMb     Int      @default(500)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([address])
+  @@index([domain])
+  @@map("email_accounts")
+}
+
+// ─── CRM ──────────────────────────────────────────────────────────────────────
+
+model CrmContact {
+  id          String   @id @default(uuid())
+  firstName   String
+  lastName    String?
+  email       String?
+  phone       String?
+  company     String?
+  position    String?
+  status      String   @default("lead") // lead, prospect, customer, churned
+  source      String?
+  notes       String?
+  tags        String?  // JSON array
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  activities CrmActivity[]
+  deals     CrmDeal[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([email])
+  @@index([company])
+  @@map("crm_contacts")
+}
+
+model CrmDeal {
+  id             String   @id @default(uuid())
+  title          String
+  value          Float    @default(0)
+  stage          String   @default("qualification") // qualification, proposal, negotiation, closed_won, closed_lost
+  probability    Int      @default(0)
+  expectedClose  DateTime?
+  contactId      String?
+  pipelineId     String?
+  userId         String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contact   CrmContact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  pipeline CrmPipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  user     User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  activities CrmActivity[]
+
+  @@index([userId])
+  @@index([stage])
+  @@index([pipelineId])
+  @@index([contactId])
+  @@map("crm_deals")
+}
+
+model CrmPipeline {
+  id        String   @id @default(uuid())
+  name      String
+  stages    String   // JSON array of stage names
+  isDefault Boolean  @default(false)
+  userId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deals CrmDeal[]
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("crm_pipelines")
+}
+
+model CrmActivity {
+  id          String   @id @default(uuid())
+  type        String   // email, call, meeting, note, task
+  subject     String
+  description String?
+  contactId   String?
+  dealId      String?
+  userId      String?
+  scheduledAt DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  contact CrmContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal    CrmDeal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  user    User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([contactId])
+  @@index([dealId])
+  @@index([type])
+  @@index([scheduledAt])
+  @@map("crm_activities")
+}
+
+// ─── CI/CD ─────────────────────────────────────────────────────────────────────
+
+model CiPipeline {
+  id          String   @id @default(uuid())
+  name        String
+  websiteId   String?
+  repository  String?
+  branch      String   @default("main")
+  buildCmd    String?
+  deployCmd   String?
+  status      String   @default("active") // active, paused, archived
+  lastBuildAt DateTime?
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  website Website?  @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+  builds  CiBuild[]
+  user    User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId])
+  @@index([status])
+  @@index([userId])
+  @@map("ci_pipelines")
+}
+
+model CiBuild {
+  id             String   @id @default(uuid())
+  pipelineId     String
+  number         Int
+  commitHash     String?
+  commitMessage  String?
+  branch         String?
+  status         String   @default("pending") // pending, running, success, failed, cancelled
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  durationMs     Int?
+  buildOutput    String?
+  deployOutput   String?
+  error          String?
+  triggeredBy    String?
+  createdAt      DateTime @default(now())
+
+  pipeline CiPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@unique([pipelineId, number])
+  @@index([pipelineId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("ci_builds")
+}
+
+// ─── Firewall ──────────────────────────────────────────────────────────────────
+
+model FirewallRule {
+  id        String   @id @default(uuid())
+  name      String
+  action    String   @default("allow") // allow, deny, reject
+  direction String   @default("ingress") // ingress, egress
+  protocol  String   @default("tcp") // tcp, udp, icmp, all
+  port      Int?
+  portRange String?  // e.g. "8000-9000"
+  source    String?  // CIDR or IP
+  dest      String?  // CIDR or IP
+  isActive  Boolean  @default(true)
+  priority  Int      @default(1000)
+  userId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([isActive])
+  @@index([priority])
+  @@index([direction])
+  @@map("firewall_rules")
+}
+
+// ─── Storage ───────────────────────────────────────────────────────────────────
+
+model StorageBucket {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  provider    String   @default("local") // local, s3, gcs
+  region      String?
+  accessKey   String?
+  secretKey   String?  // encrypted
+  endpoint    String?
+  bucketPath  String?
+  sizeBytes   BigInt   @default(0)
+  objectCount Int      @default(0)
+  isActive    Boolean  @default(true)
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("storage_buckets")
+}
+
+// ─── Orders ────────────────────────────────────────────────────────────────────
+
+model Order {
+  id             String   @id @default(uuid())
+  orderNumber    String   @unique
+  userId         String
+  status         String   @default("pending") // pending, processing, completed, cancelled, refunded
+  totalCents     Int
+  currency       String   @default("USD")
+  paymentMethod  String?
+  paymentRef     String?
+  notes          String?
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items OrderItem[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  description String
+  type        String   // domain, plan_upgrade, addon, service
+  quantity    Int      @default(1)
+  unitPriceCents Int
+  totalCents  Int
+  metadata    Json?    // extra details about the item
+  createdAt   DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// ─── Email Campaigns ───────────────────────────────────────────────────────────
+
+model EmailCampaign {
+  id           String   @id @default(uuid())
+  name         String
+  subject      String
+  fromAddress  String?
+  fromName     String?
+  status       String   @default("draft") // draft, scheduled, sending, sent, failed
+  content      String?  // HTML body
+  textContent  String?  // plain text body
+  recipientCount Int    @default(0)
+  sentCount    Int      @default(0)
+  openCount    Int      @default(0)
+  clickCount   Int      @default(0)
+  bounceCount  Int      @default(0)
+  scheduledAt  DateTime?
+  sentAt       DateTime?
+  userId       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("email_campaigns")
+}
+
+// ─── DNS Records ───────────────────────────────────────────────────────────────
+
+model DnsRecord {
+  id        String   @id @default(uuid())
+  domainId  String
+  type      String   // A, AAAA, CNAME, MX, TXT, NS, SRV, CAA
+  name      String   // subdomain (e.g. "www" or "@" for root)
+  value     String   // IP, hostname, text value
+  ttl       Int      @default(3600)
+  priority  Int?     // for MX, SRV
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+  @@index([type])
+  @@index([name])
+  @@map("dns_records")
+}
+
+// ─── MFA ───────────────────────────────────────────────────────────────────────
+
+model UserMfa {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  method        String   @default("totp") // totp, sms, email
+  secret        String?  // encrypted TOTP secret
+  backupCodes   String?  // JSON array of hashed backup codes
+  isVerified    Boolean  @default(false)
+  isEnabled     Boolean  @default(false)
+  lastUsedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_mfa")
+}
+
+// ─── Monitoring & Alerts ──────────────────────────────────────────────────────
+
+model AlertRule {
+  id          String   @id @default(uuid())
+  name        String
+  metric      String   // cpu, memory, disk, bandwidth, ssl_expiry, downtime
+  condition   String   // gt, lt, gte, lte, eq
+  threshold   Float
+  serverId    String?
+  websiteId   String?
+  cooldownMin Int      @default(5)
+  isActive    Boolean  @default(true)
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  alerts   Alert[]
+
+  @@index([isActive])
+  @@index([metric])
+  @@map("alert_rules")
+}
+
+model Alert {
+  id          String   @id @default(uuid())
+  ruleId      String
+  severity    String   @default("warning") // info, warning, critical
+  message     String
+  value       Float?
+  threshold   Float?
+  isRead      Boolean  @default(false)
+  acknowledgedAt DateTime?
+  resolvedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  rule AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId])
+  @@index([severity])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("alerts")
+}
+
+// ─── Usage & Billing ───────────────────────────────────────────────────────────
+
+model UsageRecord {
+  id          String   @id @default(uuid())
+  userId      String
+  websiteId   String?
+  resource    String   // bandwidth_mb, storage_gb, requests, cpu_hours, memory_gb_hours
+  quantity    Float
+  unitPrice   Float    @default(0)
+  totalCost   Float    @default(0)
+  billed      Boolean  @default(false)
+  invoiceId   String?
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([websiteId])
+  @@index([resource])
+  @@index([periodStart, periodEnd])
+  @@index([billed])
+  @@map("usage_records")
+}
+
+// ─── Application Records ───────────────────────────────────────────────────────
+
+model Application {
+  id          String   @id @default(uuid())
+  name        String
+  websiteId   String?
+  type        String   // web, api, worker, cron, database
+  status      String   @default("active") // active, paused, stopped, error
+  runtime     String?
+  version     String?
+  config      Json?
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  website Website? @relation(fields: [websiteId], references: [id], onDelete: SetNull)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([websiteId])
+  @@index([userId])
+  @@index([status])
+  @@map("applications")
+}

@@ -1,0 +1,246 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — SSL Helper
+# Manages Let's Encrypt certificates via certbot for hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
+CERTBOT_WEBROOT="/var/lib/caddy/.well-known/acme-challenge"
+CERT_BASE="/etc/letsencrypt/live"
+CERT_ARCHIVE="/etc/letsencrypt/archive"
+APP_USER="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-ssl-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-ssl-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-ssl-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: issue ────────────────────────────────────────────────────────────
+action_issue() {
+  if [[ $# -lt 1 ]]; then
+    die "issue" "Usage: issue <domain> [email]"
+  fi
+
+  local domain="$1"
+  local email="${2:-}"
+
+  validate_domain "$domain"
+
+  # Check if certificate already exists
+  if [[ -d "${CERT_BASE}/${domain}" ]]; then
+    die "issue" "Certificate already exists for ${domain}. Use renew or revoke first."
+  fi
+
+  # Ensure webroot directory exists
+  local site_dir="${SITE_BASE}/${domain}"
+  local webroot="${site_dir}/public"
+
+  if [[ ! -d "$webroot" ]]; then
+    mkdir -p "${webroot}/.well-known/acme-challenge"
+    chown -R "${APP_USER}:${APP_USER}" "${webroot}"
+  fi
+
+  # Build certbot command
+  local certbot_args=(
+    certbot certonly
+    --webroot
+    --webroot-path "$webroot"
+    -d "$domain"
+    --non-interactive
+    --agree-tos
+    --register-unsafely-without-email
+  )
+
+  if [[ -n "$email" ]]; then
+    certbot_args+=(--email "$email")
+  fi
+
+  log_info "Requesting certificate for ${domain}..."
+  local output
+  output=$("${certbot_args[@]}" 2>&1) || {
+    # Check if it's a rate limit or validation error
+    if echo "$output" | grep -qi "rate limit"; then
+      die "issue" "Rate limited by Let's Encrypt. Try again later."
+    fi
+    if echo "$output" | grep -qi "invalid domain"; then
+      die "issue" "Domain validation failed. Ensure DNS points to this server."
+    fi
+    die "issue" "Certificate issuance failed: ${output}"
+  }
+
+  log_info "Certificate issued for ${domain}"
+
+  # Read certificate details
+  local cert_path="${CERT_BASE}/${domain}/cert.pem"
+  local issuer=""
+  local not_before=""
+  local not_after=""
+
+  if [[ -f "$cert_path" ]]; then
+    issuer=$(openssl x509 -in "$cert_path" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+    not_before=$(openssl x509 -in "$cert_path" -noout -startdate 2>/dev/null | cut -d= -f2 || echo "")
+    not_after=$(openssl x509 -in "$cert_path" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+  fi
+
+  # Update Caddy config to use HTTPS
+  local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
+  if [[ -f "$caddy_file" ]]; then
+    # Caddy auto-handles HTTPS with Let's Encrypt, just reload
+    systemctl reload caddy 2>/dev/null || true
+  fi
+
+  json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"certPath\":\"${CERT_BASE}/${domain}\",\"message\":\"Certificate issued successfully\"}"
+}
+
+# ── action: renew ────────────────────────────────────────────────────────────
+action_renew() {
+  local domain="${1:-}"
+
+  if [[ -n "$domain" ]]; then
+    validate_domain "$domain"
+    log_info "Renewing certificate for ${domain}..."
+    local output
+    output=$(certbot renew --cert-name "$domain" --non-interactive 2>&1) || {
+      die "renew" "Certificate renewal failed: ${output}"
+    }
+  else
+    log_info "Renewing all certificates..."
+    certbot renew --non-interactive 2>&1 || {
+      die "renew" "Bulk certificate renewal failed"
+    }
+  fi
+
+  # Reload Caddy to pick up new certificates
+  systemctl reload caddy 2>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"renew\",\"domain\":\"${domain:-all}\",\"message\":\"Certificate renewed successfully\"}"
+}
+
+# ── action: revoke ───────────────────────────────────────────────────────────
+action_revoke() {
+  if [[ $# -lt 1 ]]; then
+    die "revoke" "Usage: revoke <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local cert_path="${CERT_BASE}/${domain}"
+  if [[ ! -d "$cert_path" ]]; then
+    die "revoke" "No certificate found for ${domain}"
+  fi
+
+  log_info "Revoking certificate for ${domain}..."
+  local output
+  output=$(certbot revoke --cert-path "${cert_path}/cert.pem" --non-interactive 2>&1) || {
+    die "revoke" "Certificate revocation failed: ${output}"
+  }
+
+  # Delete certificate files
+  certbot delete --cert-name "$domain" --non-interactive 2>&1 || true
+
+  log_info "Certificate revoked and deleted for ${domain}"
+
+  json_out "{\"success\":true,\"step\":\"revoke\",\"domain\":\"${domain}\",\"message\":\"Certificate revoked successfully\"}"
+}
+
+# ── action: info ─────────────────────────────────────────────────────────────
+action_info() {
+  if [[ $# -lt 1 ]]; then
+    die "info" "Usage: info <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local cert_path="${CERT_BASE}/${domain}/cert.pem"
+  if [[ ! -f "$cert_path" ]]; then
+    die "info" "No certificate found for ${domain}"
+  fi
+
+  # Extract certificate details
+  local issuer not_before not_after serial san days_remaining
+  issuer=$(openssl x509 -in "$cert_path" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+  not_before=$(openssl x509 -in "$cert_path" -noout -startdate 2>/dev/null | cut -d= -f2 || echo "")
+  not_after=$(openssl x509 -in "$cert_path" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+  serial=$(openssl x509 -in "$cert_path" -noout -serial 2>/dev/null | cut -d= -f2 || echo "")
+  san=$(openssl x509 -in "$cert_path" -noout -ext subjectAltName 2>/dev/null | grep -oP 'DNS:\K[^,]+' | tr '\n' ',' | sed 's/,$//' || echo "$domain")
+
+  # Calculate days remaining
+  days_remaining=0
+  if [[ -n "$not_after" ]]; then
+    local expiry_epoch now_epoch
+    expiry_epoch=$(date -d "$not_after" +%s 2>/dev/null || echo "0")
+    now_epoch=$(date +%s)
+    days_remaining=$(( (expiry_epoch - now_epoch) / 86400 ))
+  fi
+
+  json_out "{\"success\":true,\"step\":\"info\",\"domain\":\"${domain}\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"serial\":\"${serial}\",\"san\":\"${san}\",\"daysRemaining\":${days_remaining}}"
+}
+
+# ── action: list ─────────────────────────────────────────────────────────────
+action_list() {
+  local certs_json="["
+  local first=true
+
+  if [[ -d "$CERT_BASE" ]]; then
+    for cert_dir in "${CERT_BASE}"/*/; do
+      [[ -d "$cert_dir" ]] || continue
+      local domain
+      domain=$(basename "$cert_dir")
+      local cert_file="${cert_dir}cert.pem"
+
+      if [[ -f "$cert_file" ]]; then
+        local not_after days_remaining=0
+        not_after=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+        if [[ -n "$not_after" ]]; then
+          local expiry_epoch now_epoch
+          expiry_epoch=$(date -d "$not_after" +%s 2>/dev/null || echo "0")
+          now_epoch=$(date +%s)
+          days_remaining=$(( (expiry_epoch - now_epoch) / 86400 ))
+        fi
+
+        if [[ "$first" == true ]]; then first=false; else certs_json+=","; fi
+        certs_json+="{\"domain\":\"${domain}\",\"expiry\":\"${not_after}\",\"daysRemaining\":${days_remaining}}"
+      fi
+    done
+  fi
+
+  certs_json+="]"
+
+  json_out "{\"success\":true,\"step\":\"list\",\"certificates\":${certs_json}}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  issue)  action_issue "$@" ;;
+  renew)  action_renew "$@" ;;
+  revoke) action_revoke "$@" ;;
+  info)   action_info "$@" ;;
+  list)   action_list "$@" ;;
+  *)      die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

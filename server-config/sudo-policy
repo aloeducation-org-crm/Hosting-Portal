@@ -1,0 +1,20 @@
+# ALO Labs Hosting Portal — Sudo Policy
+# Install to: /etc/sudoers.d/alo-hosting-portal
+# Permissions: root:root 0440
+# Validate with: visudo -cf /etc/sudoers.d/alo-hosting-portal
+
+# Helper script execution (root-owned, specific paths only)
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-hosting-helper
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-restore
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-database-helper
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-domain-helper
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-node-app-helper
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-file-manager-helper
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-log-helper
+aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-health-helper
+
+# Caddy reload
+aloedu ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy
+
+# Site systemd service management (pattern-restricted)
+aloedu ALL=(root) NOPASSWD: /usr/bin/systemctl restart alo-site-*, /usr/bin/systemctl start alo-site-*, /usr/bin/systemctl stop alo-site-*, /usr/bin/systemctl enable alo-site-*, /usr/bin/systemctl disable alo-site-*

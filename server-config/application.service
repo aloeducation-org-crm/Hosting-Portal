@@ -1,0 +1,30 @@
+[Unit]
+Description=ALO Labs Hosting Portal
+Documentation=https://hosting.alolabs.net
+Wants=network-online.target postgresql.service caddy.service
+After=network-online.target postgresql.service caddy.service
+
+[Service]
+Type=simple
+User=alo-panel
+Group=alo-panel
+WorkingDirectory=/opt/alo-panel/current
+Environment=NODE_ENV=production
+Environment=PORT=3101
+Environment=HOSTNAME=127.0.0.1
+ExecStart=/usr/bin/node .next/standalone/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alo-hosting-portal
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/opt/application/shared /srv/alo-sites /var/backups/alo-sites /var/log/caddy/alo-sites
+
+[Install]
+WantedBy=multi-user.target

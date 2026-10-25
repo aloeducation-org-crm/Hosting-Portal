@@ -1,0 +1,30 @@
+[Unit]
+Description=ALO Labs Hosting Portal
+After=network.target postgresql.service mariadb.service caddy.service php8.2-fpm.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=aloedu
+Group=aloedu
+WorkingDirectory=/opt/alo-hosting-portal
+ExecStart=/usr/bin/node .next/standalone/server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3101
+Environment=HOSTNAME=127.0.0.1
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/alo-hosting-portal /tmp
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alo-hosting-portal
+
+[Install]
+WantedBy=multi-user.target

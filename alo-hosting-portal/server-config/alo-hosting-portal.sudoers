@@ -1,0 +1,42 @@
+# ALO Labs Hosting Portal - Restricted Sudo Policy
+# Install to: /etc/sudoers.d/alo-hosting-portal
+# Permissions: root:root 0440
+
+# Allow aloedu to manage site directories
+aloedu ALL=(root) NOPASSWD: /bin/chown -R aloedu:aloedu /srv/alo-sites/*
+aloedu ALL=(root) NOPASSWD: /bin/chmod -R * /srv/alo-sites/*
+aloedu ALL=(root) NOPASSWD: /bin/mkdir -p /srv/alo-sites/*
+
+# Allow aloedu to manage Caddy configuration
+aloedu ALL=(root) NOPASSWD: /usr/bin/cp * /etc/caddy/sites-enabled/*
+aloedu ALL=(root) NOPASSWD: /bin/rm -f /etc/caddy/sites-enabled/*
+aloedu ALL=(root) NOPASSWD: /usr/bin/caddy validate --config /etc/caddy/sites-enabled/* --adapter caddyfile
+aloedu ALL=(root) NOPASSWD: /bin/systemctl reload caddy
+
+# Allow aloedu to manage systemd services for sites only
+aloedu ALL=(root) NOPASSWD: /bin/systemctl start alo-site-*
+aloedu ALL=(root) NOPASSWD: /bin/systemctl stop alo-site-*
+aloedu ALL=(root) NOPASSWD: /bin/systemctl restart alo-site-*
+aloedu ALL=(root) NOPASSWD: /bin/systemctl enable alo-site-*
+aloedu ALL=(root) NOPASSWD: /bin/systemctl disable alo-site-*
+aloedu ALL=(root) NOPASSWD: /bin/ln -sfn * /srv/alo-sites/*
+
+# Allow aloedu to manage systemd service files
+aloedu ALL=(root) NOPASSWD: /usr/bin/tee /etc/systemd/system/alo-site-*.service
+aloedu ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
+
+# Allow aloedu to manage backup directories
+aloedu ALL=(root) NOPASSWD: /bin/mkdir -p /var/backups/alo-sites/*
+aloedu ALL=(root) NOPASSWD: /bin/chown -R aloedu:aloedu /var/backups/alo-sites/*
+
+# Allow aloedu to manage PHP-FPM pool configs
+aloedu ALL=(root) NOPASSWD: /usr/bin/cp * /etc/php/8.2/fpm/pool.d/*
+aloedu ALL=(root) NOPASSWD: /bin/rm -f /etc/php/8.2/fpm/pool.d/alo-*
+aloedu ALL=(root) NOPASSWD: /bin/systemctl reload php8.2-fpm
+aloedu ALL=(root) NOPASSWD: /bin/systemctl restart php8.2-fpm
+
+# PostgreSQL management (restricted to alo_ databases)
+aloedu ALL=(postgres) NOPASSWD: /usr/bin/psql -c *alo_*
+aloedu ALL=(postgres) NOPASSWD: /usr/bin/psql *alo_*
+aloedu ALL=(postgres) NOPASSWD: /usr/bin/pg_dump alo_*
+aloedu ALL=(postgres) NOPASSWD: /usr/bin/pg_dump *alo_*

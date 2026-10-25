@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Database Helper
+# Manages MariaDB/PostgreSQL databases for hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-database-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-database-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+generate_password() {
+  tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom 2>/dev/null | head -c 32
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-database-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# Validate database name: alphanumeric + underscores only
+validate_dbname() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9_]{1,64}$ ]]; then
+    die "arg-validation" "Invalid database name: $1"
+  fi
+}
+
+# Validate username: alphanumeric + underscores only
+validate_username() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9_]{1,32}$ ]]; then
+    die "arg-validation" "Invalid username: $1"
+  fi
+}
+
+# Validate engine
+validate_engine() {
+  if [[ "$1" != "mariadb" && "$1" != "postgresql" ]]; then
+    die "arg-validation" "Engine must be mariadb or postgresql"
+  fi
+}
+
+# ── action: create ──────────────────────────────────────────────────────────
+action_create() {
+  if [[ $# -lt 3 ]]; then
+    die "create" "Usage: create <engine> <dbname> <username>"
+  fi
+
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
+
+  local password
+  password=$(generate_password)
+
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Creating MariaDB database: ${dbname}"
+    mysql -u root -e "
+      CREATE DATABASE IF NOT EXISTS \`${dbname}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+      CREATE USER IF NOT EXISTS '${username}'@'localhost' IDENTIFIED BY '${password}';
+      GRANT ALL PRIVILEGES ON \`${dbname}\`.* TO '${username}'@'localhost';
+      FLUSH PRIVILEGES;
+    " 2>/dev/null || die "create" "MariaDB database creation failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Creating PostgreSQL database: ${dbname}"
+    # For PostgreSQL, single quotes need escaping in the password
+    local escaped_password
+    escaped_password=$(printf '%s' "$password" | sed "s/'/''/g")
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      SELECT 'CREATE DATABASE \"${dbname}\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${dbname}')\\gexec
+    " 2>/dev/null || die "create" "PostgreSQL database creation failed (database)"
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      SELECT 'CREATE USER \"${username}\" WITH PASSWORD '\''${escaped_password}'\''' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${username}')\\gexec
+    " 2>/dev/null || die "create" "PostgreSQL database creation failed (user)"
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      GRANT ALL PRIVILEGES ON DATABASE \"${dbname}\" TO \"${username}\";
+      GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"${username}\";
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"${username}\";
+    " 2>/dev/null || die "create" "PostgreSQL grant failed"
+  fi
+
+  log_info "Database created successfully."
+  # Password only in stdout JSON, never in logs
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\",\"password\":\"${password}\"}"
+}
+
+# ── action: test ────────────────────────────────────────────────────────────
+action_test() {
+  if [[ $# -lt 4 ]]; then
+    die "test" "Usage: test <engine> <dbname> <username> <password>"
+  fi
+
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local password="$4"
+
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
+
+  if [[ "$engine" == "mariadb" ]]; then
+    MYSQL_PWD="$password" mysql -u "$username" "$dbname" -e 'SELECT 1' &>/dev/null || \
+      die "test" "MariaDB connection test failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    PGPASSWORD="$password" psql -U "$username" -d "$dbname" -c 'SELECT 1' &>/dev/null || \
+      die "test" "PostgreSQL connection test failed"
+  fi
+
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"connection\":\"ok\"}"
+}
+
+# ── action: backup ──────────────────────────────────────────────────────────
+action_backup() {
+  if [[ $# -lt 5 ]]; then
+    die "backup" "Usage: backup <engine> <dbname> <username> <password> <output-path>"
+  fi
+
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local password="$4"
+  local output_path="$5"
+
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
+
+  # Validate output path
+  local output_dir
+  output_dir=$(dirname "$output_path")
+  if [[ ! -d "$output_dir" ]]; then
+    die "backup" "Output directory does not exist: ${output_dir}"
+  fi
+
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Dumping MariaDB database: ${dbname}"
+    MYSQL_PWD="$password" mysqldump -u "$username" --single-transaction --routines "$dbname" > "$output_path" 2>/dev/null || \
+      die "backup" "MariaDB dump failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Dumping PostgreSQL database: ${dbname}"
+    PGPASSWORD="$password" pg_dump -U "$username" -d "$dbname" --no-owner --no-privileges -F p -f "$output_path" 2>/dev/null || \
+      die "backup" "PostgreSQL dump failed"
+  fi
+
+  local file_size
+  file_size=$(stat -c%s "$output_path" 2>/dev/null || echo "0")
+
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"path\":\"${output_path}\",\"size\":${file_size}}"
+}
+
+# ── action: restore ──────────────────────────────────────────────────────────
+action_restore() {
+  if [[ $# -lt 5 ]]; then
+    die "restore" "Usage: restore <engine> <dbname> <username> <password> <input-path>"
+  fi
+
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local password="$4"
+  local input_path="$5"
+
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
+
+  if [[ ! -f "$input_path" ]]; then
+    die "restore" "Input dump file not found: ${input_path}"
+  fi
+
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Restoring MariaDB database: ${dbname}"
+    MYSQL_PWD="$password" mysql -u "$username" "$dbname" < "$input_path" 2>/dev/null || \
+      die "restore" "MariaDB restore failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Restoring PostgreSQL database: ${dbname}"
+    PGPASSWORD="$password" psql -U "$username" -d "$dbname" -f "$input_path" 2>/dev/null || \
+      die "restore" "PostgreSQL restore failed"
+  fi
+
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\"}"
+}
+
+# ── action: rotate-password ──────────────────────────────────────────────────
+action_rotate_password() {
+  if [[ $# -lt 4 ]]; then
+    die "rotate-password" "Usage: rotate-password <engine> <dbname> <username> <new-password>"
+  fi
+
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local new_password="$4"
+
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
+
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Rotating MariaDB password for: ${username}"
+    # Escape single quotes in password to prevent SQL injection
+    local escaped_password
+    escaped_password=$(printf '%s' "$new_password" | sed "s/'/\\\\'/g")
+    mysql -u root -e "ALTER USER '${username}'@'localhost' IDENTIFIED BY '${escaped_password}'; FLUSH PRIVILEGES;" 2>/dev/null || \
+      die "rotate-password" "MariaDB password rotation failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Rotating PostgreSQL password for: ${username}"
+    local escaped_password
+    escaped_password=$(printf '%s' "$new_password" | sed "s/'/''/g")
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "ALTER USER \"${username}\" WITH PASSWORD '${escaped_password}';" 2>/dev/null || \
+      die "rotate-password" "PostgreSQL password rotation failed"
+  fi
+
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\"}"
+}
+
+# ── action: delete ──────────────────────────────────────────────────────────
+action_delete() {
+  if [[ $# -lt 3 ]]; then
+    die "delete" "Usage: delete <engine> <dbname> <username>"
+  fi
+
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
+
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Deleting MariaDB database and user: ${dbname}"
+    mysql -u root -e "
+      REVOKE ALL PRIVILEGES ON \`${dbname}\`.* FROM '${username}'@'localhost';
+      DROP DATABASE IF EXISTS \`${dbname}\`;
+      DROP USER IF EXISTS '${username}'@'localhost';
+      FLUSH PRIVILEGES;
+    " 2>/dev/null || die "delete" "MariaDB deletion failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Deleting PostgreSQL database and user: ${dbname}"
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      REVOKE ALL PRIVILEGES ON DATABASE \"${dbname}\" FROM \"${username}\";
+      DROP DATABASE IF EXISTS \"${dbname}\";
+      DROP USER IF EXISTS \"${username}\";
+    " 2>/dev/null || die "delete" "PostgreSQL deletion failed"
+  fi
+
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\"}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  create)         action_create "$@" ;;
+  test)           action_test "$@" ;;
+  backup)         action_backup "$@" ;;
+  restore)        action_restore "$@" ;;
+  rotate-password) action_rotate_password "$@" ;;
+  delete)         action_delete "$@" ;;
+  *)              die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

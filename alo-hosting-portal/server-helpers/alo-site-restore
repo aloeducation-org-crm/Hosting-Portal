@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# ALO Labs - Site Restore Helper
+# Restores a website from a backup tar.gz
+# Usage: alo-site-restore <domain> <backup_file>
+
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+BACKUP_BASE="/var/backups/alo-sites"
+CADDY_DIR="/etc/caddy/sites-enabled"
+LOG_DIR="/var/log/caddy/alo-sites"
+
+DOMAIN="${1:?Usage: alo-site-restore <domain> <backup_file>}"
+BACKUP_FILE="${2:?Usage: alo-site-restore <domain> <backup_file>}"
+
+# Validate domain (alphanumeric, hyphens, dots only)
+if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+  echo '{"success":false,"error":"Invalid domain name"}' >&2
+  exit 1
+fi
+
+# Resolve and validate backup file path
+BACKUP_RESOLVED=$(realpath "$BACKUP_FILE" 2>/dev/null || echo "")
+if [[ -z "$BACKUP_RESOLVED" ]]; then
+  echo '{"success":false,"error":"Backup file not found"}' >&2
+  exit 1
+fi
+
+# Backup must be under backup base or /tmp
+if [[ "$BACKUP_RESOLVED" != "$BACKUP_BASE/"* && "$BACKUP_RESOLVED" != "/tmp/"* ]]; then
+  echo '{"success":false,"error":"Backup file must be under backup directory or /tmp"}' >&2
+  exit 1
+fi
+
+if [[ ! -f "$BACKUP_RESOLVED" ]]; then
+  echo '{"success":false,"error":"Backup file does not exist"}' >&2
+  exit 1
+fi
+
+SITE_DIR="$SITE_BASE/$DOMAIN"
+
+output_json() {
+  local success="$1"
+  local message="$2"
+  local extra="${3:-}"
+  if [[ -n "$extra" ]]; then
+    echo "{\"success\":$success,\"domain\":\"$DOMAIN\",\"backupFile\":\"$BACKUP_RESOLVED\",\"message\":\"$message\",$extra,\"restoredAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+  else
+    echo "{\"success\":$success,\"domain\":\"$DOMAIN\",\"backupFile\":\"$BACKUP_RESOLVED\",\"message\":\"$message\",\"restoredAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+  fi
+}
+
+# Create temp extraction directory
+TEMP_DIR=$(mktemp -d /tmp/alo-restore-XXXXXX)
+trap "rm -rf '$TEMP_DIR'" EXIT
+
+echo '{"status":"extracting"}' >&2
+tar -xzf "$BACKUP_RESOLVED" -C "$TEMP_DIR" 2>/dev/null
+if [[ $? -ne 0 ]]; then
+  output_json false "Failed to extract backup archive"
+  exit 1
+fi
+
+# Check for site files in the extracted backup
+EXTRACTED_SITE="$TEMP_DIR"
+if [[ -d "$TEMP_DIR/site" ]]; then
+  EXTRACTED_SITE="$TEMP_DIR/site"
+elif [[ -d "$TEMP_DIR/$DOMAIN" ]]; then
+  EXTRACTED_SITE="$TEMP_DIR/$DOMAIN"
+fi
+
+# Stop the site service if it exists
+SERVICE_NAME="alo-site-$DOMAIN"
+if systemctl list-unit-files "$SERVICE_NAME.service" &>/dev/null; then
+  echo '{"status":"stopping_service"}' >&2
+  sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+fi
+
+# Backup current site if exists
+if [[ -d "$SITE_DIR" ]]; then
+  echo '{"status":"backing_up_current"}' >&2
+  CURRENT_BACKUP="$BACKUP_BASE/$DOMAIN/pre-restore-$(date +%Y%m%d%H%M%S).tar.gz"
+  mkdir -p "$(dirname "$CURRENT_BACKUP")"
+  tar -czf "$CURRENT_BACKUP" -C "$SITE_BASE" "$DOMAIN" 2>/dev/null || true
+fi
+
+# Restore site files
+echo '{"status":"restoring_files"}' >&2
+mkdir -p "$SITE_DIR"
+if [[ -d "$EXTRACTED_SITE/public" ]]; then
+  cp -a "$EXTRACTED_SITE/public/"* "$SITE_DIR/public/" 2>/dev/null || true
+fi
+if [[ -d "$EXTRACTED_SITE/current" ]]; then
+  cp -a "$EXTRACTED_SITE/current/"* "$SITE_DIR/current/" 2>/dev/null || true
+fi
+if [[ -d "$EXTRACTED_SITE/releases" ]]; then
+  cp -a "$EXTRACTED_SITE/releases/"* "$SITE_DIR/releases/" 2>/dev/null || true
+fi
+if [[ -d "$EXTRACTED_SITE/shared" ]]; then
+  cp -a "$EXTRACTED_SITE/shared/"* "$SITE_DIR/shared/" 2>/dev/null || true
+fi
+# If no subdirs, copy root contents
+if [[ ! -d "$EXTRACTED_SITE/public" && ! -d "$EXTRACTED_SITE/current" ]]; then
+  cp -a "$EXTRACTED_SITE/"* "$SITE_DIR/" 2>/dev/null || true
+fi
+
+# Ensure correct ownership
+sudo chown -R aloedu:aloedu "$SITE_DIR" 2>/dev/null || true
+
+# Restore database if dump exists
+DB_RESTORED="false"
+if [[ -f "$TEMP_DIR/database.sql" ]]; then
+  echo '{"status":"restoring_database"}' >&2
+  DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_')
+  # Try PostgreSQL first
+  if sudo -u postgres psql -lqt 2>/dev/null | cut -d '|' -f 1 | grep -qw "alo_${DOMAIN_SAFE}"; then
+    sudo -u postgres psql "alo_${DOMAIN_SAFE}" < "$TEMP_DIR/database.sql" 2>/dev/null && DB_RESTORED="true"
+  fi
+  # Try MariaDB
+  if [[ "$DB_RESTORED" == "false" ]]; then
+    if mysql -e "SHOW DATABASES LIKE 'alo_${DOMAIN_SAFE}%'" 2>/dev/null | grep -q "alo_${DOMAIN_SAFE}"; then
+      DB_NAME=$(mysql -e "SHOW DATABASES LIKE 'alo_${DOMAIN_SAFE}%'" 2>/dev/null | tail -1)
+      mysql "$DB_NAME" < "$TEMP_DIR/database.sql" 2>/dev/null && DB_RESTORED="true"
+    fi
+  fi
+fi
+
+# Restore Caddy config if exists
+CADDY_RESTORED="false"
+if [[ -f "$TEMP_DIR/caddy.conf" ]]; then
+  echo '{"status":"restoring_caddy_config"}' >&2
+  sudo cp "$TEMP_DIR/caddy.conf" "$CADDY_DIR/$DOMAIN.conf" 2>/dev/null && CADDY_RESTORED="true"
+fi
+
+# Reload Caddy if config was restored
+if [[ "$CADDY_RESTORED" == "true" ]]; then
+  echo '{"status":"reloading_caddy"}' >&2
+  sudo systemctl reload caddy 2>/dev/null || true
+fi
+
+# Restart site service if it exists
+if systemctl list-unit-files "$SERVICE_NAME.service" &>/dev/null; then
+  echo '{"status":"starting_service"}' >&2
+  sudo systemctl start "$SERVICE_NAME" 2>/dev/null || true
+fi
+
+output_json true "Site restored successfully" ",\"databaseRestored\":$DB_RESTORED,\"caddyRestored\":$CADDY_RESTORED

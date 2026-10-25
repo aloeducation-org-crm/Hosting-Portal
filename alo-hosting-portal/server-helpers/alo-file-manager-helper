@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# ALO Labs - File Manager Helper
+# Safe file operations within site directories
+# Usage: alo-file-manager-helper <command> [args...]
+
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+MAX_FILE_SIZE=$((5 * 1024 * 1024))  # 5MB read limit
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    echo '{"success":false,"error":"Invalid domain name"}'
+    exit 1
+  fi
+}
+
+# CRITICAL: Validate path is within site directory and no traversal
+validate_path() {
+  local domain="$1"
+  local rel_path="$2"
+  local site_dir="$SITE_BASE/$domain"
+
+  # Reject path traversal
+  if [[ "$rel_path" == *".."* ]]; then
+    echo '{"success":false,"error":"Path traversal detected"}'
+    exit 1
+  fi
+
+  # Build full path and resolve
+  local full_path
+  if [[ "$rel_path" == "/" || -z "$rel_path" ]]; then
+    full_path="$site_dir"
+  else
+    full_path="$site_dir/$rel_path"
+  fi
+
+  # Resolve symlinks
+  local resolved
+  resolved=$(realpath "$full_path" 2>/dev/null || echo "")
+  if [[ -z "$resolved" ]]; then
+    echo '{"success":false,"error":"Path does not exist"}'
+    exit 1
+  fi
+
+  # Must be under site dir
+  if [[ "$resolved" != "$site_dir"/* && "$resolved" != "$site_dir" ]]; then
+    echo '{"success":false,"error":"Access denied: path outside site directory"}'
+    exit 1
+  fi
+
+  echo "$resolved"
+}
+
+COMMAND="${1:?Usage: alo-file-manager-helper <command> [args...]}
+shift
+
+case "$COMMAND" in
+  list)
+    DOMAIN="${1:?Usage: list <domain> [relative_path]}"
+    REL_PATH="${2:-/}"
+    validate_domain "$DOMAIN"
+
+    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
+    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
+
+    if [[ ! -d "$RESOLVED" ]]; then
+      echo '{"success":false,"error":"Path is not a directory"}'
+      exit 1
+    fi
+
+    ENTRIES="[]"
+    ITEMS=""
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      NAME=$(echo "$line" | awk '{print $NF}')
+      TYPE=$(echo "$line" | awk '{print $1}' | cut -c1)
+      SIZE=$(echo "$line" | awk '{print $5}')
+      MODIFIED=$(echo "$line" | awk '{print $6, $7, $8}')
+      PERMS=$(echo "$line" | awk '{print $1}')
+
+      if [[ "$TYPE" == "d" ]]; then
+        ENTRY_TYPE="directory"
+        SIZE=0
+      else
+        ENTRY_TYPE="file"
+      fi
+
+      # Convert modified to ISO
+      MOD_ISO=$(date -d "$MODIFIED" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
+      [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
+      ITEMS="$ITEMS{\"name\":\"$NAME\",\"type\":\"$ENTRY_TYPE\",\"size\":$SIZE,\"modified\":\"$MOD_ISO\",\"permissions\":\"$PERMS\"}"
+    done < <(ls -la "$RESOLVED" 2>/dev/null | tail -n +3)
+
+    ENTRIES="[$ITEMS]"
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"entries\":$ENTRIES}"
+    ;;
+
+  read)
+    DOMAIN="${1:?Usage: read <domain> <relative_path>}
+    REL_PATH="${2:?Usage: read <domain> <relative_path>}
+    validate_domain "$DOMAIN"
+
+    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
+    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
+
+    if [[ ! -f "$RESOLVED" ]]; then
+      echo '{"success":false,"error":"File not found"}'
+      exit 1
+    fi
+
+    FSIZE=$(stat -c%s "$RESOLVED" 2>/dev/null || echo 0)
+    if [[ $FSIZE -gt $MAX_FILE_SIZE ]]; then
+      echo "{\"success\":false,\"error\":\"File too large (max 5MB)\",\"size\":$FSIZE}"
+      exit 1
+    fi
+
+    # Output file content (base64 encoded to handle binary)
+    CONTENT=$(base64 -w0 "$RESOLVED" 2>/dev/null)
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"size\":$FSIZE,\"encoding\":\"base64\",\"content\":\"$CONTENT\"}"
+    ;;
+
+  write)
+    DOMAIN="${1:?Usage: write <domain> <relative_path>}
+    REL_PATH="${2:?Usage: write <domain> <relative_path>}
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    if [[ "$REL_PATH" == "/" || -z "$REL_PATH" ]]; then
+      echo '{"success":false,"error":"Cannot write to root directory"}'
+      exit 1
+    fi
+
+    FULL_PATH="$SITE_DIR/$REL_PATH"
+    RESOLVED_PARENT=$(realpath "$(dirname "$FULL_PATH")" 2>/dev/null)
+    if [[ "$RESOLVED_PARENT" != "$SITE_DIR"/* ]]; then
+      echo '{"success":false,"error":"Access denied"}'
+      exit 1
+    fi
+
+    mkdir -p "$RESOLVED_PARENT"
+    cat > "$FULL_PATH"
+    FSIZE=$(stat -c%s "$FULL_PATH" 2>/dev/null || echo 0)
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"size\":$FSIZE}"
+    ;;
+
+  delete)
+    DOMAIN="${1:?Usage: delete <domain> <relative_path>}
+    REL_PATH="${2:?Usage: delete <domain> <relative_path>}
+    validate_domain "$DOMAIN"
+
+    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
+    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
+
+    # Prevent deleting the site root
+    if [[ "$RESOLVED" == "$SITE_BASE/$DOMAIN" ]]; then
+      echo '{"success":false,"error":"Cannot delete site root"}'
+      exit 1
+    fi
+
+    if [[ -d "$RESOLVED" ]]; then
+      rmdir "$RESOLVED" 2>/dev/null || rm -rf "$RESOLVED"
+      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"type\":\"directory\"}"
+    elif [[ -f "$RESOLVED" ]]; then
+      rm -f "$RESOLVED"
+      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"type\":\"file\"}"
+    else
+      echo '{"success":false,"error":"Path not found"}'
+      exit 1
+    fi
+    ;;
+
+  mkdir)
+    DOMAIN="${1:?Usage: mkdir <domain> <relative_path>}
+    REL_PATH="${2:?Usage: mkdir <domain> <relative_path>}
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    FULL_PATH="$SITE_DIR/$REL_PATH"
+    RESOLVED_PARENT=$(realpath "$(dirname "$FULL_PATH")" 2>/dev/null)
+    if [[ "$RESOLVED_PARENT" != "$SITE_DIR"/* && "$RESOLVED_PARENT" != "$SITE_DIR" ]]; then
+      echo '{"success":false,"error":"Access denied"}'
+      exit 1
+    fi
+
+    mkdir -p "$FULL_PATH"
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\"}"
+    ;;
+
+  rename)
+    DOMAIN="${1:?Usage: rename <domain> <relative_path> <new_name>}
+    REL_PATH="${2:?Usage: rename <domain> <relative_path> <new_name>}
+    NEW_NAME="${3:?Usage: rename <domain> <relative_path> <new_name>}
+    validate_domain "$DOMAIN"
+
+    # Validate new name has no traversal
+    if [[ "$NEW_NAME" == *".."* || "$NEW_NAME" == */* ]]; then
+      echo '{"success":false,"error":"Invalid new name"}'
+      exit 1
+    fi
+
+    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
+    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
+
+    PARENT=$(dirname "$RESOLVED")
+    mv "$RESOLVED" "$PARENT/$NEW_NAME"
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"oldPath\":\"$REL_PATH\",\"newPath\":\"$(dirname "$REL_PATH")/$NEW_NAME\"}"
+    ;;
+
+  upload)
+    DOMAIN="${1:?Usage: upload <domain> <relative_path> <tmp_file_path>}
+    REL_PATH="${2:?Usage: upload <domain> <relative_path> <tmp_file_path>}
+    TMP_FILE="${3:?Usage: upload <domain> <relative_path> <tmp_file_path>}
+    validate_domain "$DOMAIN"
+
+    if [[ ! -f "$TMP_FILE" ]]; then
+      echo '{"success":false,"error":"Temporary file not found"}'
+      exit 1
+    fi
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    FULL_PATH="$SITE_DIR/$REL_PATH"
+    RESOLVED_PARENT=$(realpath "$(dirname "$FULL_PATH")" 2>/dev/null)
+    if [[ "$RESOLVED_PARENT" != "$SITE_DIR"/* && "$RESOLVED_PARENT" != "$SITE_DIR" ]]; then
+      echo '{"success":false,"error":"Access denied"}'
+      exit 1
+    fi
+
+    mkdir -p "$RESOLVED_PARENT"
+    mv "$TMP_FILE" "$FULL_PATH"
+    FSIZE=$(stat -c%s "$FULL_PATH" 2>/dev/null || echo 0)
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"size\":$FSIZE}"
+    ;;
+
+  disk-usage)
+    DOMAIN="${1:?Usage: disk-usage <domain>}
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    if [[ ! -d "$SITE_DIR" ]]; then
+      echo '{"success":false,"error":"Site directory not found"}'
+      exit 1
+    fi
+
+    USAGE=$(du -sb "$SITE_DIR" 2>/dev/null | awk '{print $1}')
+    USAGE_HUMAN=$(du -sh "$SITE_DIR" 2>/dev/null | awk '{print $1}')
+    FILE_COUNT=$(find "$SITE_DIR" -type f 2>/dev/null | wc -l)
+    DIR_COUNT=$(find "$SITE_DIR" -type d 2>/dev/null | wc -l)
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"sizeBytes\":${USAGE:-0},\"sizeHuman\":\"${USAGE_HUMAN:-0B}\",\"fileCount\":$FILE_COUNT,\"directoryCount\":$DIR_COUNT}"
+    ;;
+
+  *)
+    echo "Available commands: list, read, write, delete, mkdir, rename, upload, disk-usage" >&2
+    exit 1
+    ;;
+esac

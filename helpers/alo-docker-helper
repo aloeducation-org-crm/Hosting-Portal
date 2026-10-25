@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# ALO Labs - Docker Helper
+# Manages Docker containers and images
+# Usage: alo-docker-helper <command> [args...]
+
+set -euo pipefail
+
+ts() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+# Validate container/image name: alphanumeric, dashes, underscores, dots
+validate_name() {
+  local n="$1"
+  if [[ ! "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+    echo '{"success":false,"error":"Invalid name. Use alphanumeric, dashes, underscores, dots"}'
+    exit 1
+  fi
+}
+
+# Validate lines parameter (positive integer)
+validate_lines() {
+  local n="$1"
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
+    echo '{"success":false,"error":"Lines must be a positive integer"}'
+    exit 1
+  fi
+}
+
+COMMAND="${1:?Usage: alo-docker-helper <command> [args...]}"
+shift
+
+case "$COMMAND" in
+  list)
+    # docker ps -a with JSON format, wrap in array
+    RAW=$(docker ps -a --format '{{json .}}' 2>/dev/null || echo "")
+
+    if [[ -z "$RAW" ]]; then
+      echo "{\"success\":true,\"containers\":[],\"count\":0,\"listedAt\":\"$(ts)\"}"
+      exit 0
+    fi
+
+    # Wrap lines in JSON array
+    ITEMS=""
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
+      ITEMS="$ITEMS$line"
+    done <<< "$RAW"
+
+    # Count by counting the JSON objects (looking for { that starts a json line)
+    COUNT=0
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      ((COUNT++)) || true
+    done <<< "$RAW"
+
+    echo "{\"success\":true,\"containers\":[$ITEMS],\"count\":$COUNT,\"listedAt\":\"$(ts)\"}"
+    ;;
+
+  create)
+    NAME="${1:?Usage: create <name> <image>}"
+    IMAGE="${2:?Usage: create <name> <image>}"
+    validate_name "$NAME"
+
+    # Check if container already exists
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
+      echo "{\"success\":false,\"error\":\"Container '$NAME' already exists\"}"
+      exit 1
+    fi
+
+    OUTPUT=$(docker create --name "$NAME" "$IMAGE" 2>&1) || {
+      echo "{\"success\":false,\"error\":\"Failed to create container: $OUTPUT\"}"
+      exit 1
+    }
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"image\":\"$IMAGE\",\"containerId\":\"$OUTPUT\",\"createdAt\":\"$(ts)\"}"
+    ;;
+
+  start)
+    NAME="${1:?Usage: start <name>}"
+    validate_name "$NAME"
+
+    if ! docker start "$NAME" 2>&1; then
+      echo "{\"success\":false,\"error\":\"Failed to start container $NAME\"}"
+      exit 1
+    fi
+
+    STATE=$(docker inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo "unknown")
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"status\":\"$STATE\",\"action\":\"start\",\"timestamp\":\"$(ts)\"}"
+    ;;
+
+  stop)
+    NAME="${1:?Usage: stop <name>}"
+    validate_name "$NAME"
+
+    if ! docker stop "$NAME" 2>&1; then
+      echo "{\"success\":false,\"error\":\"Failed to stop container $NAME\"}"
+      exit 1
+    fi
+
+    STATE=$(docker inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo "unknown")
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"status\":\"$STATE\",\"action\":\"stop\",\"timestamp\":\"$(ts)\"}"
+    ;;
+
+  restart)
+    NAME="${1:?Usage: restart <name>}"
+    validate_name "$NAME"
+
+    if ! docker restart "$NAME" 2>&1; then
+      echo "{\"success\":false,\"error\":\"Failed to restart container $NAME\"}"
+      exit 1
+    fi
+
+    STATE=$(docker inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo "unknown")
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"status\":\"$STATE\",\"action\":\"restart\",\"timestamp\":\"$(ts)\"}"
+    ;;
+
+  remove)
+    NAME="${1:?Usage: remove <name>}"
+    validate_name "$NAME"
+
+    if ! docker rm "$NAME" 2>&1; then
+      echo "{\"success\":false,\"error\":\"Failed to remove container $NAME\"}"
+      exit 1
+    fi
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"action\":\"remove\",\"removedAt\":\"$(ts)\"}"
+    ;;
+
+  logs)
+    NAME="${1:?Usage: logs <name> <lines>}"
+    LINES="${2:?Usage: logs <name> <lines>}"
+    validate_name "$NAME"
+    validate_lines "$LINES"
+
+    RAW_LOGS=$(docker logs --tail "$LINES" "$NAME" 2>&1) || {
+      echo "{\"success\":false,\"error\":\"Failed to retrieve logs for $NAME\"}"
+      exit 1
+    }
+
+    # Escape for JSON
+    ESCAPED_LOGS=$(echo "$RAW_LOGS" | jq -Rs .)
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"lines\":$LINES,\"logs\":$ESCAPED_LOGS,\"retrievedAt\":\"$(ts)\"}"
+    ;;
+
+  inspect)
+    NAME="${1:?Usage: inspect <name>}"
+    validate_name "$NAME"
+
+    INSPECT=$(docker inspect "$NAME" 2>/dev/null) || {
+      echo "{\"success\":false,\"error\":\"Failed to inspect container $NAME\"}"
+      exit 1
+    }
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"inspect\":$INSPECT,\"inspectedAt\":\"$(ts)\"}"
+    ;;
+
+  images)
+    RAW=$(docker images --format '{{json .}}' 2>/dev/null || echo "")
+
+    if [[ -z "$RAW" ]]; then
+      echo "{\"success\":true,\"images\":[],\"count\":0,\"listedAt\":\"$(ts)\"}"
+      exit 0
+    fi
+
+    ITEMS=""
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
+      ITEMS="$ITEMS$line"
+    done <<< "$RAW"
+
+    # Count images
+    IMG_COUNT=0
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      ((IMG_COUNT++)) || true
+    done <<< "$RAW"
+
+    echo "{\"success\":true,\"images\":[$ITEMS],\"count\":$IMG_COUNT,\"listedAt\":\"$(ts)\"}"
+    ;;
+
+  stats)
+    # docker stats --no-stream outputs a table; parse to JSON
+    RAW=$(docker stats --no-stream --format '{{json .}}' 2>/dev/null || echo "")
+
+    if [[ -z "$RAW" ]]; then
+      echo "{\"success\":true,\"containers\":[],\"count\":0,\"capturedAt\":\"$(ts)\"}"
+      exit 0
+    fi
+
+    ITEMS=""
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
+      ITEMS="$ITEMS$line"
+    done <<< "$RAW"
+
+    STAT_COUNT=0
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      ((STAT_COUNT++)) || true
+    done <<< "$RAW"
+
+    echo "{\"success\":true,\"containers\":[$ITEMS],\"count\":$STAT_COUNT,\"capturedAt\":\"$(ts)\"}"
+    ;;
+
+  *)
+    echo '{"success":false,"error":"Unknown command. Available: list, create, start, stop, restart, remove, logs, inspect, images, stats"}'
+    exit 1
+    ;;
+esac

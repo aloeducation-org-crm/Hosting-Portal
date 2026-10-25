@@ -1,0 +1,27 @@
+[Unit]
+Description=ALO Labs Server Hosting Portal
+After=network.target postgresql.service mariadb.service caddy.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=alo-panel
+Group=alo-panel
+WorkingDirectory=/srv/alo-server-hosting/current
+EnvironmentFile=/etc/alo-server-hosting/.env
+ExecStart=/usr/bin/node .next/standalone/server.js
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alo-server-hosting
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/srv/alo-sites /var/backups/alo-sites /srv/alo-server-hosting/logs
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

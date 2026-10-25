@@ -1,0 +1,26 @@
+# ALO Labs Hosting Portal - Restricted Sudo Policy
+# Install to: /etc/sudoers.d/alo-helpers
+# Permissions: root:root 0440
+
+# Allow alo-panel to execute all 15 shell helpers as root (NOPASSWD)
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-hosting-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-lifecycle
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-backup
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-restore
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-database-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-domain-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-node-app-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-file-manager-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-log-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-health-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-firewall-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssl-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-email-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-cron-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssh-helper
+
+# Allow alo-panel to reload system services managed by helpers
+alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload caddy
+alo-panel ALL=(root) NOPASSWD: /bin/systemctl daemon-reload
+alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload postfix
+alo-panel ALL=(root) NOPASSWD: /bin/systemctl reload dovecot

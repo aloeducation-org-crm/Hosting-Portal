@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# ALO Labs - Node/Next.js App Helper
+# Manages Node.js and Next.js site provisioning, deployment, and rollback
+# Usage: alo-node-app-helper <command> [args...]
+
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    echo '{"success":false,"error":"Invalid domain name"}'
+    exit 1
+  fi
+}
+
+COMMAND="${1:?Usage: alo-node-app-helper <command> [args...]}
+shift
+
+case "$COMMAND" in
+  provision)
+    DOMAIN="${1:?Usage: provision <domain> <port> <startup_command> <health_path>}"
+    PORT="${2:?Usage: provision <domain> <port> <startup_command> <health_path>}"
+    STARTUP_CMD="${3:?Usage: provision <domain> <port> <startup_command> <health_path>}"
+    HEALTH_PATH="${4:-/}"
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    mkdir -p "$SITE_DIR/{releases,current,shared}
+
+    # Create .alo-runtime and .alo-port markers
+    echo "NODE" > "$SITE_DIR/.alo-runtime"
+    echo "$PORT" > "$SITE_DIR/.alo-port"
+    echo "$STARTUP_CMD" > "$SITE_DIR/.alo-startup"
+    echo "$HEALTH_PATH" > "$SITE_DIR/.alo-health"
+
+    # Create systemd service
+    UNIT_NAME="alo-site-$DOMAIN"
+    SERVICE_FILE="/etc/systemd/system/$UNIT_NAME.service"
+    sudo tee "$SERVICE_FILE" > /dev/null << UNIT_EOF
+[Unit]
+Description=ALO Site: $DOMAIN
+After=network.target
+
+[Service]
+Type=simple
+User=aloedu
+WorkingDirectory=$SITE_DIR/current
+ExecStart=/usr/bin/env bash -c '$STARTUP_CMD'
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=$PORT
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable "$UNIT_NAME" 2>/dev/null || true
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"port\":$PORT,\"startupCommand\":\"$STARTUP_CMD\",\"healthPath\":\"$HEALTH_PATH\",\"serviceUnit\":\"$UNIT_NAME\",\"serviceFile\":\"$SERVICE_FILE\",\"provisionedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  deploy)
+    DOMAIN="${1:?Usage: deploy <domain> <release_path>}"
+    RELEASE_PATH="${2:?Usage: deploy <domain> <release_path>}"
+    validate_domain "$DOMAIN"
+
+    if [[ ! -d "$RELEASE_PATH" ]]; then
+      echo '{"success":false,"error":"Release path does not exist"}'
+      exit 1
+    fi
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    TIMESTAMP=$(date +%Y%m%d%H%M%S)
+    RELEASE_DIR="$SITE_DIR/releases/$TIMESTAMP"
+
+    # Determine next version number
+    VERSION=$(ls -1d "$SITE_DIR/releases/"* 2>/dev/null | wc -l)
+    VERSION=$((VERSION + 1))
+
+    cp -a "$RELEASE_PATH/"* "$RELEASE_DIR/" 2>/dev/null || true
+
+    # Update current symlink
+    ln -sfn "$RELEASE_DIR" "$SITE_DIR/current"
+
+    # Restart service
+    UNIT_NAME="alo-site-$DOMAIN"
+    sudo systemctl restart "$UNIT_NAME" 2>/dev/null || true
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"version\":$VERSION,\"releasePath\":\"$RELEASE_DIR\",\"currentSymlink\":\"$SITE_DIR/current\",\"deployedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  rollback)
+    DOMAIN="${1:?Usage: rollback <domain> <version>}"
+    VERSION="${2:?Usage: rollback <domain> <version>}"
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    RELEASES=($(ls -1d "$SITE_DIR/releases/"* 2>/dev/null | sort))
+
+    if [[ ${#RELEASES[@]} -eq 0 ]]; then
+      echo '{"success":false,"error":"No releases available for rollback"}'
+      exit 1
+    fi
+
+    # Find the target release by version index
+    TARGET_IDX=$((VERSION - 1))
+    if [[ $TARGET_IDX -lt 0 || $TARGET_IDX -ge ${#RELEASES[@]} ]]; then
+      echo "{\"success\":false,\"error\":\"Version $VERSION not found. Available: 1-${#RELEASES[@]}\"}"
+      exit 1
+    fi
+
+    TARGET_RELEASE="${RELEASES[$TARGET_IDX]}"
+    ln -sfn "$TARGET_RELEASE" "$SITE_DIR/current"
+
+    UNIT_NAME="alo-site-$DOMAIN"
+    sudo systemctl restart "$UNIT_NAME" 2>/dev/null || true
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"rolledBackTo\":$VERSION,\"releasePath\":\"$TARGET_RELEASE\",\"rolledBackAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  start)
+    DOMAIN="${1:?Usage: start <domain>}"
+    validate_domain "$DOMAIN"
+    UNIT_NAME="alo-site-$DOMAIN"
+    sudo systemctl start "$UNIT_NAME" 2>/dev/null
+    STATUS=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "unknown")
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\",\"action\":\"started\"}"
+    ;;
+
+  stop)
+    DOMAIN="${1:?Usage: stop <domain>}"
+    validate_domain "$DOMAIN"
+    UNIT_NAME="alo-site-$DOMAIN"
+    sudo systemctl stop "$UNIT_NAME" 2>/dev/null
+    STATUS=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "inactive")
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\",\"action\":\"stopped\"}"
+    ;;
+
+  restart)
+    DOMAIN="${1:?Usage: restart <domain>}"
+    validate_domain "$DOMAIN"
+    UNIT_NAME="alo-site-$DOMAIN"
+    sudo systemctl restart "$UNIT_NAME" 2>/dev/null
+    STATUS=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "unknown")
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\",\"action\":\"restarted\"}"
+    ;;
+
+  *)
+    echo "Available commands: provision, deploy, rollback, start, stop, restart" >&2
+    exit 1
+    ;;
+esac

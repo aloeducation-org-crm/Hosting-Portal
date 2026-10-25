@@ -1,0 +1,1 @@
+*/5 * * * * root /usr/local/sbin/alo-healthcheck.sh >> /var/log/alo-healthcheck.log 2>&1

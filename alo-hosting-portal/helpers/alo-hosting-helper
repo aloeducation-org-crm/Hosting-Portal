@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Hosting Helper (Meta-Helper)
+# General hosting operations: provisioning static/PHP sites, port allocation,
+# Caddy management, site existence checks, release cleanup.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+BACKUP_BASE="/var/backups/alo-sites"
+CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
+CADDY_LOG_DIR="/var/log/caddy/alo-sites"
+APP_USER="aloedu"
+APP_GROUP="aloedu"
+PORT_START=3102
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-hosting-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-hosting-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-hosting-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: provision-static ───────────────────────────────────────────────
+action_provision_static() {
+  if [[ $# -lt 1 ]]; then
+    die "provision-static" "Usage: provision-static <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local public_dir="${site_dir}/public"
+  local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
+
+  if [[ -d "$site_dir" ]]; then
+    die "provision-static" "Site directory already exists: ${domain}"
+  fi
+
+  # Create site directories
+  mkdir -p "${public_dir}/assets" "${public_dir}/css" "${public_dir}/js" "${public_dir}/images"
+  chown -R "${APP_USER}:${APP_GROUP}" "$site_dir"
+
+  # Create default index.html
+  cat > "${public_dir}/index.html" <<INDEXHTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${domain} — ALO Labs Hosting</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f8f9fa;
+            color: #212529;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+        p { color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>${domain}</h1>
+        <p>Site provisioned by ALO Labs Hosting Portal. Replace this file with your content.</p>
+    </div>
+</body>
+</html>
+INDEXHTML
+
+  chown "${APP_USER}:${APP_GROUP}" "${public_dir}/index.html"
+
+  # Create Caddy config
+  cat > "$caddy_file" <<CADDYCONF
+# ALO Labs Hosting - ${domain} (static)
+${domain} {
+    root * ${public_dir}
+    file_server
+    encode gzip
+
+    log {
+        output file ${CADDY_LOG_DIR}/${domain}-access.log
+    }
+}
+CADDYCONF
+
+  log_info "Created Caddy fragment: ${caddy_file}"
+
+  # Validate Caddy config
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || {
+    rm -f "$caddy_file"
+    die "provision-static" "Caddy config validation failed – cleaned up"
+  }
+
+  # Reload Caddy
+  systemctl reload caddy || die "provision-static" "Failed to reload Caddy"
+
+  json_out "{\"success\":true,\"step\":\"provision-static\",\"domain\":\"${domain}\",\"siteDir\":\"${site_dir}\",\"caddyConfig\":\"${caddy_file}\"}"
+}
+
+# ── action: provision-php ────────────────────────────────────────────────────
+action_provision_php() {
+  if [[ $# -lt 1 ]]; then
+    die "provision-php" "Usage: provision-php <domain> [create-db]"
+  fi
+
+  local domain="$1"
+  local create_db="${2:-false}"
+
+  validate_domain "$domain"
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local public_dir="${site_dir}/public"
+  local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
+
+  if [[ -d "$site_dir" ]]; then
+    die "provision-php" "Site directory already exists: ${domain}"
+  fi
+
+  # Create site directories
+  mkdir -p "${public_dir}"
+  chown -R "${APP_USER}:${APP_GROUP}" "$site_dir"
+
+  # Create default index.php
+  cat > "${public_dir}/index.php" <<INDEXPHP
+<?php
+echo '<!DOCTYPE html><html><head><title>' . htmlspecialchars('${domain}') . '</title></head>';
+echo '<body><h1>${domain}</h1>';
+echo '<p>PHP site provisioned by ALO Labs Hosting Portal.</p>';
+echo '<p>PHP ' . phpversion() . '</p>';
+echo '</body></html>';
+INDEXPHP
+
+  chown "${APP_USER}:${APP_GROUP}" "${public_dir}/index.php"
+
+  # Create Caddy config with PHP-FPM
+  cat > "$caddy_file" <<CADDYCONF
+# ALO Labs Hosting - ${domain} (PHP)
+${domain} {
+    root * ${public_dir}
+    php_fastcgi unix//run/php/php-fpm.sock
+    file_server
+    encode gzip
+
+    log {
+        output file ${CADDY_LOG_DIR}/${domain}-access.log
+    }
+}
+CADDYCONF
+
+  log_info "Created PHP Caddy fragment: ${caddy_file}"
+
+  # Optionally create database
+  local db_info="null"
+  if [[ "$create_db" == "true" ]]; then
+    local db_name="${domain//./_}"
+    local db_user="${db_name}_user"
+    # Generate random password
+    local db_pass
+    db_pass=$(tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom 2>/dev/null | head -c 32)
+
+    mysql -u root -e "
+      CREATE DATABASE IF NOT EXISTS \`${db_name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+      CREATE USER IF NOT EXISTS '${db_user}'@'localhost' IDENTIFIED BY '${db_pass}';
+      GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'localhost';
+      FLUSH PRIVILEGES;
+    " 2>/dev/null || log_err "Database creation failed (non-fatal)"
+
+    db_info="{\"database\":\"${db_name}\",\"username\":\"${db_user}\",\"password\":\"${db_pass}\"}"
+    log_info "Created MariaDB database: ${db_name}"
+  fi
+
+  # Validate Caddy config
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || {
+    rm -f "$caddy_file"
+    die "provision-php" "Caddy config validation failed – cleaned up"
+  }
+
+  # Reload Caddy
+  systemctl reload caddy || die "provision-php" "Failed to reload Caddy"
+
+  json_out "{\"success\":true,\"step\":\"provision-php\",\"domain\":\"${domain}\",\"siteDir\":\"${site_dir}\",\"database\":${db_info}}"
+}
+
+# ── action: validate-caddy ──────────────────────────────────────────────────
+action_validate_caddy() {
+  local output
+  output=$(caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1) || {
+    json_out "{\"success\":false,\"step\":\"validate-caddy\",\"error\":\"${output}\"}"
+    return
+  }
+  json_out "{\"success\":true,\"step\":\"validate-caddy\",\"valid\":true}"
+}
+
+# ── action: reload-caddy ──────────────────────────────────────────────────
+action_reload_caddy() {
+  systemctl reload caddy || die "reload-caddy" "Failed to reload Caddy"
+  json_out "{\"success\":true,\"step\":\"reload-caddy\"}"
+}
+
+# ── action: allocate-port ──────────────────────────────────────────────────
+action_allocate_port() {
+  local port="$PORT_START"
+  local max_port=32768
+
+  while [[ "$port" -lt "$max_port" ]]; do
+    if ! ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+      json_out "{\"success\":true,\"step\":\"allocate-port\",\"port\":${port}}"
+      return
+    fi
+    port=$((port + 1))
+  done
+
+  die "allocate-port" "No available ports in range ${PORT_START}-${max_port}"
+}
+
+# ── action: site-exists ─────────────────────────────────────────────────────
+action_site_exists() {
+  if [[ $# -lt 1 ]]; then
+    die "site-exists" "Usage: site-exists <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local has_dir="false"
+  local has_caddy="false"
+  local has_service="false"
+
+  [[ -d "$site_dir" ]] && has_dir="true"
+  [[ -f "${CADDY_CONFIG_DIR}/${domain}.caddy" ]] && has_caddy="true"
+  systemctl is-enabled "alo-site-${domain}.service" &>/dev/null && has_service="true"
+
+  local exists="false"
+  if [[ "$has_dir" == "true" ]]; then
+    exists="true"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"site-exists\",\"domain\":\"${domain}\",\"exists\":${exists},\"hasDirectory\":${has_dir},\"hasCaddyConfig\":${has_caddy},\"hasSystemService\":${has_service}}"
+}
+
+# ── action: cleanup-release ─────────────────────────────────────────────────
+action_cleanup_release() {
+  if [[ $# -lt 2 ]]; then
+    die "cleanup-release" "Usage: cleanup-release <domain> <keep-count>"
+  fi
+
+  local domain="$1"
+  local keep_count="$2"
+
+  validate_domain "$domain"
+
+  if ! [[ "$keep_count" =~ ^[0-9]+$ ]] || [[ "$keep_count" -lt 1 ]]; then
+    die "cleanup-release" "keep-count must be a positive integer"
+  fi
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local releases_dir="${site_dir}/releases"
+
+  if [[ ! -d "$releases_dir" ]]; then
+    json_out "{\"success\":true,\"step\":\"cleanup-release\",\"domain\":\"${domain}\",\"removed\":0,\"message\":\"No releases directory\"}"
+    return
+  fi
+
+  # Get list of release directories sorted by modification time (newest first)
+  local removed=0
+  local count=0
+
+  while IFS= read -r -d '' release; do
+    count=$((count + 1))
+    if [[ "$count" -gt "$keep_count" ]]; then
+      local release_name
+      release_name=$(basename "$release")
+      log_info "Removing old release: ${release_name}"
+      rm -r "$release" || log_err "Failed to remove ${release}"
+      removed=$((removed + 1))
+    fi
+  done < <(find "$releases_dir" -maxdepth 1 -mindepth 1 -type d -print0 | sort -z -r)
+
+  json_out "{\"success\":true,\"step\":\"cleanup-release\",\"domain\":\"${domain}\",\"removed\":${removed},\"kept\":${keep_count}}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  provision-static) action_provision_static "$@" ;;
+  provision-php)    action_provision_php "$@" ;;
+  validate-caddy)   action_validate_caddy "$@" ;;
+  reload-caddy)     action_reload_caddy "$@" ;;
+  allocate-port)    action_allocate_port "$@" ;;
+  site-exists)      action_site_exists "$@" ;;
+  cleanup-release)  action_cleanup_release "$@" ;;
+  *)                die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

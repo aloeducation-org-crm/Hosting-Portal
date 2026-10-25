@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# ALO Labs - Log Helper
+# Streams and retrieves logs from various sources
+# Usage: alo-log-helper <command> [args...]
+
+set -euo pipefail
+
+CADDY_LOG_DIR="/var/log/caddy/alo-sites"
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    echo '{"success":false,"error":"Invalid domain name"}'
+    exit 1
+  fi
+}
+
+validate_lines() {
+  local n="$1"
+  if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ $n -lt 1 ]] || [[ $n -gt 10000 ]]; then
+    echo '{"success":false,"error":"Lines must be between 1 and 10000"}'
+    exit 1
+  fi
+}
+
+COMMAND="${1:?Usage: alo-log-helper <command> [args...]}
+shift
+
+case "$COMMAND" in
+  caddy-access)
+    DOMAIN="${1:?Usage: caddy-access <domain> [lines]}"
+    LINES="${2:-100}"
+    validate_domain "$DOMAIN"
+    validate_lines "$LINES"
+
+    LOG_FILE="$CADDY_LOG_DIR/$DOMAIN.access.log"
+    if [[ ! -f "$LOG_FILE" ]]; then
+      echo "{\"success\":true,\"source\":\"caddy-access\",\"domain\":\"$DOMAIN\",\"lines\":[],\"totalLines\":0,\"message\":\"No access log found\"}"
+      exit 0
+    fi
+
+    TOTAL=$(wc -l < "$LOG_FILE")
+    # Convert log lines to JSON array
+    LINES_JSON=$(tail -n "$LINES" "$LOG_FILE" | jq -R . | jq -s .)
+    echo "{\"success\":true,\"source\":\"caddy-access\",\"domain\":\"$DOMAIN\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
+    ;;
+
+  caddy-error)
+    DOMAIN="${1:?Usage: caddy-error <domain> [lines]}"
+    LINES="${2:-100}"
+    validate_domain "$DOMAIN"
+    validate_lines "$LINES"
+
+    ERROR_LOG="$CADDY_LOG_DIR/$DOMAIN.error.log"
+    LINES_JSON="[]"
+    TOTAL=0
+
+    if [[ -f "$ERROR_LOG" ]]; then
+      TOTAL=$(wc -l < "$ERROR_LOG")
+      LINES_JSON=$(tail -n "$LINES" "$ERROR_LOG" | jq -R . | jq -s .)
+    fi
+
+    echo "{\"success\":true,\"source\":\"caddy-error\",\"domain\":\"$DOMAIN\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
+    ;;
+
+  systemd)
+    DOMAIN="${1:?Usage: systemd <domain> [lines]}"
+    LINES="${2:-100}"
+    validate_domain "$DOMAIN"
+    validate_lines "$LINES"
+
+    UNIT_NAME="alo-site-$DOMAIN"
+    # Use journalctl to get logs
+    LOG_OUTPUT=$(journalctl -u "$UNIT_NAME" -n "$LINES" --no-pager -o cat 2>/dev/null || echo "")
+    TOTAL=$(journalctl -u "$UNIT_NAME" --no-pager 2>/dev/null | wc -l || echo 0)
+    LINES_JSON=$(echo "$LOG_OUTPUT" | grep -v '^$' | jq -R . | jq -s .)
+
+    echo "{\"success\":true,\"source\":\"systemd\",\"domain\":\"$DOMAIN\",\"unitName\":\"$UNIT_NAME\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
+    ;;
+
+  php-fpm)
+    DOMAIN="${1:?Usage: php-fpm <domain> [lines]}"
+    LINES="${2:-100}"
+    validate_domain "$DOMAIN"
+    validate_lines "$LINES"
+
+    PHP_LOG="/var/log/php8.2-fpm.log"
+    LINES_JSON="[]"
+    TOTAL=0
+
+    if [[ -f "$PHP_LOG" ]]; then
+      # Filter by domain pool name
+      FILTERED=$(grep "alo-$DOMAIN" "$PHP_LOG" 2>/dev/null | tail -n "$LINES" || echo "")
+      TOTAL=$(grep -c "alo-$DOMAIN" "$PHP_LOG" 2>/dev/null || echo 0)
+      LINES_JSON=$(echo "$FILTERED" | grep -v '^$' | jq -R . | jq -s .)
+    fi
+
+    echo "{\"success\":true,\"source\":\"php-fpm\",\"domain\":\"$DOMAIN\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
+    ;;
+
+  list-available)
+    DOMAIN="${1:?Usage: list-available <domain>}"
+    validate_domain "$DOMAIN"
+
+    SOURCES="[]"
+    ITEMS=""
+
+    # Check caddy access log
+    if [[ -f "$CADDY_LOG_DIR/$DOMAIN.access.log" ]]; then
+      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
+      ITEMS="\"caddy-access\"$ITEMS"
+    fi
+
+    # Check caddy error log
+    if [[ -f "$CADDY_LOG_DIR/$DOMAIN.error.log" ]]; then
+      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
+      ITEMS="\"caddy-error\"$ITEMS"
+    fi
+
+    # Check systemd service
+    if systemctl list-unit-files "alo-site-$DOMAIN.service" &>/dev/null; then
+      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
+      ITEMS="\"systemd\"$ITEMS"
+    fi
+
+    # Check PHP-FPM log
+    if [[ -f "/var/log/php8.2-fpm.log" ]] && grep -q "alo-$DOMAIN" "/var/log/php8.2-fpm.log" 2>/dev/null; then
+      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
+      ITEMS="\"php-fpm\"$ITEMS"
+    fi
+
+    SOURCES="[$ITEMS]"
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"availableSources\":$SOURCES}"
+    ;;
+
+  *)
+    echo "Available commands: caddy-access, caddy-error, systemd, php-fpm, list-available" >&2
+    exit 1
+    ;;
+esac

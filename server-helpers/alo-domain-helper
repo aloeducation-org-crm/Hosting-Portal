@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# ALO Labs - Domain Helper
+# Manages DNS verification, SSL checks, and Caddy configuration
+# Usage: alo-domain-helper <command> [args...]
+
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+CADDY_DIR="/etc/caddy/sites-enabled"
+LOG_DIR="/var/log/caddy/alo-sites"
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    echo '{"success":false,"error":"Invalid domain name"}'
+    exit 1
+  fi
+}
+
+COMMAND="${1:?Usage: alo-domain-helper <command> [args...]}
+shift
+
+case "$COMMAND" in
+  add)
+    DOMAIN="${1:?Usage: add <domain> <website_domain>}
+    WEBSITE_DOMAIN="${2:?Usage: add <domain> <website_domain>}
+    validate_domain "$DOMAIN"
+    validate_domain "$WEBSITE_DOMAIN"
+
+    # Get runtime and port from site config if available
+    RUNTIME="STATIC"
+    PORT_OR_ROOT="/srv/alo-sites/$DOMAIN/public"
+    if [[ -f "$SITE_BASE/$DOMAIN/.alo-runtime" ]]; then
+      RUNTIME=$(cat "$SITE_BASE/$DOMAIN/.alo-runtime")
+    fi
+    if [[ -f "$SITE_BASE/$DOMAIN/.alo-port" ]]; then
+      PORT_OR_ROOT=$(cat "$SITE_BASE/$DOMAIN/.alo-port")
+    fi
+
+    # Generate Caddy config
+    mkdir -p "$LOG_DIR"
+    if [[ "$RUNTIME" == "STATIC" ]]; then
+      cat > "/tmp/caddy-$DOMAIN.conf" << CADDYEOF
+$DOMAIN {
+    root * $SITE_BASE/$DOMAIN/public
+    file_server
+    encode gzip
+    log {
+        output file $LOG_DIR/$DOMAIN.access.log
+    }
+}
+CADDYEOF
+    elif [[ "$RUNTIME" == "PHP82" ]]; then
+      cat > "/tmp/caddy-$DOMAIN.conf" << CADDYEOF
+$DOMAIN {
+    root * $SITE_BASE/$DOMAIN/public
+    php_fastcgi unix//run/php/php8.2-fpm-alo-$DOMAIN.sock
+    file_server
+    encode gzip
+    log {
+        output file $LOG_DIR/$DOMAIN.access.log
+    }
+}
+CADDYEOF
+    else
+      cat > "/tmp/caddy-$DOMAIN.conf" << CADDYEOF
+$DOMAIN {
+    reverse_proxy localhost:$PORT_OR_ROOT
+    encode gzip
+    log {
+        output file $LOG_DIR/$DOMAIN.access.log
+    }
+}
+CADDYEOF
+    fi
+
+    sudo cp "/tmp/caddy-$DOMAIN.conf" "$CADDY_DIR/$DOMAIN.conf"
+    rm -f "/tmp/caddy-$DOMAIN.conf"
+    sudo caddy validate --config "$CADDY_DIR/$DOMAIN.conf" --adapter caddyfile 2>/dev/null
+    sudo systemctl reload caddy 2>/dev/null
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"configPath\":\"$CADDY_DIR/$DOMAIN.conf\",\"runtime\":\"$RUNTIME\",\"reloadedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  remove)
+    DOMAIN="${1:?Usage: remove <domain>}
+    validate_domain "$DOMAIN"
+
+    if [[ -f "$CADDY_DIR/$DOMAIN.conf" ]]; then
+      sudo rm -f "$CADDY_DIR/$DOMAIN.conf"
+      sudo systemctl reload caddy 2>/dev/null
+    fi
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"removedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  verify-dns)
+    DOMAIN="${1:?Usage: verify-dns <domain>}
+    validate_domain "$DOMAIN"
+
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    TS_IP=$(ip -4 addr show tailscale0 2>/dev/null | grep -oP 'inet \K[\d.]+' || echo "")
+
+    # Query A records
+    A_RECORDS=$(dig +short A "$DOMAIN" 2>/dev/null || echo "")
+    AAAA_RECORDS=$(dig +short AAAA "$DOMAIN" 2>/dev/null || echo "")
+    CNAME_RECORD=$(dig +short CNAME "$DOMAIN" 2>/dev/null || echo "")
+
+    MATCHES=false
+    MATCH_IP=""
+    for ip in $A_RECORDS; do
+      if [[ "$ip" == "$SERVER_IP" ]]; then
+        MATCHES=true
+        MATCH_IP="$ip"
+        break
+      fi
+    done
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"serverIp\":\"$SERVER_IP\",\"tailscaleIp\":\"$TS_IP\",\"aRecords\":$(echo "$A_RECORDS" | jq -R . | jq -s .),\"aaaaRecords\":$(echo "$AAAA_RECORDS" | jq -R . | jq -s .),\"cnameRecord\":\"$CNAME_RECORD\",\"dnsVerified\":$MATCHES,\"matchedIp\":\"$MATCH_IP\",\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  check-ssl)
+    DOMAIN="${1:?Usage: check-ssl <domain>}
+    validate_domain "$DOMAIN"
+
+    SSL_INFO=$(echo | timeout 10 openssl s_client -servername "$DOMAIN" -connect "$DOMAIN:443" 2>/dev/null || echo "")
+    if [[ -z "$SSL_INFO" ]]; then
+      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"sslActive\":false,\"status\":\"NONE\"}"
+      exit 0
+    fi
+
+    ISSUER=$(echo "$SSL_INFO" | openssl x509 -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "")
+    NOT_BEFORE=$(echo "$SSL_INFO" | openssl x509 -noout -startdate 2>/dev/null | cut -d= -f2 || echo "")
+    NOT_AFTER=$(echo "$SSL_INFO" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+    SUBJECT=$(echo "$SSL_INFO" | openssl x509 -noout -subject 2>/dev/null | sed 's/subject=//' || echo "")
+
+    # Check expiry
+    EXPIRY_DAYS=0
+    if [[ -n "$NOT_AFTER" ]]; then
+      EXPIRY_EPOCH=$(date -d "$NOT_AFTER" +%s 2>/dev/null || echo 0)
+      NOW_EPOCH=$(date +%s)
+      EXPIRY_DAYS=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+    fi
+
+    if [[ $EXPIRY_DAYS -lt 0 ]]; then
+      STATUS="EXPIRED"
+    elif [[ $EXPIRY_DAYS -lt 30 ]]; then
+      STATUS="RENEWING"
+    else
+      STATUS="ISSUED"
+    fi
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"sslActive\":true,\"status\":\"$STATUS\",\"issuer\":\"$ISSUER\",\"subject\":\"$SUBJECT\",\"notBefore\":\"$NOT_BEFORE\",\"notAfter\":\"$NOT_AFTER\",\"daysUntilExpiry\":$EXPIRY_DAYS,\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  generate-caddy-config)
+    DOMAIN="${1:?Usage: generate-caddy-config <domain> <runtime> <port_or_root>}
+    RUNTIME="${2:?Usage: generate-caddy-config <domain> <runtime> <port_or_root>}
+    PORT_OR_ROOT="${3:?Usage: generate-caddy-config <domain> <runtime> <port_or_root>}
+    validate_domain "$DOMAIN"
+
+    mkdir -p "$LOG_DIR"
+
+    if [[ "$RUNTIME" == "STATIC" ]]; then
+      cat > "/tmp/caddy-$DOMAIN.conf" << CADDYEOF
+$DOMAIN {
+    root * $PORT_OR_ROOT
+    file_server
+    encode gzip
+    log {
+        output file $LOG_DIR/$DOMAIN.access.log
+    }
+}
+CADDYEOF
+    elif [[ "$RUNTIME" == "PHP82" ]]; then
+      cat > "/tmp/caddy-$DOMAIN.conf" << CADDYEOF
+$DOMAIN {
+    root * $PORT_OR_ROOT
+    php_fastcgi unix//run/php/php8.2-fpm-alo-$DOMAIN.sock
+    file_server
+    encode gzip
+    log {
+        output file $LOG_DIR/$DOMAIN.access.log
+    }
+}
+CADDYEOF
+    else
+      cat > "/tmp/caddy-$DOMAIN.conf" << CADDYEOF
+$DOMAIN {
+    reverse_proxy localhost:$PORT_OR_ROOT
+    encode gzip
+    log {
+        output file $LOG_DIR/$DOMAIN.access.log
+    }
+}
+CADDYEOF
+    fi
+
+    sudo cp "/tmp/caddy-$DOMAIN.conf" "$CADDY_DIR/$DOMAIN.conf"
+    rm -f "/tmp/caddy-$DOMAIN.conf"
+    sudo caddy validate --config "$CADDY_DIR/$DOMAIN.conf" --adapter caddyfile 2>/dev/null
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"runtime\":\"$RUNTIME\",\"configPath\":\"$CADDY_DIR/$DOMAIN.conf\",\"generatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  reload-caddy)
+    sudo systemctl reload caddy 2>/dev/null
+    CADDY_STATUS=$(systemctl is-active caddy 2>/dev/null || echo "unknown")
+    echo "{\"success\":true,\"caddyStatus\":\"$CADDY_STATUS\",\"reloadedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  *)
+    echo "Available commands: add, remove, verify-dns, check-ssl, generate-caddy-config, reload-caddy" >&2
+    exit 1
+    ;;
+esac

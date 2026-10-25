@@ -1,0 +1,17 @@
+[Unit]
+Description=ALO Labs Application
+After=network.target
+
+[Service]
+Type=simple
+User=aloedu
+WorkingDirectory=/opt/app
+Environment=NODE_ENV=production
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3101
+ExecStart=/usr/bin/node /opt/app/.next/standalone/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
