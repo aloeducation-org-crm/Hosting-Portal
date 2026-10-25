@@ -4,6 +4,25 @@ A production web-hosting control panel: Next.js 16 App Router, React 19,
 TypeScript, Tailwind 4, shadcn/ui, Prisma, RBAC, MFA, AI agents, CRM, billing,
 monitoring, SSL lifecycle, site provisioning.
 
+## AI: provider chain + automation server
+
+- **Providers** (`src/lib/ai/providers.ts`): an ordered, OpenAI-compatible chain
+  with failover, retries and a circuit breaker. A free anonymous backend (LLM7.io)
+  works with no key; UnoRouter/Groq/OpenAI/self-hosted LiteLLM/Ollama are profiles
+  you enable in `.env`. Configure with `AI_PROVIDER_ORDER`, then verify live with
+  `GET /api/ai/status?probe=1` — configuration alone is never reported as health.
+- **Automations** (`src/lib/ai/automation/`): validated DAGs that mix model calls
+  with read-only hosting queries (`listSites`, `siteHealth`, `sslExpiring`),
+  executed server-side with per-step logs, dry-run and persisted run history.
+  UI at `/ai/automations`, API under `/api/ai/workflows`.
+- **No demo answers.** The old `agents/:slug/run` behaviour that emitted canned
+  text when no key was set is removed; without a reachable provider those routes
+  return `503 AI_NOT_CONFIGURED`.
+
+Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md) (including the
+honest table of which upstream projects are integrated and which are not) and
+[docs/AI-AUTOMATION.md](docs/AI-AUTOMATION.md).
+
 ---
 
 ## ⚠️ Read this first: which directory is the app?

@@ -52,6 +52,7 @@ const clientNavItems = [
   { label: "Databases", href: "/databases", icon: Database },
   { label: "Storage", href: "/storage", icon: HardDrive },
   { label: "AI Builder", href: "/ai/builder", altPrefix: "/dashboard/agents", icon: Bot },
+  { label: "AI Automations", href: "/ai/automations", icon: Zap },
   { label: "CRM", href: "/dashboard/crm", icon: Users },
   { label: "Email", href: "/dashboard/email", icon: Mail },
   { label: "Billing", href: "/dashboard/billing", altPrefix: "/billing", icon: CreditCard },
