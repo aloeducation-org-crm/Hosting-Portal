@@ -1622,8 +1622,40 @@ model AiWorkflow {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  runs        AiWorkflowRun[]
+
   @@index([userId])
+  @@index([status])
   @@map("ai_workflows")
+}
+
+/// One execution of an AiWorkflow by the automation engine.
+/// `steps` and `input`/`output` hold JSON text so a run is replayable without a
+/// second join table; see src/lib/ai/automation/runner.ts.
+model AiWorkflowRun {
+  id          String   @id @default(uuid())
+  workflowId  String
+  userId      String?
+  trigger     String   @default("manual") // manual, schedule, webhook
+  status      String   @default("running") // running, succeeded, failed
+  dryRun      Boolean  @default(false)
+  input       String?
+  output      String?
+  steps       String?
+  error       String?
+  providers   String?  // comma-separated provider ids that answered
+  aiCalls     Int      @default(0)
+  tokensUsed  Int      @default(0)
+  durationMs  Int?
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+
+  workflow    AiWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("ai_workflow_runs")
 }
 
 // ─── Contact (form submissions) ─────────────────────────────────────────────
