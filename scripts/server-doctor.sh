@@ -492,6 +492,25 @@ api=$(curl -sS -o /tmp/doctor-api -w '%{http_code}' --max-time 12 "https://${DOM
 [[ -n "$api" ]] || api="000"
 [[ "$api" == "200" ]] && { pass "https://${DOMAIN}/api/health → 200"; head -c 200 /tmp/doctor-api; echo; } || fail "https://${DOMAIN}/api/health → ${api}"
 
+# Who actually answered? A Cloudflare Workers service connected to this repo
+# (dashboard → Workers & Pages → hosting-portal → Domains & Routes) takes
+# priority over a tunnel CNAME, and a Next.js app cannot be built as a Worker
+# without @opennextjs/cloudflare — so the build fails and the hostname serves an
+# error instead of your panel. nginx always advertises itself; a Worker does not.
+hdrs=$(curl -sSI --max-time 12 "https://${DOMAIN}/" 2>/dev/null || true)
+if [[ -n "$hdrs" ]]; then
+  server_hdr=$(printf '%s' "$hdrs" | grep -iE '^server:' | head -1 | tr -d '\r')
+  if printf '%s' "$server_hdr" | grep -qi "nginx"; then
+    pass "public responses come from YOUR nginx (${server_hdr})"
+  elif [[ -n "$server_hdr" ]]; then
+    warn "public 'server' header is '${server_hdr}' — not your nginx"
+  else
+    warn "no 'server' header from https://${DOMAIN}/ — the response did not come from your nginx"
+    fix "Cloudflare dashboard → Workers & Pages: if a Worker (e.g. 'hosting-portal') is bound to ${DOMAIN}, remove that hostname so the tunnel is authoritative. A failing Workers build on this repo does not deploy your panel; it just owns the hostname."
+  fi
+  printf '%s' "$hdrs" | grep -qiE '^cf-ray:' && echo "          (served via Cloudflare edge — cf-ray present)"
+fi
+
 # ═══ 10. FIREWALL & EXPOSED SERVICES ══════════════════════════════════════════
 head_ "10. Firewall & exposure"
 

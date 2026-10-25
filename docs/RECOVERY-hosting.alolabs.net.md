@@ -189,6 +189,42 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo mkdir -p /var/www/certbot        # ACME challenge root for renewals
 ```
 
+### 2.1 Make sure nothing else owns the hostname
+
+This repository is also connected to a **Cloudflare Workers build** (account
+`7164cebb…`, service `hosting-portal`). It reports **failure** on every push —
+correctly, because a Next.js 16 app cannot be built as a Worker without
+`@opennextjs/cloudflare`, and this repo has no `wrangler.toml`.
+
+A failing build is harmless noise **unless that Worker is bound to
+`hosting.alolabs.net`**. If it is, a Workers route/custom domain takes priority
+over the tunnel CNAME, and the hostname serves the Worker's error instead of
+your panel — which also produces edge 5xx while everything on the server looks
+healthy. Your certbot run showed exactly that class of failure *before* the
+tunnel route existed:
+
+```
+Detail: 2606:4700:3034::6815:223a: Invalid response from
+        http://hosting.alolabs.net/.well-known/acme-challenge/…: 530
+```
+
+Check it once, in the dashboard:
+
+1. **Workers & Pages → `hosting-portal` → Settings → Domains & Routes.** If
+   `hosting.alolabs.net` (or `*.alolabs.net`) is listed, **remove it**. Then
+   either disconnect the Worker from this repository, or delete the Worker if
+   nothing uses it — otherwise every push keeps producing a red build.
+2. **alolabs.net → DNS → Records.** There must be exactly **one** record for
+   `hosting`: a CNAME to `7160647f-edfb-42c0-b98d-b760c30a0a61.cfargotunnel.com`,
+   proxied. You hit `code: 1003 … An A, AAAA, or CNAME record with that host
+   already exists` twice, which means an older record was in the way; the second
+   `cloudflared tunnel route dns` succeeded, so confirm the stale one is gone.
+
+`scripts/server-doctor.sh` verifies this from the response headers: nginx always
+advertises `server: nginx/…`, a Worker does not. A missing or non-nginx `server`
+header on `https://hosting.alolabs.net/` means something other than your nginx
+answered.
+
 **Cloudflare dashboard → alolabs.net → SSL/TLS → Overview: set the mode to
 `Full`.** Not *Flexible* (it re-encrypts to port 80 and re-creates the loop),
 not *Full (strict)* (it rejects the loopback SNI). Your certificate is already
