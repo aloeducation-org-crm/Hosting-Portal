@@ -38,10 +38,29 @@ const envSchema = z.object({
   ALLOW_NEXTJS: z.coerce.boolean().default(true),
   COMMERCIAL_HOSTING: z.coerce.boolean().default(false),
 
-  // AI
+  // OAuth Providers
+  GOOGLE_CLIENT_ID: z.string().optional().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().optional().default(""),
+  GITHUB_CLIENT_ID: z.string().optional().default(""),
+  GITHUB_CLIENT_SECRET: z.string().optional().default(""),
+
+  // AI & LiteLLM Gateway
   OPENAI_API_KEY: z.string().optional().default(""),
   OPENAI_BASE_URL: z.string().default("https://api.openai.com/v1"),
+  AI_GATEWAY_URL: z.string().default("http://localhost:4000/v1"),
+  AI_GATEWAY_KEY: z.string().optional().default(""),
   AI_MODEL: z.string().default("gpt-4o-mini"),
+
+  // Billing & Stripe
+  STRIPE_SECRET_KEY: z.string().optional().default(""),
+  STRIPE_WEBHOOK_SECRET: z.string().optional().default(""),
+
+  // Cloudflare DNS & SSL
+  CLOUDFLARE_API_TOKEN: z.string().optional().default(""),
+  CLOUDFLARE_ZONE_ID: z.string().optional().default(""),
+
+  // Encryption
+  APP_ENCRYPTION_KEY: z.string().default("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
 
   // Redis
   REDIS_URL: z.string().optional(),
@@ -73,8 +92,11 @@ function loadEnv(input?: EnvInput) {
   }
 
   // Runtime security: block server startup (not build) if production uses default secrets
-  // Next.js build sets NEXT_WORKER_ID in its worker processes
-  const isBuildWorker = !!process.env.NEXT_WORKER_ID || !!process.env.BUILD_ID;
+  const isBuildWorker =
+    !!process.env.NEXT_WORKER_ID ||
+    !!process.env.BUILD_ID ||
+    process.env.NEXT_PHASE === "phase-production-build" ||
+    process.env.npm_lifecycle_event === "build";
   const data = result.data;
   if (data.NODE_ENV === 'production' && !isBuildWorker) {
     if (data.NEXTAUTH_SECRET === 'dev-secret-change-in-production') {

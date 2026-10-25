@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  allowedDevOrigins: ["*.e2b.app"],
   typescript: {
     ignoreBuildErrors: false,
   },

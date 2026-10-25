@@ -1,12 +1,18 @@
 import { getServerSession } from "next-auth/next";
+import { getToken } from "next-auth/jwt";
 import { apiError } from "@/lib/response";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import { authOptions, handlers, auth } from "@/lib/nextauth";
+
+export { authOptions, handlers, auth };
 
 export const ROLES = {
   SUPER_ADMIN: "SUPER_ADMIN" as const,
   ADMIN: "ADMIN" as const,
+  RESELLER: "RESELLER" as const,
+  CLIENT: "CLIENT" as const,
   DEVOPS: "DEVOPS" as const,
   SUPPORT: "SUPPORT" as const,
   VIEWER: "VIEWER" as const,
@@ -49,11 +55,13 @@ export const PERMISSIONS = [
 
 export type PermissionName = (typeof PERMISSIONS)[number];
 
-const ROLE_HIERARCHY: Record<RoleName, number> = {
+export const ROLE_HIERARCHY: Record<RoleName, number> = {
   SUPER_ADMIN: 100,
   ADMIN: 80,
+  RESELLER: 70,
   DEVOPS: 60,
   SUPPORT: 40,
+  CLIENT: 30,
   VIEWER: 20,
 };
 
@@ -65,19 +73,41 @@ export type AuthUser = {
   permissions: string[];
 };
 
-export async function requireSession(request: NextRequest): Promise<AuthUser> {
-  const session = await getServerSession();
+export function isAdminRole(role?: string | null): boolean {
+  return role === ROLES.SUPER_ADMIN || role === ROLES.ADMIN;
+}
 
-  if (!session?.user) {
+export function isResellerRole(role?: string | null): boolean {
+  return role === ROLES.RESELLER || isAdminRole(role);
+}
+
+export function isClientRole(role?: string | null): boolean {
+  return role === ROLES.CLIENT || role === ROLES.VIEWER;
+}
+
+export async function requireSession(request: NextRequest): Promise<AuthUser> {
+  let email: string | undefined;
+
+  const session = await getServerSession();
+  if (session?.user?.email) {
+    email = session.user.email;
+  } else if (request) {
+    try {
+      const token = await getToken({ req: request, secret: env.NEXTAUTH_SECRET });
+      if (token?.email) {
+        email = String(token.email);
+      }
+    } catch {
+      // Ignore token parsing error on mock requests
+    }
+  }
+
+  if (!email) {
     throw apiError("Authentication required", "UNAUTHORIZED", undefined, 401);
   }
 
-  if (!session.user.email) {
-    throw apiError("Invalid session", "UNAUTHORIZED", undefined, 401);
-  }
-
   const user = await db.user.findUnique({
-    where: { email: session.user.email },
+    where: { email },
     include: { role: { include: { permissions: { include: { permission: true } } } } },
   });
 
@@ -136,6 +166,14 @@ export async function requireSuperAdmin(request: NextRequest): Promise<AuthUser>
   return requireRole(request, [ROLES.SUPER_ADMIN]);
 }
 
+export async function requireAdmin(request: NextRequest): Promise<AuthUser> {
+  return requireRole(request, [ROLES.SUPER_ADMIN, ROLES.ADMIN]);
+}
+
+export async function requireReseller(request: NextRequest): Promise<AuthUser> {
+  return requireRole(request, [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.RESELLER]);
+}
+
 export function hasPermission(permissions: string[], permission: string): boolean {
   return permissions.includes(permission);
 }
@@ -160,8 +198,7 @@ export function isRoleAtLeast(role: string, minimum: string): boolean {
  */
 export function verifyToken(token: string): { id: string; email: string; role: string } {
   if (!token || token !== env.INTERNAL_SECRET) {
-    throw apiError('Invalid or expired token', 'UNAUTHORIZED', undefined, 401);
+    throw apiError("Invalid or expired token", "UNAUTHORIZED", undefined, 401);
   }
-  // For internal service tokens, return a system-level user
-  return { id: 'system', email: 'system@alolabs.net', role: ROLES.SUPER_ADMIN };
+  return { id: "system", email: "system@alolabs.net", role: ROLES.SUPER_ADMIN };
 }
