@@ -222,7 +222,7 @@ export default function AIChatWidget() {
 
       const assistantMessage: ChatMessage = {
         role: 'assistant',
-        content: data.message ?? 'Sorry, I could not generate a response.',
+        content: data.reply ?? data.data?.reply ?? data.message ?? 'Sorry, I could not generate a response.',
         timestamp: new Date(),
       };
 

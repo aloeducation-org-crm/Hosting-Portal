@@ -5,31 +5,25 @@ const RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const RATE_MAX = 100;
 const RATE_WINDOW_MS = 60_000;
 
-// Login-specific stricter rate limit
 const LOGIN_RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const LOGIN_RATE_MAX = 10;
 const LOGIN_RATE_WINDOW_MS = 60_000;
 
-const PUBLIC_PATHS = ['/api/auth', '/api/health', '/api/pricing', '/api/deploy/webhook'];
+const PUBLIC_PATHS = ['/api/auth', '/api/health', '/api/pricing', '/api/deploy/webhook', '/api/ai/chat'];
 const LOGIN_PATH = '/api/auth/login';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-
-  // --- Rate limiting (applies to ALL requests) ---
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
-
+    request.headers.get("x-real-ip") || "unknown";
   const now = Date.now();
 
-  // Stricter rate limit for login endpoint
   if (pathname === LOGIN_PATH) {
     const loginEntry = LOGIN_RATE_LIMIT.get(ip);
     if (loginEntry && now < loginEntry.resetAt) {
       if (loginEntry.count >= LOGIN_RATE_MAX) {
         return NextResponse.json(
-          { status: 429, success: false, message: "Too many login attempts. Try again later.", error: { code: "RATE_LIMITED" }, requestId: "" },
+          { status: 429, success: false, message: "Too many login attempts.", error: { code: "RATE_LIMITED" }, requestId: "" },
           { status: 429 }
         );
       }
@@ -39,7 +33,6 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // General rate limiting
   if (!PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
     const entry = RATE_LIMIT.get(ip);
     if (entry && now < entry.resetAt) {
@@ -55,7 +48,6 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // --- Security headers (on ALL responses) ---
   const response = NextResponse.next();
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -64,17 +56,15 @@ export async function middleware(request: NextRequest) {
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 
-  // --- Authentication for protected paths ---
   if (pathname.startsWith("/dashboard")) {
     const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
     if (!token) {
-      const loginUrl = new URL("/", request.url);
+      const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
     }
   }
 
-  // --- API authentication ---
   if (pathname.startsWith("/api/") && !PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
     const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
     if (!token) {
@@ -89,8 +79,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/api/:path*",
-  ],
+  matcher: ["/dashboard/:path*", "/api/:path*"],
 };

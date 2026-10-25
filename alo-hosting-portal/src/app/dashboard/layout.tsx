@@ -35,6 +35,7 @@ import {
   User,
   ChevronRight,
   Zap,
+  MessageSquare,
 } from 'lucide-react'
 
 const navItems = [
@@ -46,6 +47,7 @@ const navItems = [
   { label: 'Email', href: '/dashboard/email', icon: Mail },
   { label: 'Billing', href: '/dashboard/billing', icon: CreditCard },
   { label: 'Settings', href: '/dashboard/settings', icon: Settings },
+  { label: 'Webchat', href: '/dashboard/webchat', icon: MessageSquare },
 ]
 
 function useAuthRedirect() {

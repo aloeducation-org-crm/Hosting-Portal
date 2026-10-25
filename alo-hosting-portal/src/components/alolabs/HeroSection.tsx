@@ -75,7 +75,7 @@ export default function HeroSection() {
                 value={domainQuery}
                 onChange={(e) => setDomainQuery(e.target.value)}
                 onFocus={() => results.length > 0 && setShowResults(true)}
-                placeholder="Type the domain you want"
+                id="domain-search" name="domain" placeholder="Type the domain you want"
                 className="flex-1 bg-transparent px-5 py-3.5 text-sm text-alo-text placeholder:text-alo-text-muted/60 focus:outline-none md:px-6 md:py-4 md:text-base"
               />
               <button
