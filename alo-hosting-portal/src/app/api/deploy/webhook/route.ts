@@ -1,119 +1,114 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { db } from '@/lib/db';
-import { env } from '@/lib/env';
-import { v4 as uuidv4 } from 'uuid';
-import { createAuditLog } from '@/lib/audit';
-
-function handleErr(e: unknown): NextResponse {
-  if (e && typeof e === 'object' && 'status' in e) {
-    const a = e as ApiResponse;
-    return NextResponse.json(a, { status: a.status });
-  }
-  return NextResponse.json(apiError('Internal server error'), { status: 500 });
-}
+import crypto from 'crypto';
+import { prisma } from '@/lib/prisma';
+import { executeDeployment } from '@/lib/deploy/orchestrator';
 
 export async function POST(request: NextRequest) {
   try {
-    // Webhook auth via header secret
-    const webhookSecret = request.headers.get('x-webhook-secret');
-    if (!webhookSecret || webhookSecret !== env.INTERNAL_SECRET) {
-      throw apiError('Invalid or missing webhook secret', 'UNAUTHORIZED', undefined, 401);
+    const bodyText = await request.text();
+    const sigHeader = request.headers.get('x-hub-signature-256');
+    const signature = sigHeader ? sigHeader : '';
+    const eventHeader = request.headers.get('x-github-event');
+    const eventName = eventHeader ? eventHeader : '';
+    const deliveryHeader = request.headers.get('x-github-delivery');
+    const deliveryId = deliveryHeader ? deliveryHeader : '';
+    const secretA = process.env.GITHUB_WEBHOOK_SECRET;
+    const secretB = process.env.CRON_SECRET;
+    let webhookSecret = '';
+    if (secretA) { webhookSecret = secretA; }
+    else if (secretB) { webhookSecret = secretB; }
+    if (webhookSecret.length > 0 && signature.length > 0) {
+      const hmac = crypto.createHmac('sha256', webhookSecret);
+      hmac.update(bodyText);
+      const digest = 'sha256=' + hmac.digest('hex');
+      const aBuf = Buffer.from(signature);
+      const bBuf = Buffer.from(digest);
+      let sigOk = false;
+      if (aBuf.length === bBuf.length) {
+        sigOk = crypto.timingSafeEqual(aBuf, bBuf);
+      }
+      if (sigOk === false) {
+        return NextResponse.json({ success: false, error: 'Invalid HMAC signature' }, { status: 401 });
+      }
     }
-
-    const body = await request.json();
-    const { websiteId, branch, commitHash, commitMessage } = body as {
-      websiteId: string;
-      branch?: string;
-      commitHash?: string;
-      commitMessage?: string;
-    };
-
-    if (!websiteId) {
-      throw apiError('websiteId is required', 'VALIDATION_ERROR', undefined, 400);
-    }
-
-    // Verify website exists
-    const website = await db.website.findUnique({
-      where: { id: websiteId },
-    });
-    if (!website) {
-      throw apiError('Website not found', 'NOT_FOUND', undefined, 404);
-    }
-
-    // Find or create CI pipeline
-    let pipeline = await db.ciPipeline.findFirst({
-      where: { websiteId },
-    });
-
-    if (!pipeline) {
-      pipeline = await db.ciPipeline.create({
-        data: {
-          name: `${website.domain}-pipeline`,
-          websiteId,
-          branch: branch || 'main',
-          status: 'active',
-        },
+    if (eventName === 'push' || eventName === 'workflow_dispatch') {
+      let payload: any = {};
+      try { payload = JSON.parse(bodyText); } catch { payload = {}; }
+      let repoUrl = '';
+      if (payload.repository && payload.repository.clone_url) { repoUrl = payload.repository.clone_url; }
+      else if (payload.repository && payload.repository.html_url) { repoUrl = payload.repository.html_url; }
+      let branch = 'main';
+      if (payload.ref && typeof payload.ref === 'string') {
+        const prefix = 'refs/heads/';
+        if (payload.ref.indexOf(prefix) === 0) {
+          branch = payload.ref.substring(prefix.length);
+        } else {
+          branch = payload.ref;
+        }
+      }
+      let commitHash = 'manual';
+      if (payload.after) { commitHash = payload.after; }
+      else if (payload.head_commit && payload.head_commit.id) { commitHash = payload.head_commit.id; }
+      let commitMessage = 'GitHub Push Event';
+      if (payload.head_commit && payload.head_commit.message) { commitMessage = payload.head_commit.message; }
+      let commitAuthor = 'GitHub User';
+      if (payload.head_commit && payload.head_commit.author && payload.head_commit.author.name) {
+        commitAuthor = payload.head_commit.author.name;
+      } else if (payload.pusher && payload.pusher.name) {
+        commitAuthor = payload.pusher.name;
+      }
+      if (repoUrl.length === 0) {
+        return NextResponse.json({ success: false, message: 'No repository URL in payload' }, { status: 400 });
+      }
+      let repoName = '';
+      if (payload.repository && payload.repository.name) { repoName = payload.repository.name; }
+      let repoFull = repoName;
+      if (payload.repository && payload.repository.full_name) { repoFull = payload.repository.full_name; }
+      if (repoName.length === 0) {
+        return NextResponse.json({ success: false, message: 'Missing repo name' }, { status: 400 });
+      }
+      const website = await prisma.website.findFirst({
+        where: {
+          OR: [
+            { domain: repoName },
+            { documentRoot: { contains: repoName } }
+          ]
+        }
+      });
+      if (website === null || website === undefined) {
+        return NextResponse.json({
+          success: true,
+          message: 'Webhook received. No website linked yet.',
+          repository: repoFull,
+          commit: commitHash
+        });
+      }
+      const deployResult = await executeDeployment({
+        websiteId: website.id,
+        repositoryUrl: repoUrl,
+        branch: branch,
+        commitHash: commitHash,
+        commitMessage: commitMessage,
+        commitAuthor: commitAuthor
+      });
+      return NextResponse.json({
+        success: true,
+        message: 'Deployment triggered via GitHub webhook',
+        deliveryId: deliveryId,
+        deployResult: deployResult
       });
     }
-
-    // Get next build number
-    const lastBuild = await db.ciBuild.findFirst({
-      where: { pipelineId: pipeline.id },
-      orderBy: { number: 'desc' },
-    });
-    const nextNumber = (lastBuild?.number ?? 0) + 1;
-
-    // Create CI build
-    const build = await db.ciBuild.create({
-      data: {
-        pipelineId: pipeline.id,
-        number: nextNumber,
-        commitHash,
-        commitMessage,
-        branch: branch || 'main',
-        status: 'pending',
-        triggeredBy: 'webhook',
-      },
-    });
-
-    // Create deployment record
-    const deployment = await db.deployment.create({
-      data: {
-        websiteId,
-        source: 'git-push',
-        commitHash,
-        status: 'PENDING',
-      },
-    });
-
-    await createAuditLog({
-      action: 'DEPLOYMENT_WEBHOOK_TRIGGERED',
-      resourceType: 'Deployment',
-      resourceId: deployment.id,
-      result: 'SUCCESS',
-      metadata: {
-        websiteId,
-        buildId: build.id,
-        pipelineId: pipeline.id,
-        branch,
-        commitHash,
-        commitMessage,
-      },
-    });
-
-    return NextResponse.json(
-      apiSuccess(
-        {
-          buildId: build.id,
-          deploymentId: deployment.id,
-          pipelineId: pipeline.id,
-          status: 'triggered',
-        },
-        'Deployment triggered successfully',
-      ),
-    );
-  } catch (e) {
-    return handleErr(e);
+    if (eventName === 'ping') {
+      return NextResponse.json({ success: true, message: 'pong' });
+    }
+    return NextResponse.json({ success: true, message: 'Event acknowledged: ' + eventName });
+  } catch (err: any) {
+    let msg = 'webhook error';
+    if (err && err.message) { msg = String(err.message); }
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
+}
+
+export async function GET() {
+  return NextResponse.json({ success: true, message: 'deploy webhook alive' });
 }
