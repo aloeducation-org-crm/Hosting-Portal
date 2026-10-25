@@ -43,11 +43,13 @@ import {
   Layers,
   FileText,
   Sparkles,
+  Rocket,
 } from "lucide-react";
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },
+  { label: "Deployments", href: "/deployments", altPrefix: "/dashboard/deployments", icon: Rocket },
   { label: "Domains", href: "/dashboard/domains", icon: Globe },
   { label: "Databases", href: "/databases", icon: Database },
   { label: "Storage", href: "/storage", icon: HardDrive },

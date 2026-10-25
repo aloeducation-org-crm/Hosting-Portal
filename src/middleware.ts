@@ -34,6 +34,10 @@ const PUBLIC_API_PATHS = [
   "/api/internal/sites/ssl-status",
   "/api/contact",
   "/api/newsletter",
+  // GitHub webhooks are authenticated by HMAC-SHA256 signature, not a session.
+  "/api/github/webhook",
+  // OAuth callback is CSRF-protected by the one-time state cookie.
+  "/api/github/callback",
 ];
 
 const ADMIN_UI_PREFIXES = [
@@ -57,6 +61,7 @@ const DASHBOARD_UI_PREFIXES = [
   "/billing",
   "/settings",
   "/onboarding",
+  "/deployments",
 ];
 
 const ADMIN_API_PREFIXES = [
@@ -285,6 +290,7 @@ export const config = {
     "/billing/:path*",
     "/settings/:path*",
     "/onboarding/:path*",
+    "/deployments/:path*",
     "/api/:path*",
   ],
 };
