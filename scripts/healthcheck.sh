@@ -1,8 +1,9 @@
 #!/bin/bash
 # ALO Labs Health Check Script
 # Usage: ./scripts/healthcheck.sh [url]
+# Without an explicit URL it uses $PORT (default 3101, same as src/lib/env.ts).
 
-HEALTH_URL="${1:-http://127.0.0.1:3101/api}"
+HEALTH_URL="${1:-http://127.0.0.1:${PORT:-3101}/api}"
 TIMEOUT=10
 
 response=$(curl -s -o /dev/null -w "%{http_code}" --max-time "${TIMEOUT}" "${HEALTH_URL}" 2>/dev/null)

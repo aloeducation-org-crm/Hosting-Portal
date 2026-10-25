@@ -1,23 +1,37 @@
+# ALO Labs Hosting Portal — Caddy reverse proxy (development / single-site mode)
+#
+# The upstream port is NOT hardcoded: set PORT in the environment of the Caddy
+# service (or in /etc/caddy/.env via `Environment=` in caddy.service) and Caddy
+# picks it up. Falls back to 3101, the same default as src/lib/env.ts.
+#
+#   PORT=3051 sudo systemctl restart caddy
+#
+# In production prefer a named site block instead of the catch-all below:
+#
+#   {$APP_DOMAIN:hosting.alolabs.net} {
+#       reverse_proxy 127.0.0.1:{$PORT:3101}
+#   }
+
 :81 {
-        @transform_port_query {
-                query XTransformPort=*
-        }
+	@transform_port_query {
+		query XTransformPort=*
+	}
 
-        handle @transform_port_query {
-                reverse_proxy localhost:{query.XTransformPort} {
-                        header_up Host {host}
-                        header_up X-Forwarded-For {remote_host}
-                        header_up X-Forwarded-Proto {scheme}
-                        header_up X-Real-IP {remote_host}
-                }
-        }
+	handle @transform_port_query {
+		reverse_proxy localhost:{query.XTransformPort} {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
-        handle {
-                reverse_proxy localhost:3101 {
-                        header_up Host {host}
-                        header_up X-Forwarded-For {remote_host}
-                        header_up X-Forwarded-Proto {scheme}
-                        header_up X-Real-IP {remote_host}
-                }
-        }
+	handle {
+		reverse_proxy localhost:{$PORT:3101} {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+		}
+	}
 }

@@ -170,7 +170,7 @@ action_delete() {
 action_enable() {
   # Ensure SSH is allowed before enabling to prevent lockout
   ufw allow 22/tcp 2>/dev/null || true
-  ufw allow 3101/tcp 2>/dev/null || true  # Panel port
+  ufw allow "${PORT:-3101}/tcp" 2>/dev/null || true  # Panel port (PORT env, default 3101)
   ufw allow 80/tcp 2>/dev/null || true   # HTTP
   ufw allow 443/tcp 2>/dev/null || true  # HTTPS
 

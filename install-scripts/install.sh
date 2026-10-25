@@ -75,7 +75,8 @@ echo "[5/8] Creating .env.production..."
 cat > "$INSTALL_DIR/.env" << ENV_EOF
 NODE_ENV=production
 HOSTNAME=127.0.0.1
-PORT=3101
+# Single source of truth for the panel port. Override: PORT=3051 ./install.sh
+PORT=${PORT:-3101}
 APP_URL=https://hosting.alolabs.net
 NEXTAUTH_URL=https://hosting.alolabs.net
 NEXTAUTH_SECRET=$NEXTAUTH_SECRET
