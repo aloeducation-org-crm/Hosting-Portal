@@ -1,0 +1,25 @@
+name: Auto Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install & Build
+        run: |
+          cd alo-hosting-portal
+          npm install
+          npx prisma generate
+          npm run build
+
+      - name: Restart Application
+        run: |
+          cd alo-hosting-portal
+          pm2 restart alo-hosting || PORT=3051 pm2 start npm --name "alo-hosting" -- start
+          pm2 save
