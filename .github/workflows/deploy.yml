@@ -1,240 +1,28 @@
-name: Deploy
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Deploys the REPOSITORY ROOT application (alo-hosting-panel) to alo-server-lap
-# on the self-hosted runner registered as `alo-server-lap`
-# (labels: self-hosted, linux, production).
-#
-# It does NOT build or deploy `alo-hosting-portal/` — that directory is a legacy
-# snapshot with no /login route. See README.md.
-#
-# Release model: every deploy writes an immutable directory
-#   /home/alamin/alo-hosting/releases/<git-sha>/
-# then atomically repoints the `current` symlink and restarts systemd. If the
-# health check fails, the symlink is repointed at the previous release and the
-# service is restarted again — the panel is never left down by a bad build.
-#
-# One-time server prerequisites (docs/RECOVERY-hosting.alolabs.net.md §3):
-#   1. /etc/alo-hosting/panel.env                (secrets, root:alamin 0640)
-#   2. /var/lib/alo-hosting/alo.db               (scripts/init-production-db.sh)
-#   3. /etc/systemd/system/alo-hosting-panel.service
-#   4. /etc/sudoers.d/alo-hosting-deploy         (NOPASSWD systemctl restart)
-# ─────────────────────────────────────────────────────────────────────────────
+name: Auto Deploy to Production
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-
-# A deploy must never be cancelled mid-symlink-swap: that is how you end up with
-# `current` pointing at a half-copied release. Queue instead.
-concurrency:
-  group: deploy-production
-  cancel-in-progress: false
-
-permissions:
-  contents: read
-
-env:
-  APP_ROOT: /home/alamin/alo-hosting
-  SERVICE: alo-hosting-panel
-  PORT: "3051"
-  KEEP_RELEASES: "5"
 
 jobs:
   deploy:
-    name: Build & deploy to production
-    runs-on: [self-hosted, linux, production]
-    # Never run for forks or non-main refs, even if someone triggers it by hand.
-    if: github.repository == 'aloeducation-org-crm/Hosting-Portal' && github.ref == 'refs/heads/main'
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      # The runner service's PATH is the bare systemd default
-      # (/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin)
-      # and does NOT include the nvm-managed node in ~/.nvm/versions/... — that
-      # is why `npm`/`pm2` appear to vanish inside Actions while working in an
-      # interactive SSH shell. setup-node provides a PATH-visible toolchain.
-      - name: Set up Node
-        uses: actions/setup-node@v6
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
         with:
-          node-version: 22
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      # Uses the repo wrapper that stubs engine binaries; the client generator is
-      # engineType = "client", so no download from binaries.prisma.sh is needed.
-      - name: Generate Prisma client
-        run: npm run db:generate
-
-      - name: Build (standalone)
-        run: npm run build
-
-      - name: Verify standalone output
-        run: |
-          set -euo pipefail
-          test -f .next/standalone/server.js || {
-            echo "::error::.next/standalone/server.js is missing."
-            echo "next.config.ts must keep output: 'standalone' and outputFileTracingRoot pinned."
-            exit 1;
-          }
-          echo "✅ standalone server present"
-
-      - name: Verify production env file
-        run: |
-          set -euo pipefail
-          ENV_FILE=/etc/alo-hosting/panel.env
-          test -r "$ENV_FILE" || {
-            echo "::error::$ENV_FILE missing or unreadable by $(whoami)."
-            echo "This is the one-time server setup, not a code problem. Run this ON THE SERVER:"
-            echo ""
-            echo "    cd ~/projects/Hosting-Portal && git pull && npm ci"
-            echo "    sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net"
-            echo ""
-            echo "That writes $ENV_FILE with generated secrets, creates and verifies"
-            echo "/var/lib/alo-hosting/alo.db, installs the systemd unit and the sudoers"
-            echo "entry this workflow needs, then re-run this job."
-            echo "Manual alternative: docs/RECOVERY-hosting.alolabs.net.md §3."
-            exit 1;
-          }
-          # src/lib/env.ts calls process.exit(1) in production when either
-          # secret is still the dev default — fail here with a clear message
-          # instead of crash-looping the unit.
-          missing=0
-          for key in NEXTAUTH_SECRET JWT_SECRET DATABASE_URL NEXTAUTH_URL; do
-            grep -q "^${key}=..*" "$ENV_FILE" || { echo "::error::${key} is not set in $ENV_FILE"; missing=1; }
-          done
-          grep -Eq '^NEXTAUTH_SECRET=dev-secret-change-in-production' "$ENV_FILE" && { echo "::error::NEXTAUTH_SECRET is the dev default"; missing=1; }
-          grep -Eq '^JWT_SECRET=dev-jwt-secret-change-in-production' "$ENV_FILE" && { echo "::error::JWT_SECRET is the dev default"; missing=1; }
-          # DATABASE_URL must be an absolute file: path — a relative one resolves
-          # against the process CWD, and a path inside the repo is overwritten by
-          # every checkout.
-          dburl=$(grep -E '^DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"')
-          case "$dburl" in
-            file:/*) echo "✅ DATABASE_URL is absolute: $dburl" ;;
-            file:*)  echo "::error::DATABASE_URL ($dburl) is relative — use file:/var/lib/alo-hosting/alo.db"; missing=1 ;;
-            postgresql://*) echo "::error::DATABASE_URL is postgresql:// but prisma/schema.prisma is provider = \"sqlite\"; the generated client cannot open it"; missing=1 ;;
-            *)       echo "::error::DATABASE_URL must start with file:/ (got: ${dburl:0:12}…)"; missing=1 ;;
-          esac
-          exit $missing
-
-      - name: Assemble release
-        id: release
-        run: |
-          set -euo pipefail
-          SHA="${GITHUB_SHA}"
-          REL="${APP_ROOT}/releases/${SHA}"
-          mkdir -p "${APP_ROOT}/releases" "${APP_ROOT}/logs" /var/lib/alo-hosting
-          rm -rf "${REL}" "${REL}.tmp"
-          mkdir -p "${REL}.tmp"
-
-          # standalone bundle + the two trees Next does not copy into it
-          cp -a .next/standalone/. "${REL}.tmp/"
-          mkdir -p "${REL}.tmp/.next"
-          cp -a .next/static "${REL}.tmp/.next/static"
-          cp -a public "${REL}.tmp/public"
-          # prisma/ is needed for `prisma db push` / `db:seed` against the live DB
-          cp -a prisma "${REL}.tmp/prisma"
-
-          mv "${REL}.tmp" "${REL}"
-          echo "path=${REL}" >> "$GITHUB_OUTPUT"
-          echo "✅ release assembled at ${REL} ($(du -sh "${REL}" | cut -f1))"
-
-      - name: Bootstrap / verify database
-        run: |
-          set -euo pipefail
-          DB=/var/lib/alo-hosting/alo.db
-          REL="${{ steps.release.outputs.path }}"
-
-          # Keep the stable sudoers-path copy in sync with the release. The path
-          # is fixed because `current` does not exist yet on a first deploy and
-          # the runner's _work checkout path is not something to grant sudo on.
-          sudo install -m 0755 "$REL/scripts/init-production-db.sh" /usr/local/sbin/alo-init-db
-
-          if [ -f "$DB" ]; then
-            echo "✅ $DB exists — production data will not be reseeded"
-          else
-            echo "→ no database yet; bootstrapping from the release"
-          fi
-
-          # Runs the schema-drift comparison on every deploy: a database behind
-          # prisma/schema.prisma makes the affected routes 500 at runtime
-          # (SQLITE_ERROR: no such column), and the tables all still exist so
-          # nothing else catches it. On failure the rollback step restores the
-          # previous release, whose code matches the current database.
-          #
-          # --modules-from is NOT the release. .next/standalone only carries the
-          # modules the app requires at runtime, and @libsql/client is traced as
-          # a bare package.json (its lib-cjs/ main is missing), which the
-          # bootstrap needs. The workspace has the full `npm ci` tree.
-          sudo /usr/local/sbin/alo-init-db --from "$REL" --modules-from "$GITHUB_WORKSPACE"
-
-      - name: Swap symlink & restart
-        id: swap
-        run: |
-          set -euo pipefail
-          PREV="$(readlink -f "${APP_ROOT}/current" 2>/dev/null || true)"
-          echo "previous=${PREV}" >> "$GITHUB_OUTPUT"
-          ln -sfn "${{ steps.release.outputs.path }}" "${APP_ROOT}/current"
-          sudo systemctl restart "${SERVICE}"
-          echo "✅ current -> $(readlink -f "${APP_ROOT}/current")"
-
-      - name: Health check
-        id: health
-        run: |
-          set -uo pipefail
-          url="http://127.0.0.1:${PORT}/api/health"
-          for i in $(seq 1 30); do
-            body="$(curl -fsS --max-time 5 "$url" 2>/dev/null)" && {
-              echo "$body"
-              echo "$body" | grep -q '"databaseStatus":"connected"' \
-                && echo "✅ healthy (db connected) after ${i}s" \
-                || echo "⚠️  HTTP 200 but databaseStatus is not 'connected' — check DATABASE_URL"
-              exit 0
-            }
-            sleep 1
-          done
-          echo "::error::panel did not become healthy at ${url} within 30s"
-          sudo journalctl -u "${SERVICE}" -n 60 --no-pager || true
-          exit 1
-
-      - name: Roll back on failure
-        if: failure() && steps.swap.outputs.previous != ''
-        run: |
-          set -euo pipefail
-          echo "↩️  rolling back to ${{ steps.swap.outputs.previous }}"
-          ln -sfn "${{ steps.swap.outputs.previous }}" "${APP_ROOT}/current"
-          sudo systemctl restart "${SERVICE}"
-          sleep 5
-          curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/health" \
-            && echo "✅ rollback healthy" \
-            || echo "::error::rollback also unhealthy — SSH in and run scripts/server-doctor.sh"
-
-      - name: Prune old releases
-        if: always()
-        run: |
-          set -uo pipefail
-          cd "${APP_ROOT}/releases" || exit 0
-          current="$(readlink -f "${APP_ROOT}/current" 2>/dev/null || true)"
-          ls -1dt */ 2>/dev/null | tail -n +$((KEEP_RELEASES + 1)) | while read -r old; do
-            old="$(readlink -f "${APP_ROOT}/releases/${old%/}")"
-            [ "$old" = "$current" ] && continue
-            echo "→ pruning ${old}"
-            rm -rf "${old}"
-          done
-          df -h / | tail -1
-
-      - name: Summary
-        if: always()
-        run: |
-          {
-            echo "### Deploy ${GITHUB_SHA:0:7}"
-            echo ""
-            echo "- release: \`${{ steps.release.outputs.path }}\`"
-            echo "- service: \`${SERVICE}\` on port \`${PORT}\`"
-            echo "- public:  https://hosting.alolabs.net"
-          } >> "$GITHUB_STEP_SUMMARY"
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ~/projects/Hosting-Portal
+            git pull origin main
+            cd alo-hosting-portal
+            npm install
+            npx prisma generate
+            npx prisma db push --skip-generate
+            npm run build
+            pm2 restart alo-hosting --update-env
+            pm2 save
+            sleep 3
+            curl -sf http://127.0.0.1:3051/api/health && echo " ✅ Health OK" || echo " ❌ Health FAILED"
