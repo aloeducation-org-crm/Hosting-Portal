@@ -1,0 +1,73 @@
+# ALO Labs Hosting Panel — systemd unit for alo-server-lap
+#
+# Install:
+#   sudo cp deploy/systemd/alo-hosting-panel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now alo-hosting-panel
+#
+# Layout this unit expects (created by .github/workflows/deploy.yml):
+#   /home/alamin/alo-hosting/releases/<git-sha>/   immutable standalone build
+#   /home/alamin/alo-hosting/current -> releases/<git-sha>
+#   /var/lib/alo-hosting/alo.db                    live SQLite database
+#   /etc/alo-hosting/panel.env                     secrets (root:alamin 0640)
+#
+# Why systemd and not PM2: PM2 keeps its process list in ~/.pm2 and loses it
+# whenever the daemon is respawned (a reboot, a `pm2 kill`, or an nvm node
+# upgrade). This unit is declarative and survives all three. `pm2 startup`
+# only prints a command — it does not install anything until you run the
+# printed `sudo env PATH=... pm2 startup systemd -u <user> --hp <home>` line.
+
+[Unit]
+Description=ALO Labs Hosting Panel (Next.js standalone)
+Documentation=https://github.com/aloeducation-org-crm/Hosting-Portal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alamin
+Group=alamin
+
+# `current` is a symlink to an immutable release directory, so a deploy never
+# mutates the tree the running process is serving from.
+WorkingDirectory=/home/alamin/alo-hosting/current
+
+# Single source of truth for NODE_ENV, PORT, HOSTNAME, DATABASE_URL and secrets.
+# Must contain at least NEXTAUTH_SECRET and JWT_SECRET with non-default values:
+# src/lib/env.ts calls process.exit(1) in production if either is the dev default.
+EnvironmentFile=/etc/alo-hosting/panel.env
+Environment=NODE_ENV=production
+Environment=PORT=3051
+Environment=HOSTNAME=127.0.0.1
+
+ExecStart=/usr/bin/env node server.js
+ExecStartPost=/bin/sh -c 'sleep 3'
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+LimitNOFILE=65535
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alo-hosting-panel
+
+# ── Hardening ───────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# The panel provisions customer sites, writes backups and owns its database, so
+# these paths must stay writable. Add /srv/alo-sites and /var/backups/alo-sites
+# once the helper layer (helpers/install-helpers.sh) and Caddy are in place.
+ReadWritePaths=/var/lib/alo-hosting /home/alamin/alo-hosting/logs
+
+[Install]
+WantedBy=multi-user.target
