@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import ZAI from '@/lib/ai-sdk'
+import { AIProviderError } from '@/lib/ai-provider'
 import { verifyToken } from '@/lib/auth'
 
 const advisorSchema = z.object({
@@ -13,10 +14,6 @@ For each suggestion, provide the domain name and a brief reason why it's a good 
 Return your response as a JSON array of objects with "name" and "reason" fields. Example:
 [{"name": "example.com", "reason": "Short and memorable, directly relates to the business."}]
 Return ONLY the JSON array, no explanation, no markdown, no code blocks.`
-
-function isAvailable(): boolean {
-  return Math.random() > 0.35
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -60,44 +57,24 @@ export async function POST(request: NextRequest) {
 
     const rawContent = result.choices?.[0]?.message?.content ?? ''
 
-    // Parse the AI response
-    let recommendations: Array<{ name: string; reason: string; available: boolean }> = []
-    try {
-      // Extract JSON from potential markdown code blocks
-      const jsonMatch = rawContent.match(/\[[\s\S]*?\]/)
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0])
-        recommendations = parsed.map((item: { name?: string; reason?: string }) => ({
-          name: item.name ?? 'unknown.com',
-          reason: item.reason ?? 'A strong domain choice for your brand.',
-          available: isAvailable(),
-        }))
-      } else {
-        // Fallback: try parsing the whole response
-        const parsed = JSON.parse(rawContent)
-        recommendations = parsed.map((item: { name?: string; reason?: string }) => ({
-          name: item.name ?? 'unknown.com',
-          reason: item.reason ?? 'A strong domain choice for your brand.',
-          available: isAvailable(),
-        }))
-      }
-    } catch {
-      // If parsing fails, create a fallback recommendation
-      const cleanedBusiness = business.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15)
-      recommendations = [
-        { name: `${cleanedBusiness}.com`, reason: `Direct match for "${business}"`, available: isAvailable() },
-        { name: `${cleanedBusiness}.io`, reason: `Modern tech-focused TLD for "${business}"`, available: isAvailable() },
-        { name: `get${cleanedBusiness}.com`, reason: `Action-oriented domain for "${business}"`, available: isAvailable() },
-        { name: `${cleanedBusiness}app.com`, reason: `App-focused branding for "${business}"`, available: isAvailable() },
-      ]
+    // AI can suggest names, but registrar availability is a separate real lookup.
+    const jsonMatch = rawContent.match(/\[[\s\S]*?\]/)
+    if (!jsonMatch) {
+      return NextResponse.json({ success: false, error: 'AI provider returned an invalid response' }, { status: 502 })
     }
-
+    const aiParsed: unknown = JSON.parse(jsonMatch[0])
+    if (!Array.isArray(aiParsed)) {
+      return NextResponse.json({ success: false, error: 'AI provider returned an invalid response' }, { status: 502 })
+    }
+    const recommendations = aiParsed.flatMap((item): Array<{ name: string; reason: string; availability: 'UNKNOWN' }> => {
+      if (!item || typeof item.name !== 'string' || typeof item.reason !== 'string') return []
+      return [{ name: item.name, reason: item.reason, availability: 'UNKNOWN' }]
+    })
     return NextResponse.json({ success: true, recommendations })
   } catch (error) {
-    console.error('Domain advisor error:', error)
-    return NextResponse.json(
-      { success: false, error: 'Failed to get domain recommendations' },
-      { status: 500 }
-    )
+    if (error instanceof AIProviderError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status })
+    }
+    return NextResponse.json({ success: false, error: 'Failed to get domain recommendations' }, { status: 500 })
   }
 }

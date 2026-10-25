@@ -3,7 +3,6 @@ import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { readFileSync, existsSync } from 'fs';
-import crypto from 'crypto';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -23,9 +22,16 @@ export async function GET(request: NextRequest) {
       throw apiError('domain query parameter is required', 'VALIDATION_ERROR', undefined, 400);
     }
 
-    // Get server IP for SPF record
+    if (!/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))+$/.test(domain)) {
+      return NextResponse.json(apiError('Invalid domain name', 'VALIDATION_ERROR', undefined, 400), { status: 400 });
+    }
+
+    // Only report values backed by current server configuration.
     const server = await db.server.findFirst();
-    const serverIp = server?.ip ?? 'YOUR_SERVER_IP';
+    const serverIp = server?.ip;
+    if (!serverIp) {
+      return NextResponse.json(apiError('Server IP is not configured; SPF data is unavailable', 'NOT_CONFIGURED', undefined, 503), { status: 503 });
+    }
 
     // SPF Record
     const spf = `v=spf1 ip4:${serverIp} -all`;
@@ -42,11 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (!dkimPublicKey) {
-      // Generate a placeholder RSA public key representation
-      const { publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-      const exported = publicKey.export({ type: 'spki', format: 'der' });
-      const b64 = Buffer.from(exported).toString('base64');
-      dkimPublicKey = b64;
+      return NextResponse.json(apiError('DKIM key is not installed for this domain', 'NOT_CONFIGURED', undefined, 503), { status: 503 });
     }
 
     const dkim = {

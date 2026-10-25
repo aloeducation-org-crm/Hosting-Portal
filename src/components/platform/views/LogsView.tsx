@@ -80,10 +80,6 @@ export default function LogsView() {
   }
 
   useEffect(() => {
-    setDisplayCount(50)
-  }, [source, level, search])
-
-  useEffect(() => {
     let cancelled = false
     ;(async () => {
       const token = getToken()

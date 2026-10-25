@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build --experimental-build-mode compile",
+    "build": "next build",
     "start": "node .next/standalone/server.js",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",

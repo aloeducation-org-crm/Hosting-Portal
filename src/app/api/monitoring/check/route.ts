@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requirePermission } from '@/lib/auth';
 import { db } from '@/lib/db';
+import tls from 'node:tls';
 import { callHelper } from '@/lib/helpers';
 import { readFileSync } from 'fs';
 import { existsSync } from 'fs';
@@ -59,32 +60,25 @@ async function checkPublicUrl(domain: string): Promise<{ ok: boolean; status: nu
 }
 
 async function checkSsl(domain: string): Promise<{ ok: boolean; daysUntilExpiry: number | null; error: string | null }> {
-  try {
-    const { execSync } = await import('child_process');
-    const output = execSync(
-      `echo | openssl s_client -connect ${domain}:443 -servername ${domain} 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null`,
-      { timeout: 10000 },
-    ).toString().trim();
-
-    if (!output) {
-      return { ok: false, daysUntilExpiry: null, error: 'No certificate found' };
-    }
-
-    const match = output.match(/notAfter=(.+)/);
-    if (!match?.[1]) {
-      return { ok: false, daysUntilExpiry: null, error: 'Could not parse expiry' };
-    }
-
-    const expiryDate = new Date(match[1]);
-    const now = new Date();
-    const diffMs = expiryDate.getTime() - now.getTime();
-    const daysUntilExpiry = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    return { ok: daysUntilExpiry > 0, daysUntilExpiry, error: null };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'SSL check failed';
-    return { ok: false, daysUntilExpiry: null, error: msg };
+  // Treat stored domains as untrusted too: TLS APIs avoid shell interpretation entirely.
+  if (!/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/.test(domain)) {
+    return { ok: false, daysUntilExpiry: null, error: 'Invalid domain stored for website' };
   }
+  return new Promise((resolve) => {
+    const socket = tls.connect({ host: domain, port: 443, servername: domain, rejectUnauthorized: true, timeout: 8000 }, () => {
+      const validTo = socket.getPeerCertificate().valid_to;
+      socket.end();
+      const expiry = validTo ? new Date(validTo) : null;
+      if (!expiry || Number.isNaN(expiry.getTime())) {
+        resolve({ ok: false, daysUntilExpiry: null, error: 'Certificate expiry metadata unavailable' });
+        return;
+      }
+      const daysUntilExpiry = Math.floor((expiry.getTime() - Date.now()) / 86400000);
+      resolve({ ok: daysUntilExpiry > 0, daysUntilExpiry, error: null });
+    });
+    socket.setTimeout(8000, () => socket.destroy(new Error('TLS connection timed out')));
+    socket.once('error', (e) => resolve({ ok: false, daysUntilExpiry: null, error: e.message }));
+  });
 }
 
 export async function POST(request: NextRequest) {

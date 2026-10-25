@@ -15,6 +15,7 @@ export default function HeroSection() {
   const [results, setResults] = useState<DomainResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -33,21 +34,13 @@ export default function HeroSection() {
         body: JSON.stringify({ query: q }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setResults(data.domains || []);
-      }
-    } catch {
-      // Generate local fallback results
-      const clean = q.replace(/[^a-z0-9]/gi, '').toLowerCase();
-      const tlds = ['.com', '.net', '.org', '.io', '.ai', '.dev', '.app', '.co', '.tech', '.info'];
-      const prices: Record<string, string> = { '.com': '$9.99', '.ai': '$29.99', '.io': '$19.99', '.dev': '$9.99', '.app': '$9.99', '.net': '$7.99', '.org': '$7.99', '.co': '$7.99', '.tech': '$7.99', '.info': '$7.99' };
-      setResults(tlds.map(tld => ({
-        name: clean + tld,
-        available: Math.random() > 0.3,
-        price: prices[tld] ?? '',
-        tld,
-      })));
+      if (!res.ok) throw new Error('Live registrar search is not configured. Availability cannot be confirmed.');
+      const data = await res.json();
+      setResults(Array.isArray(data.domains) ? data.domains : []);
+      setSearchError(data.domains?.length ? null : 'No registrar results were returned.');
+    } catch (error) {
+      setResults([]);
+      setSearchError(error instanceof Error ? error.message : 'Domain search failed.');
     } finally {
       setIsSearching(false);
     }
@@ -90,6 +83,7 @@ export default function HeroSection() {
           </form>
 
           {/* Domain Results Dropdown */}
+          {showResults && searchError && <p role="status" className="mt-2 rounded-xl bg-white p-4 text-sm text-red-700">{searchError}</p>}
           {showResults && results.length > 0 && (
             <div className="mt-2 rounded-2xl bg-white shadow-xl border border-gray-100 overflow-hidden max-h-80 overflow-y-auto">
               {results.slice(0, 6).map((domain) => (
