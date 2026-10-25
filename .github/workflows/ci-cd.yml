@@ -6,52 +6,64 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  NODE_ENV: production
-  PORT: 3101
-  HOSTNAME: 127.0.0.1
+# Cancel superseded runs on the same branch instead of burning runner minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default.
+permissions:
+  contents: read
+
+# ⚠️  DO NOT add a job-level/workflow-level `NODE_ENV: production` here.
+# `NODE_ENV=production` makes `npm ci` skip devDependencies, so eslint, typescript
+# and tailwindcss are never installed and `npm run lint` died with exit code 127
+# ("eslint: not found"). That was the cause of every red run up to #7.
+# Production environment values (NODE_ENV, PORT, HOSTNAME) belong on the server in
+# the systemd unit / .env file — never in the build pipeline.
+#
+# Deployment is intentionally NOT part of this workflow. Ship with:
+#   sudo bash scripts/deploy-alo-portal.sh            # on the server
+#   bash scripts/deploy-alo-portal.sh --target user@host
+# See DEPLOY.md § "Deploying" for the manual procedure.
 
 jobs:
   lint-and-typecheck:
+    name: Lint, typecheck & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
 
   build:
+    name: Build
     needs: lint-and-typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run build
-
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            cd /opt/app
-            git pull origin main
-            npm ci
-            npx prisma generate
-            npx prisma migrate deploy
-            npm run build
-            sudo systemctl restart alolabs
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      # Uses the repo's own wrapper (engine binaries stubbed out) so the build never
+      # depends on binaries.prisma.sh being reachable. The client uses the libSQL
+      # driver adapter, so no native query-engine download is required.
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Build
+        run: npm run build
+      - name: Verify standalone output exists
+        run: test -f .next/standalone/server.js

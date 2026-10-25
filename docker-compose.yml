@@ -5,8 +5,11 @@ services:
     build: .
     container_name: alolabs-app
     restart: always
+    # PORT comes from .env (single source of truth); 3101 is the documented default.
     ports:
-      - "3101:3101"
+      - "${PORT:-3101}:${PORT:-3101}"
+    environment:
+      PORT: ${PORT:-3101}
     env_file:
       - .env
     depends_on:

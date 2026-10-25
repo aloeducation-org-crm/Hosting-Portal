@@ -36,9 +36,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-EXPOSE 3101
-
-ENV PORT=3101
+# PORT is configurable: `docker run -e PORT=3051 -p 3051:3051 ...`
+# 3101 is only the documented default (matches src/lib/env.ts).
+ARG PORT=3101
+ENV PORT=${PORT}
 ENV HOSTNAME=0.0.0.0
+
+EXPOSE ${PORT}
 
 CMD ["node", "server.js"]

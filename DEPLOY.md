@@ -11,7 +11,7 @@ Public IP (103.231.239.79)
     ↓
 Caddy (Reverse Proxy + Auto SSL)
     ↓
-127.0.0.1:3101
+127.0.0.1:$PORT  (default 3101)
     ↓
 Next.js (Standalone)
     ↓
@@ -99,6 +99,8 @@ nano .env  # Edit with production values
 Edit `.env` with production values:
 ```
 NODE_ENV=production
+# The panel port is env-driven. 3101 is the default; use whatever your
+# Caddy upstream / firewall expect (e.g. 3051).
 PORT=3101
 HOSTNAME=127.0.0.1
 APP_NAME=ALO Labs
@@ -162,12 +164,16 @@ sudo apt install -y caddy
 sudo nano /etc/caddy/Caddyfile
 ```
 
-Add to Caddyfile:
+Add to Caddyfile. `{$PORT:3101}` reads the PORT environment variable of the
+Caddy service, falling back to 3101 — so the port is defined in exactly one place:
 ```
 hosting.alolabs.net {
-    reverse_proxy 127.0.0.1:3101
+    reverse_proxy 127.0.0.1:{$PORT:3101}
 }
 ```
+
+If Caddy runs without PORT in its environment, set it in the unit
+(`systemctl edit caddy` → `Environment=PORT=3101`).
 
 ```bash
 # Reload Caddy
@@ -225,28 +231,56 @@ crontab -e
 
 ```bash
 # Manual health check
-./scripts/healthcheck.sh http://127.0.0.1:3101/api
+./scripts/healthcheck.sh http://127.0.0.1:${PORT:-3101}/api
 
 # API health endpoint
-curl http://127.0.0.1:3101/api
+curl http://127.0.0.1:${PORT:-3101}/api
 ```
 
 ## CI/CD with GitHub Actions
 
-The project includes a GitHub Actions workflow at `.github/workflows/ci-cd.yml`.
+The workflow lives at `.github/workflows/ci-cd.yml` and covers **verification only**:
 
-### Required Secrets
-| Secret | Description |
-|--------|-------------|
-| `SERVER_HOST` | Server IP address |
-| `SERVER_USER` | SSH username (aloedu) |
-| `SSH_KEY` | SSH private key |
-| `DATABASE_URL` | Production database URL |
+1. **Lint, typecheck & test** — `npm ci` → `npm run lint` → `npm run typecheck` → `npm test`
+2. **Build** — `npm ci` → `npm run db:generate` → `npm run build` → asserts `.next/standalone/server.js` exists
 
-### Pipeline
-1. **Lint & TypeCheck** — ESLint + TypeScript on every push
-2. **Build** — `npm run build` on every push
-3. **Deploy** — SSH into server, pull, build, migrate, restart (main branch only)
+### A note on `NODE_ENV` in CI
+
+Do **not** set `NODE_ENV=production` at the workflow or job level. `npm ci` honours it
+and silently skips `devDependencies`, so `eslint`, `typescript` and `tailwindcss` are
+never installed — `npm run lint` then fails with exit code `127` (`eslint: not found`).
+That is exactly what made runs #1–#7 red. Production values belong on the server.
+
+### Deploying (manual)
+
+Deployment is deliberately not automated, so a push to `main` can never restart
+production unattended. Ship with the deploy script:
+
+```bash
+# On the server
+sudo bash scripts/deploy-alo-portal.sh
+
+# Or from your machine, over SSH
+bash scripts/deploy-alo-portal.sh --target alamin@100.94.234.101
+
+# Preview without changing anything
+bash scripts/deploy-alo-portal.sh --dry-run
+```
+
+The script reads `PORT` from the environment (default `3101`), writes it into
+`.env.production`, the generated systemd unit and the generated Caddyfile, so the
+port stays consistent end to end:
+
+```bash
+PORT=3051 sudo bash scripts/deploy-alo-portal.sh
+```
+
+After deploying, verify:
+
+```bash
+./scripts/healthcheck.sh    # uses $PORT, default 3101
+./scripts/verify.sh         # full post-deploy verification
+```
 
 ## Troubleshooting
 
@@ -279,7 +313,8 @@ sudo systemctl restart alolabs
 ## IP Architecture (Never Expose Node.js Directly)
 
 ```
-Internet → Public IP (103.231.239.79) → Caddy → 127.0.0.1:3101 → Next.js
+Internet → Public IP (103.231.239.79) → Caddy → 127.0.0.1:$PORT → Next.js
 ```
 
-Node.js MUST always run behind Caddy. Never expose port 3101 directly to the internet.
+Node.js MUST always run behind Caddy. Never expose the panel port directly to the
+internet — bind it to 127.0.0.1 and let Caddy terminate TLS.

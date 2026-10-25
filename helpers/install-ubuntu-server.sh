@@ -189,7 +189,7 @@ fi
 ufw allow 22/tcp    >/dev/null 2>&1 || true  # SSH
 ufw allow 80/tcp    >/dev/null 2>&1 || true  # HTTP
 ufw allow 443/tcp   >/dev/null 2>&1 || true  # HTTPS
-ufw allow 3101/tcp  >/dev/null 2>&1 || true  # Panel (direct access)
+ufw allow "${PORT:-3101}/tcp"  >/dev/null 2>&1 || true  # Panel (direct access; PORT env, default 3101)
 log_ok "Firewall configured (SSH, HTTP, HTTPS, Panel port)"
 
 log_step "Installing ALO helper scripts..."

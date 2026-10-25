@@ -28,7 +28,8 @@ BRAND_BLUE="#0A5CFF"
 # ── Core Configuration ─────────────────────────────────────────────────────────────
 APP_USER="alo-panel"
 APP_DIR="/opt/alo-hosting-portal"
-APP_PORT=3101
+# Port is env-driven: override with PORT=3051 before running. 3101 is the default.
+APP_PORT="${PORT:-3101}"
 DB_NAME="alolabs"
 DB_USER="alo_panel"
 DOMAIN="alolabs.net"
@@ -298,8 +299,8 @@ phase_1_server_preparation() {
         "ufw allow 443/tcp comment 'HTTPS' || true"
     run "Allow Caddy admin (port 2019)" \
         "ufw allow 2019/tcp comment 'Caddy Admin' || true"
-    run "Allow app port 3101" \
-        "ufw allow 3101/tcp comment 'ALO Portal' || true"
+    run "Allow app port $APP_PORT" \
+        "ufw allow $APP_PORT/tcp comment 'ALO Portal' || true"
     run "Allow Tailscale (port 41641)" \
         "ufw allow 41641/udp comment 'Tailscale' || true"
 
@@ -1243,7 +1244,7 @@ phase_7_verification() {
             pass_count=$((pass_count + 1))
 
             # Verify key rules
-            local expected_ports=(22 80 443 2019 3101)
+            local expected_ports=(22 80 443 2019 "$APP_PORT")
             for port in "${expected_ports[@]}"; do
                 if ufw status | grep -q "$port"; then
                     ok "UFW rule for port $port is present"
