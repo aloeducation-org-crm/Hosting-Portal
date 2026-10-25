@@ -161,6 +161,21 @@ its own.
 
 ---
 
+## 4.4 Roadmap tool adapters (added 2026-10-26)
+
+| Source | Status | What was actually done |
+|---|---|---|
+| `openrouter.ai` | **PASS (adapter)** | Registered `openrouter` provider in `src/lib/ai/providers.ts` (`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER`). It joins the existing failover/retry/breaker chain only when listed in `AI_PROVIDER_ORDER` and a key is set. Live call is **NOT TESTED** here (egress restricted). |
+| `coder.qwen.ai` / Qwen | **PASS (adapter)** | Registered `qwen` provider using DashScope's OpenAI-compatible mode (`QWEN_API_KEY`, `QWEN_BASE_URL`, `AI_MODEL_QWEN`). The default host is flagged **unverified** because the correct endpoint depends on the account region; the UI warns until the operator sets `QWEN_BASE_URL`. Qwen Coder itself is a coding-agent CLI, not an inference API — it is not executed inside the panel. |
+| `cline.bot` / `github.com/cline/cline` | **BLOCKED** | Cline (and Continue) are local/IDE coding agents. They need a workspace, their own model credentials and an interactive approval loop. The panel does not spawn them; a future integration would be an authenticated job worker, not a library import. Licensing and unattended-execution risk need review first. |
+| `buffer.com`, `larksuite.com`, `refine.ink`, `hetrixtools.com` | **BLOCKED** | These are SaaS products requiring OAuth apps/API keys and webhook endpoints. No credentials were supplied, so no integration is claimed. The existing CRM/email/monitoring modules are the natural hosts for those features. |
+| `mureka.ai`, `supercool.com`, `enerpize.com`, `aipraktor.com`, `hatchable.com`, `mat3ra.com`, `astryx.atmeta.com`, `stackoverflow.com` | **NOT APPLICABLE** | Third-party products or reference sites; no public inference/hosting API was specified. Documented in §4.3, not vendored. |
+
+Provider resolution is covered by `tests/ai-extra-providers.test.ts`. Both adapters are
+disabled by default until deliberately enabled — no free-tier or quality claim is made.
+
+---
+
 ## 5. Cost, licensing and honesty rules
 
 - UnoRouter's repository is a **storefront**; it does not make inference free.

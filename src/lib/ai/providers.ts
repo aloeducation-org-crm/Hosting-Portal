@@ -93,6 +93,43 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     baseUrlVerified: true,
   },
   {
+    id: "openrouter",
+    label: "OpenRouter",
+    tier: "paid",
+    kind: "openai-compatible",
+    baseUrl: "https://openrouter.ai/api/v1",
+    baseUrlEnv: "OPENROUTER_BASE_URL",
+    apiKeyEnv: "OPENROUTER_API_KEY",
+    requiresKey: true,
+    anonymousAccess: false,
+    defaultModel: "openai/gpt-4o-mini",
+    docs: "https://openrouter.ai/docs/quick-start",
+    notes:
+      "Model aggregator: one OpenAI-compatible key reaches many upstream models. Credits are required. " +
+      "Model IDs and free variants rotate — read GET /models and pin AI_MODEL_OPENROUTER to an enabled id. " +
+      "Set HTTP-Referer/X-Title per OpenRouter's attribution guidance; never send the key to the browser.",
+    baseUrlVerified: true,
+  },
+  {
+    id: "qwen",
+    label: "Qwen (DashScope compatible mode)",
+    tier: "paid",
+    kind: "openai-compatible",
+    baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    baseUrlEnv: "QWEN_BASE_URL",
+    apiKeyEnv: "QWEN_API_KEY",
+    requiresKey: true,
+    anonymousAccess: false,
+    defaultModel: "qwen-plus",
+    docs: "https://help.aliyun.com/en/model-studio/compatibility-of-openai-with-dashscope",
+    notes:
+      "Alibaba Cloud Model Studio exposes an OpenAI-compatible endpoint. Confirm your REGION's host " +
+      "(intl vs mainland) and enabled model ids in your own console, then set QWEN_BASE_URL; the default " +
+      "host is intentionally marked unverified. Qwen Coder is a coding agent CLI, not an inference API — " +
+      "it is not wired into the panel process.",
+    baseUrlVerified: false,
+  },
+  {
     id: "groq",
     label: "Groq",
     tier: "free",

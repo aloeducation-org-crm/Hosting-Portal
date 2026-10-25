@@ -546,6 +546,19 @@ model Deployment {
   actorId           String?
   createdAt         DateTime        @default(now())
 
+  // ── Git-connected auto-deploy (additive; nullable for all legacy rows) ──────
+  projectId         String?
+  deliveryId        String?
+  branch            String?
+  commitMessage     String?
+  commitAuthor      String?
+  trigger           String?   // webhook | manual | rollback
+  stage             String?   // queued|checkout|detect|install|test|build|package|activate|verify|done
+  failureStage      String?
+  verifiedCommitSha String?
+  configSnapshot    String?   // JSON, validated at rest; never raw webhook input
+  durationMs        Int?
+
   website     Website         @relation(fields: [websiteId], references: [id], onDelete: Cascade)
   release     Release?        @relation("CurrentRelease", fields: [releaseId], references: [id])
   logs        DeploymentLog[]
@@ -1781,4 +1794,88 @@ model Webhook {
 
   @@index([userId])
   @@map("webhooks")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Git-connected automatic deployment (2026-10-26)
+//
+// All three tables are ADDITIVE. They deliberately hold plain String foreign
+// keys instead of Prisma relations so that no existing model has to be changed
+// and no existing migration has to be rewritten. `Website` remains the project
+// anchor: a GitProject points at one website and reuses its Deployment,
+// Release, DeploymentLog, Domain and AuditLog records.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model GitConnection {
+  id             String   @id @default(uuid())
+  provider       String   @default("github")
+  mode           String   @default("app") // app | oauth | token
+  accountLogin   String
+  accountType    String?  // User | Organization
+  installationId String?  // GitHub App installation id (app mode)
+  tokenEncrypted String?  // AES-256-GCM ciphertext; NEVER a plaintext token
+  scopes         String?
+  connectedById  String?
+  status         String   @default("active") // active | revoked
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([provider, accountLogin])
+  @@index([installationId])
+  @@map("git_connections")
+}
+
+model GitProject {
+  id                String   @id @default(uuid())
+  websiteId         String   @unique
+  connectionId      String?
+  repository        String   // validated "owner/repo"
+  cloneUrl          String   // server-derived clone URL, never taken from a webhook
+  productionBranch  String   @default("main")
+  previewBranches   String   @default("[]") // JSON array of branch names
+  autoDeploy        Boolean  @default(true)
+  requiresApproval  Boolean  @default(false) // ambiguous detection -> confirm first
+  detection         String?  // JSON DetectionResult
+  config            String?  // JSON allowlisted DeployConfig
+  detectionStatus   String   @default("pending") // pending | detected | ambiguous | confirmed | failed
+  healthPath        String   @default("/")
+  healthUrl         String?  // optional override for an externally managed service
+  serviceManager    String   @default("static") // static | pm2 | systemd | none
+  serviceName       String?
+  releaseRoot       String?  // absolute path on the deploy host
+  port              Int?
+  webhookSecretEnc  String?  // AES-256-GCM ciphertext
+  webhookId         String?  // GitHub hook id, for disconnect
+  lastCommitSha     String?
+  lastCommitMessage String?
+  lastCommitAuthor  String?
+  lastDeployStatus  String?
+  createdById       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([repository, productionBranch])
+  @@index([websiteId])
+  @@index([connectionId])
+  @@map("git_projects")
+}
+
+model WebhookDelivery {
+  id             String   @id @default(uuid())
+  deliveryId     String   @unique // X-GitHub-Delivery (dedup / replay protection)
+  event          String
+  action         String?
+  repository     String?
+  installationId String?
+  signatureValid Boolean  @default(false)
+  result         String   // queued | duplicate | ignored | rejected | failed
+  reason         String?
+  projectId      String?
+  deploymentId   String?
+  payloadSha     String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([repository])
+  @@map("webhook_deliveries")
 }

@@ -124,6 +124,23 @@ PORT=3051 HOSTNAME=127.0.0.1 node .next/standalone/server.js
 `"next start" does not work with "output: standalone"` and the standalone server
 is the supported entrypoint. `npm start` already points at it.
 
+## Git-connected automatic deployment
+
+`POST /api/github/webhook` receives signed GitHub push events and drives a real
+pipeline: exact-SHA checkout → framework detection → isolated build/test →
+immutable release → HTTP health **and** release-marker verification → automatic
+rollback on failure. The dashboard page is `/deployments` (nav: **Deployments**).
+
+```bash
+DATABASE_URL="file:/var/lib/alo-hosting/alo.db" node scripts/apply-deploy-schema.mjs
+npx vitest run tests/deploy-e2e.test.ts
+node scripts/verify-deploy-http.mjs        # against a running panel
+```
+
+Setup, GitHub App/OAuth credentials, API map, security model and honest
+limitations: **[docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md)**. Roadmap
+status for all ten platform capabilities: [docs/ROADMAP-STATUS.md](docs/ROADMAP-STATUS.md).
+
 ## Deploying
 
 Canonical production path (systemd + nginx + Cloudflare Tunnel), all templates in
