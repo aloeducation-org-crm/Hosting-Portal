@@ -1,0 +1,54 @@
+# ALO Labs Hosting Panel — Cloudflare Tunnel ingress
+#
+# Install (tunnel already created as `alo-hosting`):
+#   cp deploy/cloudflared/config.yml ~/.cloudflared/config.yml
+#   # edit <TUNNEL_UUID> below, or generate the file with:
+#   #   sed "s/<TUNNEL_UUID>/$(cloudflared tunnel list -o json | jq -r '.[]|select(.name=="alo-hosting")|.id')/" \
+#   #     deploy/cloudflared/config.yml > ~/.cloudflared/config.yml
+#   sudo systemctl restart cloudflared
+#   cloudflared tunnel info alo-hosting        # expect 2+ connectors
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# WHY THE ORIGIN IS https://127.0.0.1:443 AND NOT http://localhost:80
+#
+# nginx has a certbot-managed 80 → 443 redirect. If the tunnel terminates on
+# port 80, every request is answered with
+#   301 Location: https://hosting.alolabs.net/
+# The browser follows it, Cloudflare routes it back into the same tunnel, nginx
+# 301s again — an infinite loop. The edge then reports HTTP 530 and
+# ERR_TOO_MANY_REDIRECTS, while `curl http://127.0.0.1:3051` on the server
+# returns 200 and everything looks fine locally. That is exactly the symptom
+# that was reported.
+#
+# noTLSVerify is required because cloudflared connects to 127.0.0.1 while the
+# Let's Encrypt certificate is issued for hosting.alolabs.net (SAN mismatch on
+# the loopback name). The connection never leaves the host, so this is safe.
+# If you prefer verification, add originServerName: hosting.alolabs.net instead.
+#
+# In Cloudflare dashboard → SSL/TLS → Overview, set the mode to **Full**
+# (not Flexible, not Full (strict)): Flexible re-encrypts to port 80 and
+# re-creates the loop; Full (strict) rejects the origin cert chain that
+# cloudflared presents for a loopback SNI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /home/alamin/.cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: hosting.alolabs.net
+    service: https://127.0.0.1:443
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      # nginx and the app already set these; keep the client IP visible for
+      # rate limiting and audit logs.
+      httpHostHeader: hosting.alolabs.net
+
+  # Health-check hostname, straight to the app, bypassing nginx. Optional but
+  # useful: `curl https://origin-hosting.alolabs.net/api/health` tells you
+  # whether a 5xx is nginx or the panel.
+  # - hostname: origin-hosting.alolabs.net
+  #   service: http://127.0.0.1:3051
+
+  # Required catch-all — cloudflared refuses to start without it.
+  - service: http_status:404

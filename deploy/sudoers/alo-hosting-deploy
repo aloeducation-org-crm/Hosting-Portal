@@ -1,0 +1,54 @@
+# ALO Labs Hosting Panel — deploy permissions for the CI runner user
+# Install to: /etc/sudoers.d/alo-hosting-deploy
+# Permissions: root:root 0440   (sudo chmod 0440, validate with `sudo visudo -cf`)
+#
+# The self-hosted GitHub Actions runner runs as `alamin`. The deploy workflow
+# needs exactly three privileged operations and nothing else. Granting the whole
+# `systemctl` binary would let any workflow (or anyone who compromises the
+# runner) stop sshd, disable the firewall, or edit arbitrary units — so every
+# rule below names the full command with its arguments.
+#
+# Install:
+#   sudo cp deploy/sudoers/alo-hosting-deploy /etc/sudoers.d/alo-hosting-deploy
+#   sudo chown root:root /etc/sudoers.d/alo-hosting-deploy
+#   sudo chmod 0440 /etc/sudoers.d/alo-hosting-deploy
+#   sudo visudo -cf /etc/sudoers.d/alo-hosting-deploy   # must print "parsed OK"
+
+# Restart / inspect the panel service
+alamin ALL=(root) NOPASSWD: /bin/systemctl restart alo-hosting-panel
+alamin ALL=(root) NOPASSWD: /usr/bin/systemctl restart alo-hosting-panel
+alamin ALL=(root) NOPASSWD: /bin/systemctl status alo-hosting-panel
+alamin ALL=(root) NOPASSWD: /usr/bin/systemctl status alo-hosting-panel
+alamin ALL=(root) NOPASSWD: /usr/bin/journalctl -u alo-hosting-panel *
+
+# Reload the reverse proxy / tunnel after a config change.
+# Both /bin and /usr/bin spellings are listed because sudo matches the absolute
+# path that PATH resolution produced, and /bin is a symlink to /usr/bin on
+# Ubuntu 22.04 — which one matches depends on the runner's PATH order.
+alamin ALL=(root) NOPASSWD: /usr/sbin/nginx -t
+alamin ALL=(root) NOPASSWD: /bin/systemctl reload nginx
+alamin ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
+alamin ALL=(root) NOPASSWD: /bin/systemctl restart cloudflared
+alamin ALL=(root) NOPASSWD: /usr/bin/systemctl restart cloudflared
+
+# Database bootstrap (creates /var/lib/alo-hosting, verifies the schema against
+# prisma/schema.prisma, rotates the seeded super-admin password).
+#
+# This is a STABLE path on purpose. The deploy workflow runs it from a
+# per-release directory (/home/alamin/alo-hosting/releases/<sha>/…) and, on the
+# very first deploy, `current` does not exist yet — so a rule keyed to
+# `current/` or to the runner's _work checkout would not match and sudo would
+# prompt, hanging the job. Install it once:
+#   sudo install -m 0755 scripts/init-production-db.sh /usr/local/sbin/alo-init-db
+# and re-install it after any change to the script (the workflow re-copies it).
+alamin ALL=(root) NOPASSWD: /usr/local/sbin/alo-init-db *
+
+# …and let the deploy workflow refresh that copy from the release it just built.
+# Fully pinned: fixed mode, source restricted to a release directory, fixed
+# destination. Do not widen the destination or drop the mode argument.
+alamin ALL=(root) NOPASSWD: /usr/bin/install -m 0755 /home/alamin/alo-hosting/releases/*/scripts/init-production-db.sh /usr/local/sbin/alo-init-db
+
+# Read-only diagnostics used by scripts/server-doctor.sh
+alamin ALL=(root) NOPASSWD: /usr/sbin/nginx -T
+alamin ALL=(root) NOPASSWD: /usr/bin/certbot certificates
+alamin ALL=(root) NOPASSWD: /usr/sbin/ufw status *

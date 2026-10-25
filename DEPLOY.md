@@ -1,8 +1,54 @@
 # ALO Labs — Production Deployment Guide
 
-Complete guide to deploy ALO Labs Hosting Platform on Ubuntu 24.04 LTS.
+Complete guide to deploy ALO Labs Hosting Platform on Ubuntu 22.04 / 24.04 LTS.
 
-## Architecture
+> ## ⚠️ Read before deploying
+>
+> **The application is the repository ROOT.** `alo-hosting-portal/` is a legacy
+> snapshot (55 Prisma models, no `/login` route) — deploying it produces a panel
+> that returns 200 on `/` and cannot be logged into. See `README.md`.
+>
+> **The database is SQLite via the libSQL adapter**, not PostgreSQL.
+> `prisma/schema.prisma` is `provider = "sqlite"` and
+> `prisma/migrations/migration_lock.toml` is locked to `sqlite`, so a
+> `postgresql://` URL cannot be opened by the generated client. The PostgreSQL
+> instructions further down this file are retained for the Caddy/`/opt` variant
+> of `scripts/deploy-alo-portal.sh` and require a provider migration first.
+>
+> **The live database must be an absolute path outside the repository**
+> (`file:/var/lib/alo-hosting/alo.db`). A relative `file:` URL resolves against
+> the process working directory, and `db/custom.db` is tracked by git — so a
+> checkout replaces production data with the committed snapshot.
+>
+> Current production (`hosting.alolabs.net` on `alo-server-lap`) uses nginx +
+> Let's Encrypt behind a Cloudflare Tunnel, systemd, and the self-hosted Actions
+> runner. Templates: `deploy/systemd/`, `deploy/nginx/`, `deploy/cloudflared/`,
+> `deploy/sudoers/`. Workflow: `.github/workflows/deploy.yml`.
+> Recovery runbook: **`docs/RECOVERY-hosting.alolabs.net.md`**.
+> Audit the whole chain at any time with `bash scripts/server-doctor.sh`.
+
+## Architecture (current production)
+
+```
+Internet
+    ↓
+Cloudflare edge (SSL mode: Full)
+    ↓
+Cloudflare Tunnel — cloudflared, ingress: https://127.0.0.1:443
+    ↓
+nginx 443 (Let's Encrypt, certbot.timer) ── 80 → 443 redirect
+    ↓
+127.0.0.1:3051  Next.js standalone (systemd: alo-hosting-panel)
+    ↓
+SQLite /var/lib/alo-hosting/alo.db  +  Redis 127.0.0.1:6379 (optional)
+```
+
+The tunnel **must** terminate on 443. If its ingress points at
+`http://localhost:80`, nginx answers with the certbot 301 → `https://…`, the
+browser re-enters the same tunnel, and the loop returns HTTP 530 publicly while
+`curl http://127.0.0.1:3051` on the server looks perfectly healthy.
+
+## Architecture (Caddy / `/opt` variant)
 
 ```
 Internet
@@ -15,8 +61,12 @@ Caddy (Reverse Proxy + Auto SSL)
     ↓
 Next.js (Standalone)
     ↓
-PostgreSQL 17 + Redis 7
+SQLite (libSQL adapter) + Redis 7
 ```
+
+Provisioned by `sudo bash scripts/deploy-alo-portal.sh` (7 phases, app user
+`alo-panel`, app dir `/opt/alo-hosting-portal`, 19 privileged helpers in
+`/usr/local/sbin`).
 
 ## Server Requirements
 
