@@ -93,8 +93,9 @@ export function callHelper(
       cmdArgs = ["--non-interactive", helperPath, ...sanitizedArgs];
     }
 
+    // Helper arguments may contain passwords, tokens, or private data. Never log argv.
     logger.info(
-      { helper: helperName, args: sanitizedArgs, timeout, asRoot: isRoot() },
+      { helper: helperName, timeout, asRoot: isRoot() },
       "Calling helper",
     );
 
@@ -117,8 +118,9 @@ export function callHelper(
               stderr: stderr || "Helper timed out",
             });
           } else {
+            // stderr can contain credentials or user-controlled content; keep it out of logs.
             logger.error(
-              { helper: helperName, code: error.code, stderr },
+              { helper: helperName, code: error.code },
               "Helper failed",
             );
             resolve({

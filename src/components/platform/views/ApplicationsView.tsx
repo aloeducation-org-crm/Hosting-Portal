@@ -144,10 +144,7 @@ export default function ApplicationsView() {
 
   // Fetch logs from API when a log dialog is opened
   useEffect(() => {
-    if (!logsApp) {
-      setAppLogs(null)
-      return
-    }
+    if (!logsApp) return
     let cancelled = false
     ;(async () => {
       setLogsLoading(true)

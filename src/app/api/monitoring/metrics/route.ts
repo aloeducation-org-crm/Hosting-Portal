@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession } from '@/lib/auth';
-import { db } from '@/lib/db';
 import * as os from 'os';
+import { statfs } from 'node:fs/promises';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -16,29 +16,7 @@ export async function GET(request: NextRequest) {
   try {
     await requireSession(request);
 
-    const { searchParams } = new URL(request.url);
-    const websiteId = searchParams.get('websiteId');
-
-    // Try to fetch latest metrics from database for a specific website
-    if (websiteId) {
-      const latestMetric = await db.resourceMetric.findFirst({
-        where: { websiteId },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (latestMetric) {
-        return NextResponse.json(apiSuccess({
-          source: 'database',
-          cpu: latestMetric.cpuPercent,
-          memory: latestMetric.memoryMb,
-          disk: latestMetric.diskPercent,
-          bandwidth: latestMetric.bandwidthKb,
-          timestamp: latestMetric.createdAt.toISOString(),
-        }));
-      }
-    }
-
-    // Fall back to real-time OS metrics
+    // Metrics are read directly from this host, never presented from stale per-site samples.
     const totalmem = os.totalmem();
     const freemem = os.freemem();
     const cpus = os.cpus();
@@ -48,16 +26,19 @@ export async function GET(request: NextRequest) {
     const cpuPercent = Math.min(((loadavg[0] ?? 0) / cpus.length) * 100, 100);
     const memoryPercent = ((totalmem - freemem) / totalmem) * 100;
 
-    // Estimate disk usage (this is an approximation - real implementation would use df or statfs)
-    const diskPercent = 32;
-    const bandwidthKb = Math.round(Math.random() * 1000);
+    // statfs reports the filesystem containing the application. Network throughput
+    // requires sampled interface counters; do not invent a value in a point read.
+    const disk = await statfs(process.cwd());
+    const diskPercent = disk.blocks > 0
+      ? Math.round(((disk.blocks - disk.bfree) / disk.blocks) * 10000) / 100
+      : null;
 
     return NextResponse.json(apiSuccess({
       source: 'system',
       cpu: Math.round(cpuPercent * 100) / 100,
       memory: Math.round(memoryPercent * 100) / 100,
       disk: diskPercent,
-      bandwidth: bandwidthKb,
+      bandwidth: null,
       timestamp: new Date().toISOString(),
       systemInfo: {
         totalMemoryBytes: totalmem,

@@ -4,6 +4,7 @@ import { requireSuperAdmin, ROLES } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { env } from '@/lib/env';
 import * as os from 'os';
+import { statfs } from 'node:fs/promises';
 
 type ConditionOp = 'gt' | 'lt' | 'gte' | 'lte' | 'eq';
 
@@ -48,8 +49,12 @@ export async function POST(request: NextRequest) {
     const memoryPercent = ((totalMem - freeMem) / totalMem) * 100;
     const memoryMb = (totalMem - freeMem) / (1024 * 1024);
 
-    const diskPercent = 0; // placeholder - would need df parsing in production
-    const bandwidthKb = 0; // placeholder - would need network interface parsing
+    const disk = await statfs(process.cwd());
+    const diskPercent = disk.blocks > 0
+      ? Math.round(((disk.blocks - disk.bfree) / disk.blocks) * 10000) / 100
+      : null;
+    // Throughput requires interval sampling; null means unavailable rather than fabricated zero.
+    const bandwidthKb = null;
 
     // Get all active websites
     const websites = await db.website.findMany({

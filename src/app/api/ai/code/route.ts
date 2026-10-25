@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import ZAI from '@/lib/ai-sdk'
+import { AIProviderError } from '@/lib/ai-provider'
 import { verifyToken } from '@/lib/auth'
 
 const codeSchema = z.object({
@@ -68,10 +69,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, code, explanation })
   } catch (error) {
-    console.error('AI code generation error:', error)
-    return NextResponse.json(
-      { success: false, error: 'Failed to generate code' },
-      { status: 500 }
-    )
+    if (error instanceof AIProviderError) {
+      return NextResponse.json({ success: false, error: error.message }, { status: error.status })
+    }
+    return NextResponse.json({ success: false, error: 'Failed to generate code' }, { status: 500 })
   }
 }
