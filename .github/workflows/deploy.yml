@@ -90,7 +90,15 @@ jobs:
           ENV_FILE=/etc/alo-hosting/panel.env
           test -r "$ENV_FILE" || {
             echo "::error::$ENV_FILE missing or unreadable by $(whoami)."
-            echo "Create it from .env.example; see docs/RECOVERY-hosting.alolabs.net.md §3."
+            echo "This is the one-time server setup, not a code problem. Run this ON THE SERVER:"
+            echo ""
+            echo "    cd ~/projects/Hosting-Portal && git pull && npm ci"
+            echo "    sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net"
+            echo ""
+            echo "That writes $ENV_FILE with generated secrets, creates and verifies"
+            echo "/var/lib/alo-hosting/alo.db, installs the systemd unit and the sudoers"
+            echo "entry this workflow needs, then re-run this job."
+            echo "Manual alternative: docs/RECOVERY-hosting.alolabs.net.md §3."
             exit 1;
           }
           # src/lib/env.ts calls process.exit(1) in production when either
@@ -158,7 +166,12 @@ jobs:
           # (SQLITE_ERROR: no such column), and the tables all still exist so
           # nothing else catches it. On failure the rollback step restores the
           # previous release, whose code matches the current database.
-          sudo /usr/local/sbin/alo-init-db --from "$REL"
+          #
+          # --modules-from is NOT the release. .next/standalone only carries the
+          # modules the app requires at runtime, and @libsql/client is traced as
+          # a bare package.json (its lib-cjs/ main is missing), which the
+          # bootstrap needs. The workspace has the full `npm ci` tree.
+          sudo /usr/local/sbin/alo-init-db --from "$REL" --modules-from "$GITHUB_WORKSPACE"
 
       - name: Swap symlink & restart
         id: swap

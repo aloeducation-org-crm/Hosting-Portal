@@ -10,6 +10,13 @@
 #   sudo bash scripts/init-production-db.sh --from /home/alamin/alo-hosting/current
 #   sudo ADMIN_EMAIL=ops@alolabs.net ADMIN_PASSWORD='...' bash scripts/init-production-db.sh
 #
+# --from <dir>          where db/custom.db and prisma/schema.prisma come from
+# --modules-from <dir>  where node_modules comes from. Point this at a full
+#                       `npm ci` checkout, NOT at a deployed release:
+#                       .next/standalone traces only the modules the app
+#                       requires at runtime, so @libsql/client arrives there as
+#                       a bare package.json whose lib-cjs/ main is missing.
+#
 # Why the database must not live in the repo:
 #   * `db/custom.db` is tracked by git, so every checkout / `git reset --hard` /
 #     fresh clone silently replaces production data with the committed snapshot.
@@ -29,6 +36,7 @@ APP_GROUP="${ALO_APP_GROUP:-$(id -gn "${ALO_APP_USER:-alamin}" 2>/dev/null || ec
 SEED_RELATIVE="db/custom.db"
 
 APP_DIR=""
+MODULES_DIR=""
 FORCE=false
 ROTATE=false
 
@@ -40,10 +48,11 @@ die()  { echo -e "  ${RED}✗ $*${NC}" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --from)  APP_DIR="$2"; shift 2 ;;
+    --modules-from) MODULES_DIR="$2"; shift 2 ;;
     --force) FORCE=true; shift ;;
     --rotate-password) ROTATE=true; shift ;;
     -h|--help)
-      sed -n '2,20p' "$0"; exit 0 ;;
+      sed -n '2,26p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -55,8 +64,16 @@ if [[ -z "$APP_DIR" ]]; then
 fi
 [[ -f "${APP_DIR}/${SEED_RELATIVE}" ]] \
   || die "seed database not found at ${APP_DIR}/${SEED_RELATIVE} (pass --from <release-dir>)"
-[[ -d "${APP_DIR}/node_modules/bcryptjs" ]] \
-  || die "bcryptjs not found under ${APP_DIR}/node_modules — run this against a built release"
+# Where the node modules come from. A deployed release (.next/standalone) is a
+# RUNTIME bundle: Next's file tracing copies only what the app itself requires,
+# so @libsql/client lands there as a bare package.json whose "main"
+# (lib-cjs/node.js) was never traced — requiring it throws MODULE_NOT_FOUND.
+# This script is tooling, not the app, so by default it takes its modules from
+# the same tree, but callers should point it at a full `npm ci` checkout:
+#   alo-init-db --from <release> --modules-from <workspace>
+MODULES_DIR="${MODULES_DIR:-${ALO_MODULES_DIR:-$APP_DIR}}"
+[[ -d "${MODULES_DIR}/node_modules/bcryptjs" ]] \
+  || die "bcryptjs not found under ${MODULES_DIR}/node_modules — pass --modules-from <checkout with npm ci>"
 
 echo -e "${BOLD}ALO Labs — production database bootstrap${NC}"
 echo "  release:  ${APP_DIR}"
@@ -92,6 +109,20 @@ fi
 [[ -n "$NODE_BIN" && -x "$NODE_BIN" ]] \
   || die "no node binary found (looked in PATH and /home/${APP_USER}/.nvm/versions/node/*/bin)"
 ok "node: ${NODE_BIN} ($("$NODE_BIN" -v))"
+
+# Fail here with a useful message rather than as a MODULE_NOT_FOUND stack trace
+# halfway through credential rotation (which would leave the DB seeded but the
+# published admin123 password still in place).
+"$NODE_BIN" -e '
+  const p = require("path");
+  for (const mod of ["bcryptjs", "@libsql/client"]) {
+    require(p.join(process.argv[1], "node_modules", ...mod.split("/")));
+  }
+' "$MODULES_DIR" >/dev/null 2>&1 \
+  || die "cannot load bcryptjs / @libsql/client from ${MODULES_DIR}/node_modules —
+     a .next/standalone release is deliberately incomplete, so pass
+     --modules-from <dir with a full 'npm ci' node_modules>"
+ok "modules: ${MODULES_DIR}/node_modules"
 
 # ── 3. Sanity check the schema really is there ───────────────────────────────
 # Counting tables is not enough: the seed database has previously shipped 74
@@ -168,11 +199,11 @@ if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
   GENERATED="yes"
 fi
 
-APP_DIR="$APP_DIR" DB_FILE="$DB_FILE" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+MODULES_DIR="$MODULES_DIR" DB_FILE="$DB_FILE" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   HARDEN="$( [[ "$SEEDED" == true || "$ROTATE" == true ]] && echo yes || echo auto )" \
   sudo -u "${APP_USER}" -E "$NODE_BIN" - <<'NODE' | tee "$HARDEN_LOG"
 const path = require("node:path");
-const app = process.env.APP_DIR;
+const app = process.env.MODULES_DIR;
 const bcrypt = require(path.join(app, "node_modules", "bcryptjs"));
 const { createClient } = require(path.join(app, "node_modules", "@libsql", "client"));
 

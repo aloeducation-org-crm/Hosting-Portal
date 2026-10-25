@@ -41,6 +41,32 @@ Two more things that are not broken but will bite you:
 Run these on the server. Blocks are copy-pasteable and use `set -euo pipefail`
 so a failure stops instead of cascading.
 
+### 1.0 …or do §1.2–§1.5 in one command
+
+`scripts/bootstrap-server.sh` performs the whole server-side prerequisite set
+that `.github/workflows/deploy.yml` checks for, and it is safe to re-run:
+
+```bash
+cd ~/projects/Hosting-Portal
+git pull && npm ci                       # it takes node modules from here
+sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net
+```
+
+It writes `/etc/alo-hosting/panel.env` (0640 `root:alamin`) with secrets
+generated on the box, creates and schema-verifies `/var/lib/alo-hosting/alo.db`,
+rotates the published `admin123` password (printed once — save it), installs
+`alo-hosting-panel.service` with the absolute Node path it detected, installs
+`/etc/sudoers.d/alo-hosting-deploy` after `visudo -cf`, and installs
+`/usr/local/sbin/alo-init-db`. Add `--dry-run` first to see the plan.
+
+Still manual, because they touch live traffic: §1.1 (resetting the dirty tree),
+§2 (nginx + the Cloudflare Tunnel ingress). The script will do those too if you
+ask: `--nginx` and `--tunnel <uuid>`.
+
+After it finishes, push to `main` (or re-run the failed Deploy job) and the
+workflow deploys. Read on only if you want to see what it did, or need to do a
+step by hand.
+
 ### 1.1 Pull this branch and reset the dirty tree
 
 ```bash

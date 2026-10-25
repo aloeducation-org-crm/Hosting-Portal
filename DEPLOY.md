@@ -26,6 +26,19 @@ Complete guide to deploy ALO Labs Hosting Platform on Ubuntu 22.04 / 24.04 LTS.
 > `deploy/sudoers/`. Workflow: `.github/workflows/deploy.yml`.
 > Recovery runbook: **`docs/RECOVERY-hosting.alolabs.net.md`**.
 > Audit the whole chain at any time with `bash scripts/server-doctor.sh`.
+>
+> **First-time server setup is one command.** The Deploy workflow refuses to swap
+> a release until `/etc/alo-hosting/panel.env`, the database, the systemd unit
+> and its sudoers entry exist. Create all four with:
+>
+> ```bash
+> cd ~/projects/Hosting-Portal && git pull && npm ci
+> sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net
+> ```
+>
+> It generates the secrets on the box, verifies the schema, rotates the published
+> seed password and prints it once. Add `--dry-run` to preview. The manual
+> equivalent is runbook §1.2–§1.5.
 
 ## Architecture (current production)
 
