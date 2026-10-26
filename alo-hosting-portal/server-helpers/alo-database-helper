@@ -1,217 +1,276 @@
 #!/usr/bin/env bash
-# ALO Labs - Database Helper
-# Manages MariaDB and PostgreSQL databases for hosted sites
-# Usage: alo-database-helper <command> [args...]
-
+#
+# ALO Labs Hosting Portal — Database Helper
+# Manages MariaDB/PostgreSQL databases for hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
 set -euo pipefail
 
-DOMAIN_SAFE_FUNC() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | tr '.' '_' | tr -cd 'a-z0-9_'
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-database-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-database-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
 }
 
-GEN_PASSWORD() {
-  tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 24
+generate_password() {
+  tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom 2>/dev/null | head -c 32
 }
 
-output_json() {
-  echo "$1"
-}
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-database-helper <action> [args...]"
+fi
 
-# Validate domain
-validate_domain() {
-  local d="$1"
-  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-    output_json '{"success":false,"error":"Invalid domain name"}'
-    exit 1
-  fi
-}
-
-# Validate db name (alphanumeric + underscore only)
-validate_dbname() {
-  local n="$1"
-  if [[ ! "$n" =~ ^[a-zA-Z0-9_]{1,63}$ ]]; then
-    output_json '{"success":false,"error":"Invalid database name (alphanumeric and underscores only, 1-63 chars)"}'
-    exit 1
-  fi
-}
-
-COMMAND="${1:?Usage: alo-database-helper <command> [args...]}
+ACTION="$1"
 shift
 
-case "$COMMAND" in
-  create-mariadb)
-    DOMAIN="${1:?Usage: create-mariadb <domain> <db_name>}"
-    DB_NAME="${2:?Usage: create-mariadb <domain> <db_name>}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+# Validate database name: alphanumeric + underscores only
+validate_dbname() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9_]{1,64}$ ]]; then
+    die "arg-validation" "Invalid database name: $1"
+  fi
+}
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    FULL_USER="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    PASSWORD=$(GEN_PASSWORD)
+# Validate username: alphanumeric + underscores only
+validate_username() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9_]{1,32}$ ]]; then
+    die "arg-validation" "Invalid username: $1"
+  fi
+}
 
-    # Create database and user
-    mysql -e "CREATE DATABASE IF NOT EXISTS \`${FULL_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>&1
-    mysql -e "CREATE USER IF NOT EXISTS '\`${FULL_USER}\`'@'localhost' IDENTIFIED BY '${PASSWORD}';" 2>&1
-    mysql -e "GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX ON \`${FULL_DB}\`.* TO '\`${FULL_USER}\`'@'localhost';" 2>&1
-    mysql -e "FLUSH PRIVILEGES;" 2>&1
+# Validate engine
+validate_engine() {
+  if [[ "$1" != "mariadb" && "$1" != "postgresql" ]]; then
+    die "arg-validation" "Engine must be mariadb or postgresql"
+  fi
+}
 
-    output_json "{\"success\":true,\"engine\":\"MARIADB\",\"domain\":\"$DOMAIN\",\"database\":\"$FULL_DB\",\"username\":\"$FULL_USER\",\"password\":\"$PASSWORD\",\"host\":\"localhost\",\"port\":3306,\"createdAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+# ── action: create ──────────────────────────────────────────────────────────
+action_create() {
+  if [[ $# -lt 3 ]]; then
+    die "create" "Usage: create <engine> <dbname> <username>"
+  fi
 
-  create-postgresql)
-    DOMAIN="${1:?Usage: create-postgresql <domain> <db_name>}"
-    DB_NAME="${2:?Usage: create-postgresql <domain> <db_name>}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    FULL_USER="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    PASSWORD=$(GEN_PASSWORD)
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
 
-    sudo -u postgres psql -c "CREATE DATABASE \"${FULL_DB}\" ENCODING 'UTF8';" 2>&1
-    sudo -u postgres psql -c "CREATE USER \"${FULL_USER}\" WITH PASSWORD '${PASSWORD}';" 2>&1
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \"${FULL_DB}\" TO \"${FULL_USER}\";" 2>&1
-    sudo -u postgres psql -d "$FULL_DB" -c "GRANT ALL ON SCHEMA public TO \"${FULL_USER}\";" 2>&1
+  local password
+  password=$(generate_password)
 
-    output_json "{\"success\":true,\"engine\":\"POSTGRESQL\",\"domain\":\"$DOMAIN\",\"database\":\"$FULL_DB\",\"username\":\"$FULL_USER\",\"password\":\"$PASSWORD\",\"host\":\"localhost\",\"port\":5432,\"createdAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Creating MariaDB database: ${dbname}"
+    mysql -u root -e "
+      CREATE DATABASE IF NOT EXISTS \`${dbname}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+      CREATE USER IF NOT EXISTS '${username}'@'localhost' IDENTIFIED BY '${password}';
+      GRANT ALL PRIVILEGES ON \`${dbname}\`.* TO '${username}'@'localhost';
+      FLUSH PRIVILEGES;
+    " 2>/dev/null || die "create" "MariaDB database creation failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Creating PostgreSQL database: ${dbname}"
+    # For PostgreSQL, single quotes need escaping in the password
+    local escaped_password
+    escaped_password=$(printf '%s' "$password" | sed "s/'/''/g")
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      SELECT 'CREATE DATABASE \"${dbname}\"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${dbname}')\\gexec
+    " 2>/dev/null || die "create" "PostgreSQL database creation failed (database)"
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      SELECT 'CREATE USER \"${username}\" WITH PASSWORD '\''${escaped_password}'\''' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${username}')\\gexec
+    " 2>/dev/null || die "create" "PostgreSQL database creation failed (user)"
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      GRANT ALL PRIVILEGES ON DATABASE \"${dbname}\" TO \"${username}\";
+      GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"${username}\";
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"${username}\";
+    " 2>/dev/null || die "create" "PostgreSQL grant failed"
+  fi
 
-  delete-mariadb)
-    DOMAIN="${1:?Usage: delete-mariadb <domain> <db_name>}"
-    DB_NAME="${2:?Usage: delete-mariadb <domain> <db_name>}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+  log_info "Database created successfully."
+  # Password only in stdout JSON, never in logs
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\",\"password\":\"${password}\"}"
+}
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    FULL_USER="alo_${DOMAIN_SAFE}_${DB_NAME}"
+# ── action: test ────────────────────────────────────────────────────────────
+action_test() {
+  if [[ $# -lt 4 ]]; then
+    die "test" "Usage: test <engine> <dbname> <username> <password>"
+  fi
 
-    mysql -e "DROP DATABASE IF EXISTS \`${FULL_DB}\`;" 2>&1
-    mysql -e "DROP USER IF EXISTS '\`${FULL_USER}\`'@'localhost';" 2>&1
-    mysql -e "FLUSH PRIVILEGES;" 2>&1
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local password="$4"
 
-    output_json "{\"success\":true,\"engine\":\"MARIADB\",\"domain\":\"$DOMAIN\",\"database\":\"$FULL_DB\",\"deletedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
 
-  delete-postgresql)
-    DOMAIN="${1:?Usage: delete-postgresql <domain> <db_name>}"
-    DB_NAME="${2:?Usage: delete-postgresql <domain> <db_name>}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+  if [[ "$engine" == "mariadb" ]]; then
+    MYSQL_PWD="$password" mysql -u "$username" "$dbname" -e 'SELECT 1' &>/dev/null || \
+      die "test" "MariaDB connection test failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    PGPASSWORD="$password" psql -U "$username" -d "$dbname" -c 'SELECT 1' &>/dev/null || \
+      die "test" "PostgreSQL connection test failed"
+  fi
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    FULL_USER="alo_${DOMAIN_SAFE}_${DB_NAME}"
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"connection\":\"ok\"}"
+}
 
-    sudo -u postgres psql -c "DROP DATABASE IF EXISTS \"${FULL_DB}\";" 2>&1
-    sudo -u postgres psql -c "DROP USER IF EXISTS \"${FULL_USER}\";" 2>&1
+# ── action: backup ──────────────────────────────────────────────────────────
+action_backup() {
+  if [[ $# -lt 5 ]]; then
+    die "backup" "Usage: backup <engine> <dbname> <username> <password> <output-path>"
+  fi
 
-    output_json "{\"success\":true,\"engine\":\"POSTGRESQL\",\"domain\":\"$DOMAIN\",\"database\":\"$FULL_DB\",\"deletedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local password="$4"
+  local output_path="$5"
 
-  list)
-    DOMAIN="${1:?Usage: list <domain>}"
-    validate_domain "$DOMAIN"
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    PREFIX="alo_${DOMAIN_SAFE}_"
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
 
-    MARIADB_DBS=$(mysql -e "SHOW DATABASES LIKE '${PREFIX}%';" -s 2>/dev/null | grep "^${PREFIX}" || echo "")
-    PG_DBS=$(sudo -u postgres psql -t -c "SELECT datname FROM pg_database WHERE datname LIKE '${PREFIX}%'" 2>/dev/null | tr -d ' ' | grep "^${PREFIX}" || echo "")
+  # Validate output path
+  local output_dir
+  output_dir=$(dirname "$output_path")
+  if [[ ! -d "$output_dir" ]]; then
+    die "backup" "Output directory does not exist: ${output_dir}"
+  fi
 
-    DBS_JSON="[]"
-    if [[ -n "$MARIADB_DBS" || -n "$PG_DBS" ]]; then
-      ITEMS=""
-      while IFS= read -r db; do
-        [[ -z "$db" ]] && continue
-        [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
-        ITEMS="$ITEMS{\"name\":\"$db\",\"engine\":\"MARIADB\"}"
-      done <<< "$MARIADB_DBS"
-      while IFS= read -r db; do
-        [[ -z "$db" ]] && continue
-        [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
-        ITEMS="$ITEMS{\"name\":\"$db\",\"engine\":\"POSTGRESQL\"}"
-      done <<< "$PG_DBS"
-      DBS_JSON="[$ITEMS]"
-    fi
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Dumping MariaDB database: ${dbname}"
+    MYSQL_PWD="$password" mysqldump -u "$username" --single-transaction --routines "$dbname" > "$output_path" 2>/dev/null || \
+      die "backup" "MariaDB dump failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Dumping PostgreSQL database: ${dbname}"
+    PGPASSWORD="$password" pg_dump -U "$username" -d "$dbname" --no-owner --no-privileges -F p -f "$output_path" 2>/dev/null || \
+      die "backup" "PostgreSQL dump failed"
+  fi
 
-    output_json "{\"success\":true,\"domain\":\"$DOMAIN\",\"databases\":$DBS_JSON}"
-    ;;
+  local file_size
+  file_size=$(stat -c%s "$output_path" 2>/dev/null || echo "0")
 
-  dump-mariadb)
-    DOMAIN="${1:?Usage: dump-mariadb <domain> <db_name> [output_path]}"
-    DB_NAME="${2:?Usage: dump-mariadb <domain> <db_name> [output_path]}"
-    OUTPUT_PATH="${3:-}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"path\":\"${output_path}\",\"size\":${file_size}}"
+}
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    [[ -z "$OUTPUT_PATH" ]] && OUTPUT_PATH="/var/backups/alo-sites/$DOMAIN/${FULL_DB}-$(date +%Y%m%d%H%M%S).sql"
-    mkdir -p "$(dirname "$OUTPUT_PATH")"
+# ── action: restore ──────────────────────────────────────────────────────────
+action_restore() {
+  if [[ $# -lt 5 ]]; then
+    die "restore" "Usage: restore <engine> <dbname> <username> <password> <input-path>"
+  fi
 
-    mysqldump "$FULL_DB" > "$OUTPUT_PATH" 2>/dev/null
-    SIZE=$(stat -c%s "$OUTPUT_PATH" 2>/dev/null || echo 0)
-    CHECKSUM=$(sha256sum "$OUTPUT_PATH" | awk '{print $1}')
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local password="$4"
+  local input_path="$5"
 
-    output_json "{\"success\":true,\"engine\":\"MARIADB\",\"database\":\"$FULL_DB\",\"path\":\"$OUTPUT_PATH\",\"sizeBytes\":$SIZE,\"checksum\":\"$CHECKSUM\",\"createdAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
 
-  dump-postgresql)
-    DOMAIN="${1:?Usage: dump-postgresql <domain> <db_name> [output_path]}"
-    DB_NAME="${2:?Usage: dump-postgresql <domain> <db_name> [output_path]}"
-    OUTPUT_PATH="${3:-}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+  if [[ ! -f "$input_path" ]]; then
+    die "restore" "Input dump file not found: ${input_path}"
+  fi
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    [[ -z "$OUTPUT_PATH" ]] && OUTPUT_PATH="/var/backups/alo-sites/$DOMAIN/${FULL_DB}-$(date +%Y%m%d%H%M%S).sql"
-    mkdir -p "$(dirname "$OUTPUT_PATH")"
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Restoring MariaDB database: ${dbname}"
+    MYSQL_PWD="$password" mysql -u "$username" "$dbname" < "$input_path" 2>/dev/null || \
+      die "restore" "MariaDB restore failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Restoring PostgreSQL database: ${dbname}"
+    PGPASSWORD="$password" psql -U "$username" -d "$dbname" -f "$input_path" 2>/dev/null || \
+      die "restore" "PostgreSQL restore failed"
+  fi
 
-    sudo -u postgres pg_dump "$FULL_DB" > "$OUTPUT_PATH" 2>/dev/null
-    SIZE=$(stat -c%s "$OUTPUT_PATH" 2>/dev/null || echo 0)
-    CHECKSUM=$(sha256sum "$OUTPUT_PATH" | awk '{print $1}')
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\"}"
+}
 
-    output_json "{\"success\":true,\"engine\":\"POSTGRESQL\",\"database\":\"$FULL_DB\",\"path\":\"$OUTPUT_PATH\",\"sizeBytes\":$SIZE,\"checksum\":\"$CHECKSUM\",\"createdAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+# ── action: rotate-password ──────────────────────────────────────────────────
+action_rotate_password() {
+  if [[ $# -lt 4 ]]; then
+    die "rotate-password" "Usage: rotate-password <engine> <dbname> <username> <new-password>"
+  fi
 
-  reset-password-mariadb)
-    DOMAIN="${1:?Usage: reset-password-mariadb <domain> <db_name>}"
-    DB_NAME="${2:?Usage: reset-password-mariadb <domain> <db_name>}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
+  local new_password="$4"
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    FULL_USER="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    PASSWORD=$(GEN_PASSWORD)
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
 
-    mysql -e "ALTER USER '\`${FULL_USER}\`'@'localhost' IDENTIFIED BY '${PASSWORD}';" 2>&1
-    mysql -e "FLUSH PRIVILEGES;" 2>&1
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Rotating MariaDB password for: ${username}"
+    # Escape single quotes in password to prevent SQL injection
+    local escaped_password
+    escaped_password=$(printf '%s' "$new_password" | sed "s/'/\\\\'/g")
+    mysql -u root -e "ALTER USER '${username}'@'localhost' IDENTIFIED BY '${escaped_password}'; FLUSH PRIVILEGES;" 2>/dev/null || \
+      die "rotate-password" "MariaDB password rotation failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Rotating PostgreSQL password for: ${username}"
+    local escaped_password
+    escaped_password=$(printf '%s' "$new_password" | sed "s/'/''/g")
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "ALTER USER \"${username}\" WITH PASSWORD '${escaped_password}';" 2>/dev/null || \
+      die "rotate-password" "PostgreSQL password rotation failed"
+  fi
 
-    output_json "{\"success\":true,\"engine\":\"MARIADB\",\"domain\":\"$DOMAIN\",\"database\":\"$FULL_DB\",\"username\":\"$FULL_USER\",\"password\":\"$PASSWORD\",\"resetAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\"}"
+}
 
-  reset-password-postgresql)
-    DOMAIN="${1:?Usage: reset-password-postgresql <domain> <db_name>}"
-    DB_NAME="${2:?Usage: reset-password-postgresql <domain> <db_name>}"
-    validate_domain "$DOMAIN"
-    validate_dbname "$DB_NAME"
+# ── action: delete ──────────────────────────────────────────────────────────
+action_delete() {
+  if [[ $# -lt 3 ]]; then
+    die "delete" "Usage: delete <engine> <dbname> <username>"
+  fi
 
-    DOMAIN_SAFE=$(DOMAIN_SAFE_FUNC "$DOMAIN")
-    FULL_DB="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    FULL_USER="alo_${DOMAIN_SAFE}_${DB_NAME}"
-    PASSWORD=$(GEN_PASSWORD)
+  local engine="$1"
+  local dbname="$2"
+  local username="$3"
 
-    sudo -u postgres psql -c "ALTER USER \"${FULL_USER}\" WITH PASSWORD '${PASSWORD}';" 2>&1
+  validate_engine "$engine"
+  validate_dbname "$dbname"
+  validate_username "$username"
 
-    output_json "{\"success\":true,\"engine\":\"POSTGRESQL\",\"domain\":\"$DOMAIN\",\"database\":\"$FULL_DB\",\"username\":\"$FULL_USER\",\"password\":\"$PASSWORD\",\"resetAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  if [[ "$engine" == "mariadb" ]]; then
+    log_info "Deleting MariaDB database and user: ${dbname}"
+    mysql -u root -e "
+      REVOKE ALL PRIVILEGES ON \`${dbname}\`.* FROM '${username}'@'localhost';
+      DROP DATABASE IF EXISTS \`${dbname}\`;
+      DROP USER IF EXISTS '${username}'@'localhost';
+      FLUSH PRIVILEGES;
+    " 2>/dev/null || die "delete" "MariaDB deletion failed"
+  elif [[ "$engine" == "postgresql" ]]; then
+    log_info "Deleting PostgreSQL database and user: ${dbname}"
+    sudo -u postgres psql -v ON_ERROR_STOP=1 -c "
+      REVOKE ALL PRIVILEGES ON DATABASE \"${dbname}\" FROM \"${username}\";
+      DROP DATABASE IF EXISTS \"${dbname}\";
+      DROP USER IF EXISTS \"${username}\";
+    " 2>/dev/null || die "delete" "PostgreSQL deletion failed"
+  fi
 
-  *)
-    echo "Available commands: create-mariadb, create-postgresql, delete-mariadb, delete-postgresql, list, dump-mariadb, dump-postgresql, reset-password-mariadb, reset-password-postgresql" >&2
-    exit 1
-    ;;
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\"}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  create)         action_create "$@" ;;
+  test)           action_test "$@" ;;
+  backup)         action_backup "$@" ;;
+  restore)        action_restore "$@" ;;
+  rotate-password) action_rotate_password "$@" ;;
+  delete)         action_delete "$@" ;;
+  *)              die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

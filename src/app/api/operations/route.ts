@@ -21,7 +21,7 @@ const createSchema = z.object({
   }),
   resourceId: z.string().optional(),
   resourceType: z.string().optional(),
-  input: z.record(z.unknown()).default({}),
+  input: z.record(z.string(), z.unknown()).default({}),
   priority: z.number().int().min(0).max(1000).optional().default(100),
 });
 

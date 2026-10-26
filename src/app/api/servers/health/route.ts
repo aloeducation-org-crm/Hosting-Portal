@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession } from '@/lib/auth';
+import { requireRole, ROLES } from '@/lib/auth';
 import { db } from '@/lib/db';
 import os from 'os';
 
@@ -14,7 +14,7 @@ function handleErr(e: unknown): NextResponse {
 
 export async function GET(request: NextRequest) {
   try {
-    await requireSession(request);
+    await requireRole(request, [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.DEVOPS]);
 
     // Local system info
     const totalmem = os.totalmem();

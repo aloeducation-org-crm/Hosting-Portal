@@ -18,8 +18,9 @@ import { Check, Crown, Download, AlertCircle, Sparkles, CreditCard, Receipt, Pac
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 
-function getToken() {
-  return typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+function buildAuthHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 interface Plan {
@@ -89,31 +90,32 @@ export default function BillingView() {
       try {
         if (activeTab === 'plans') {
           const [plansRes, subRes] = await Promise.all([
-            fetch('/api/pricing/plans'),
-            fetch('/api/subscriptions', { headers: { Authorization: `Bearer ${getToken()}` } }),
+            fetch('/api/pricing/plans', { credentials: 'same-origin' }),
+            fetch('/api/subscriptions', { credentials: 'same-origin', headers: buildAuthHeaders() }),
           ])
           if (!cancelled) {
             if (plansRes.ok) {
               const plansData = await plansRes.json()
-              setPlans(plansData.plans || [])
+              setPlans(plansData.plans || plansData.data?.plans || [])
             } else throw new Error('Failed to fetch plans')
             if (subRes.status === 404) {
               setSubscription(null)
             } else if (subRes.ok) {
               const subData = await subRes.json()
-              setSubscription(subData.subscription || subData[0] || null)
+              const rows = Array.isArray(subData) ? subData : subData.subscriptions || subData.data || []
+              setSubscription(subData.subscription || rows[0] || null)
             }
           }
         } else if (activeTab === 'invoices') {
-          const res = await fetch('/api/invoices', { headers: { Authorization: `Bearer ${getToken()}` } })
+          const res = await fetch('/api/invoices', { credentials: 'same-origin', headers: buildAuthHeaders() })
           if (!res.ok) throw new Error('Failed to fetch invoices')
           const data = await res.json()
-          if (!cancelled) setInvoices(data.invoices || [])
+          if (!cancelled) setInvoices(Array.isArray(data) ? data : data.invoices || data.data || [])
         } else {
-          const res = await fetch('/api/orders', { headers: { Authorization: `Bearer ${getToken()}` } })
+          const res = await fetch('/api/orders', { credentials: 'same-origin', headers: buildAuthHeaders() })
           if (!res.ok) throw new Error('Failed to fetch orders')
           const data = await res.json()
-          if (!cancelled) setOrders(data.orders || [])
+          if (!cancelled) setOrders(Array.isArray(data) ? data : data.orders || data.data || [])
         }
         if (!cancelled) {
           setError(null)
@@ -129,24 +131,29 @@ export default function BillingView() {
     return () => { cancelled = true }
   }, [activeTab])
 
-  const handleUpgrade = async (planId: string, price: number) => {
+  const handleUpgrade = async (planId: string, _price: number) => {
     setUpgrading(planId)
     try {
-      const res = await fetch('/api/orders', {
+      const res = await fetch('/api/subscriptions', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
+          ...buildAuthHeaders(),
         },
         body: JSON.stringify({
-          items: [{ type: planId, name: `${planId.charAt(0).toUpperCase() + planId.slice(1)} Plan`, price, qty: 1 }],
-          total: price,
+          planId,
+          billingCycle: 'monthly',
         }),
       })
-      if (!res.ok) throw new Error('Failed to process upgrade')
-      toast.success(`Successfully upgraded to ${planId.charAt(0).toUpperCase() + planId.slice(1)} plan!`)
-    } catch {
-      toast.error('Upgrade failed. Please try again.')
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body?.message || 'Failed to process upgrade')
+      if (body?.data?.subscription) {
+        setSubscription(body.data.subscription)
+      }
+      toast.success(`Successfully activated ${planId} plan!`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Upgrade failed. Please try again.')
     } finally {
       setUpgrading(null)
     }

@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Site Backup Helper
+# Creates verified backups of hosted sites with SHA-256 checksums.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+BACKUP_BASE="/var/backups/alo-sites"
+CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
+APP_USER="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-site-backup] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-site-backup] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-site-backup <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-site-backup <action> <domain>"
+fi
+
+DOMAIN="$1"
+shift
+validate_domain "$DOMAIN"
+
+SITE_DIR="${SITE_BASE}/${DOMAIN}"
+BACKUP_DIR="${BACKUP_BASE}/${DOMAIN}"
+SERVICE_FILE="/etc/systemd/system/alo-site-${DOMAIN}.service"
+CADDY_FRAGMENT="${CADDY_CONFIG_DIR}/${DOMAIN}.caddy"
+
+# ── action: create ────────────────────────────────────────────────────────────
+action_create() {
+  if [[ ! -d "$SITE_DIR" ]]; then
+    die "create" "Site directory not found: ${DOMAIN}"
+  fi
+
+  mkdir -p "$BACKUP_DIR"
+
+  local timestamp
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  local backup_file="${BACKUP_DIR}/${DOMAIN}-${timestamp}.tar.gz"
+  local tmp_dir="/tmp/alo-backup-${DOMAIN}-${timestamp}"
+
+  log_info "Creating backup of ${DOMAIN}..."
+
+  # Create temp directory structure
+  mkdir -p "${tmp_dir}/site" "${tmp_dir}/caddy" "${tmp_dir}/systemd" "${tmp_dir}/database"
+
+  # Step 1: Copy site files
+  log_info "Copying site files..."
+  cp -a "${SITE_DIR}/." "${tmp_dir}/site/"
+
+  # Step 2: Copy Caddy config
+  if [[ -f "$CADDY_FRAGMENT" ]]; then
+    cp "$CADDY_FRAGMENT" "${tmp_dir}/caddy/${DOMAIN}.caddy"
+    log_info "Copied Caddy config"
+  fi
+
+  # Step 3: Copy systemd unit
+  if [[ -f "$SERVICE_FILE" ]]; then
+    cp "$SERVICE_FILE" "${tmp_dir}/systemd/alo-site-${DOMAIN}.service"
+    log_info "Copied systemd unit"
+  fi
+
+  # Step 4: Create manifest
+  local site_size
+  site_size=$(du -sb "${tmp_dir}/site" 2>/dev/null | awk '{print $1}' || echo "0")
+  local file_count
+  file_count=$(find "${tmp_dir}/site" -type f 2>/dev/null | wc -l)
+
+  # Read port from systemd unit if available
+  local port=""
+  if [[ -f "$SERVICE_FILE" ]]; then
+    port=$(grep -oP 'Environment="PORT=\K[0-9]+' "$SERVICE_FILE" 2>/dev/null || echo "")
+  fi
+
+  # Read database info from site env file
+  local db_engine="" db_name=""
+  if [[ -f "${SITE_DIR}/.env" ]]; then
+    db_engine=$(grep -oP 'DB_ENGINE=\K[^\s]+' "${SITE_DIR}/.env" 2>/dev/null || echo "")
+    db_name=$(grep -oP 'DB_NAME=\K[^\s]+' "${SITE_DIR}/.env" 2>/dev/null || echo "")
+  fi
+
+  cat > "${tmp_dir}/manifest.json" <<MANIFEST
+{
+  "version": "1.0",
+  "domain": "${DOMAIN}",
+  "timestamp": "$(date -Iseconds)",
+  "siteSizeBytes": ${site_size},
+  "fileCount": ${file_count},
+  "port": "${port}",
+  "database": {
+    "engine": "${db_engine}",
+    "name": "${db_name}"
+  }
+}
+MANIFEST
+
+  # Step 5: Create archive
+  log_info "Creating archive..."
+  tar -czf "$backup_file" -C "${tmp_dir}" . 2>/dev/null || {
+    rm -rf "${tmp_dir}"
+    die "create" "Failed to create backup archive"
+  }
+
+  # Step 6: Generate SHA-256 checksum
+  sha256sum "$backup_file" > "${backup_file}.sha256"
+  log_info "SHA-256 checksum generated"
+
+  # Step 7: Cleanup temp directory
+  rm -rf "${tmp_dir}"
+
+  # Step 8: Get backup size
+  local backup_size
+  backup_size=$(stat -c%s "$backup_file" 2>/dev/null || echo "0")
+  local backup_sha
+  backup_sha=$(awk '{print $1}' "${backup_file}.sha256")
+
+  log_info "Backup created: ${backup_file} (${backup_size} bytes)"
+
+  json_out "{\"success\":true,\"step\":\"create\",\"domain\":\"${DOMAIN}\",\"path\":\"${backup_file}\",\"size\":${backup_size},\"sha256\":\"${backup_sha}\",\"timestamp\":\"${timestamp}\"}"
+}
+
+# ── action: list ─────────────────────────────────────────────────────────────
+action_list() {
+  local backups_json="["
+  local first=true
+
+  if [[ -d "$BACKUP_DIR" ]]; then
+    while IFS= read -r -d '' backup_file; do
+      local filename
+      filename=$(basename "$backup_file")
+      local size=0
+      local sha=""
+      local created=""
+
+      size=$(stat -c%s "$backup_file" 2>/dev/null || echo "0")
+      created=$(stat -c%Y "$backup_file" 2>/dev/null || echo "0")
+
+      if [[ -f "${backup_file}.sha256" ]]; then
+        sha=$(awk '{print $1}' "${backup_file}.sha256" 2>/dev/null || echo "")
+      fi
+
+      if [[ "$first" == true ]]; then first=false; else backups_json+=","; fi
+      backups_json+="{\"filename\":\"${filename}\",\"path\":\"${backup_file}\",\"size\":${size},\"sha256\":\"${sha}\",\"createdEpoch\":${created}}"
+    done < <(find "$BACKUP_DIR" -name '*.tar.gz' -print0 2>/dev/null | sort -z -r)
+  fi
+
+  backups_json+="]"
+
+  json_out "{\"success\":true,\"step\":\"list\",\"domain\":\"${DOMAIN}\",\"backups\":${backups_json}}"
+}
+
+# ── action: cleanup ──────────────────────────────────────────────────────────
+action_cleanup() {
+  local keep_count="${1:-14}"
+
+  if ! [[ "$keep_count" =~ ^[0-9]+$ ]] || [[ "$keep_count" -lt 1 ]]; then
+    keep_count=14
+  fi
+
+  if [[ ! -d "$BACKUP_DIR" ]]; then
+    json_out "{\"success\":true,\"step\":\"cleanup\",\"domain\":\"${DOMAIN}\",\"removed\":0,\"message\":\"No backup directory\"}"
+    return
+  fi
+
+  local removed=0
+  local count=0
+
+  while IFS= read -r -d '' backup_file; do
+    count=$((count + 1))
+    if [[ "$count" -gt "$keep_count" ]]; then
+      local filename
+      filename=$(basename "$backup_file")
+      log_info "Removing old backup: ${filename}"
+      rm -f "$backup_file" "${backup_file}.sha256" || log_err "Failed to remove ${filename}"
+      removed=$((removed + 1))
+    fi
+  done < <(find "$BACKUP_DIR" -name '*.tar.gz' -print0 2>/dev/null | sort -z -r)
+
+  json_out "{\"success\":true,\"step\":\"cleanup\",\"domain\":\"${DOMAIN}\",\"removed\":${removed},\"kept\":${keep_count}}"
+}
+
+# ── action: delete-one ──────────────────────────────────────────────────────
+action_delete_one() {
+  if [[ $# -lt 1 ]]; then
+    die "delete-one" "Usage: delete-one <domain> <backup-filepath>"
+  fi
+
+  local backup_path="$1"
+
+  # Verify the path is within the expected backup directory
+  local real_path
+  real_path=$(realpath "$backup_path" 2>/dev/null || echo "")
+  local real_backup_dir
+  real_backup_dir=$(realpath "$BACKUP_DIR" 2>/dev/null || echo "")
+
+  if [[ -z "$real_path" ]] || [[ ! "$real_path" =~ ^${real_backup_dir}/ ]]; then
+    die "delete-one" "Backup path is outside the expected directory"
+  fi
+
+  if [[ ! -f "$real_path" ]]; then
+    die "delete-one" "Backup file not found: ${backup_path}"
+  fi
+
+  rm -f "$real_path" "${real_path}.sha256"
+  log_info "Deleted backup: ${backup_path}"
+
+  json_out "{\"success\":true,\"step\":\"delete-one\",\"domain\":\"${DOMAIN}\",\"message\":\"Backup deleted\"}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  create)      action_create "$@" ;;
+  list)        action_list "$@" ;;
+  cleanup)     action_cleanup "$@" ;;
+  delete-one)  action_delete_one "$@" ;;
+  *)           die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

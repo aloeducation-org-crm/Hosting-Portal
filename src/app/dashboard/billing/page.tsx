@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
 import {
@@ -11,6 +12,13 @@ import {
   CardTitle,
   CardDescription,
 } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -180,6 +188,22 @@ export default function BillingPage() {
   const [activeTab, setActiveTab] = useState('orders')
   const [orders, setOrders] = useState<Order[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [availablePlans, setAvailablePlans] = useState<Array<{
+    id: string
+    name: string
+    slug: string
+    description: string | null
+    price: number
+    interval: string
+    websites: number
+    storage: number
+    databases: number
+    emailAccounts: number
+    aiCredits: number
+    popular?: boolean
+  }>>([])
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [upgradingPlanId, setUpgradingPlanId] = useState<string | null>(null)
   const [usage, setUsage] = useState<UsageStats>({
     domainsUsed: 0,
     websitesUsed: 0,
@@ -187,74 +211,170 @@ export default function BillingPage() {
   })
   const [subscription, setSubscription] = useState<{
     plan: string
+    planName?: string
     status: string
     endDate: string | null
     amount: number
+    websitesLimit?: number
+    emailsLimit?: number
   } | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (!token) return
-    let cancelled = false
-    ;(async () => {
-      try {
-        const headers = { Authorization: `Bearer ${token}` }
+  const loadBillingData = useCallback(async () => {
+    try {
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {}
 
-        const [ordersRes, invoicesRes, statsRes] = await Promise.all([
-          fetch('/api/orders', { headers }),
-          fetch('/api/invoices', { headers }),
-          fetch('/api/dashboard/stats', { headers }),
-        ])
+      const [ordersRes, invoicesRes, statsRes, subsRes, plansRes] = await Promise.all([
+        fetch('/api/orders', { headers, credentials: 'same-origin' }),
+        fetch('/api/invoices', { headers, credentials: 'same-origin' }),
+        fetch('/api/dashboard/stats', { headers, credentials: 'same-origin' }),
+        fetch('/api/subscriptions', { headers, credentials: 'same-origin' }),
+        fetch('/api/pricing/plans', { credentials: 'same-origin' }),
+      ])
 
-        if (!cancelled && ordersRes.ok) {
-          const data = await ordersRes.json()
-          setOrders(data.orders || [])
+      let parsedOrders: Order[] = []
+      if (ordersRes.ok) {
+        const data = await ordersRes.json()
+        parsedOrders = data.orders || data.data || []
+        setOrders(Array.isArray(parsedOrders) ? parsedOrders : [])
+      }
+
+      if (invoicesRes.ok) {
+        const data = await invoicesRes.json()
+        const rawInv = data.invoices || data.data || []
+        setInvoices(
+          Array.isArray(rawInv)
+            ? rawInv.map((inv: Record<string, unknown>) => ({
+                id: String(inv.id),
+                orderId: (inv.orderId as string | null) ?? null,
+                amount:
+                  typeof inv.amount === 'number'
+                    ? inv.amount
+                    : typeof inv.amountCents === 'number'
+                      ? inv.amountCents / 100
+                      : 0,
+                currency: String(inv.currency || 'USD'),
+                status: String(inv.status || 'pending'),
+                dueDate: (inv.dueDate as string | null) ?? null,
+                paidAt: (inv.paidAt as string | null) ?? null,
+                createdAt: String(inv.createdAt || new Date().toISOString()),
+              }))
+            : [],
+        )
+      }
+
+      if (statsRes.ok) {
+        const data = await statsRes.json()
+        const s = data.stats || data.data || {}
+        setUsage({
+          domainsUsed: Number(s.domains ?? 0),
+          websitesUsed: Number(s.activeWebsites ?? s.websites ?? 0),
+          emailsUsed: Number(s.emailAccounts ?? 0),
+        })
+      }
+
+      if (plansRes.ok) {
+        const pData = await plansRes.json()
+        const list = pData.plans || pData.data || []
+        if (Array.isArray(list)) setAvailablePlans(list)
+      }
+
+      if (subsRes.ok) {
+        const sData = await subsRes.json()
+        const subs = sData.data || sData.subscriptions || []
+        const activeSub = Array.isArray(subs)
+          ? subs.find((item: Record<string, unknown>) => item.status === 'active')
+          : null
+        if (activeSub && activeSub.plan) {
+          setSubscription({
+            plan: activeSub.plan.slug?.includes('business')
+              ? 'business'
+              : activeSub.plan.slug?.includes('enterprise')
+                ? 'premium'
+                : 'starter',
+            planName: activeSub.plan.name,
+            status: activeSub.status,
+            endDate: activeSub.currentPeriodEnd || null,
+            amount: Number(activeSub.plan.price ?? 0),
+            websitesLimit: Number(activeSub.plan.websites ?? 10),
+            emailsLimit: Number(activeSub.plan.emailAccounts ?? 25),
+          })
+          return
         }
+      }
 
-        if (!cancelled && invoicesRes.ok) {
-          const data = await invoicesRes.json()
-          setInvoices(data.invoices || [])
-        }
-
-        if (!cancelled && statsRes.ok) {
-          const data = await statsRes.json()
-          setUsage({
-            domainsUsed: data.stats?.domains ?? 0,
-            websitesUsed: data.stats?.activeWebsites ?? 0,
-            emailsUsed: 0,
+      const planOrder = parsedOrders.find((o: Order) =>
+        Array.isArray(o.items) &&
+        o.items.some((item: OrderItem) => ['starter', 'premium', 'business'].includes(item.type)),
+      )
+      if (planOrder) {
+        const planItem = planOrder.items.find((item: OrderItem) =>
+          ['starter', 'premium', 'business'].includes(item.type),
+        )
+        if (planItem) {
+          const end = new Date(planOrder.createdAt)
+          end.setFullYear(end.getFullYear() + 1)
+          setSubscription({
+            plan: planItem.type,
+            status: 'active',
+            endDate: end.toISOString(),
+            amount: planItem.price,
           })
         }
-
-        if (!cancelled) {
-          const planOrders = (await (ordersRes.ok ? ordersRes.clone().json().then(d => d.orders || []) : Promise.resolve([]))) as Order[]
-          const planOrder = planOrders.find((o: Order) =>
-            o.items.some((item: OrderItem) => ['starter', 'premium', 'business'].includes(item.type))
-          )
-          if (planOrder) {
-            const planItem = planOrder.items.find((item: OrderItem) => ['starter', 'premium', 'business'].includes(item.type))
-            if (planItem) {
-              const end = new Date(planOrder.createdAt)
-              end.setFullYear(end.getFullYear() + 1)
-              setSubscription({
-                plan: planItem.type,
-                status: 'active',
-                endDate: end.toISOString(),
-                amount: planItem.price,
-              })
-            }
-          }
-        }
-      } catch (err) {
-        if (!cancelled) console.error('Failed to fetch billing data:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
       }
-    })()
-    return () => { cancelled = true }
+    } catch (err) {
+      console.error('Failed to fetch billing data:', err)
+    } finally {
+      setLoading(false)
+    }
   }, [token])
 
-  const plan = user?.plan || 'free'
-  const planInfo = (PLAN_INFO[plan] || PLAN_INFO.free)!
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      if (active) await loadBillingData()
+    })()
+    return () => {
+      active = false
+    }
+  }, [loadBillingData])
+
+  const handleActivatePlan = async (planId: string) => {
+    setUpgradingPlanId(planId)
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      }
+      const res = await fetch('/api/subscriptions', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers,
+        body: JSON.stringify({ planId }),
+      })
+      const body = await res.json()
+      if (!res.ok || !body.success) {
+        throw new Error(body?.message || 'Failed to activate hosting plan')
+      }
+      toast.success(body.message || 'Hosting plan activated successfully!')
+      setUpgradeOpen(false)
+      await loadBillingData()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to activate hosting plan')
+    } finally {
+      setUpgradingPlanId(null)
+    }
+  }
+
+  const plan = subscription?.plan || user?.plan || 'free'
+  const basePlanInfo = (PLAN_INFO[plan] || PLAN_INFO.free)!
+  const planInfo: PlanInfo = {
+    ...basePlanInfo,
+    name: subscription?.planName || basePlanInfo.name,
+    price: subscription ? subscription.amount : basePlanInfo.price,
+    websites: subscription?.websitesLimit ?? basePlanInfo.websites,
+    emails: subscription?.emailsLimit ?? basePlanInfo.emails,
+  }
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -332,7 +452,8 @@ export default function BillingPage() {
                 )}
 
                 <Button
-                  onClick={() => alert('Plan upgrade coming soon — contact support')}
+                  type="button"
+                  onClick={() => setUpgradeOpen(true)}
                   className="w-full bg-[#E8501A] hover:bg-[#C73D12] text-white font-semibold"
                 >
                   {plan === 'free' ? 'Upgrade Plan' : 'Change Plan'}
@@ -448,7 +569,8 @@ export default function BillingPage() {
                     Your order history will appear here after your first purchase.
                   </p>
                   <Button
-                    onClick={() => alert('Plan upgrade coming soon — contact support')}
+                    type="button"
+                    onClick={() => setUpgradeOpen(true)}
                     className="mt-4 bg-[#E8501A] hover:bg-[#C73D12] text-white"
                     size="sm"
                   >
@@ -628,6 +750,58 @@ export default function BillingPage() {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Interactive Plan Upgrade / Switch Modal */}
+      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Select Your Hosting & AI Automation Plan</DialogTitle>
+            <DialogDescription>
+              Instant activation with automated invoice & quota provisioning on alo-server-lap.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+            {availablePlans.map((p) => (
+              <div
+                key={p.id}
+                className={cn(
+                  'rounded-xl border p-4 flex flex-col justify-between gap-3',
+                  p.popular ? 'border-[#E8501A] bg-[#FFF7ED]/50' : 'border-slate-200',
+                )}
+              >
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-semibold text-sm text-[#1E293B]">{p.name}</span>
+                    {p.popular && (
+                      <Badge className="bg-[#E8501A] text-white text-[10px]">Popular</Badge>
+                    )}
+                  </div>
+                  <div className="text-xl font-bold text-[#1E293B]">
+                    ${p.price.toFixed(2)}
+                    <span className="text-xs font-normal text-[#475569]">/{p.interval}</span>
+                  </div>
+                  <p className="text-xs text-[#475569]">{p.description}</p>
+                  <ul className="text-xs text-[#334155] space-y-1 pt-1">
+                    <li>• {p.websites} Managed Apps / Websites</li>
+                    <li>• {p.storage} GB NVMe Storage</li>
+                    <li>• {p.databases} Databases · {p.emailAccounts} Emails</li>
+                    <li>• {p.aiCredits.toLocaleString()} AI Automation Credits</li>
+                  </ul>
+                </div>
+                <Button
+                  type="button"
+                  disabled={upgradingPlanId !== null}
+                  onClick={() => void handleActivatePlan(p.id)}
+                  className="w-full bg-[#E8501A] hover:bg-[#C73D12] text-white text-xs"
+                  size="sm"
+                >
+                  {upgradingPlanId === p.id ? 'Activating...' : `Activate ${p.name}`}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

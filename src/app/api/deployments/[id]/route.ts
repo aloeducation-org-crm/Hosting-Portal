@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession } from '@/lib/auth';
+import { requireSession, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 function handleErr(e: unknown): NextResponse {
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const deployment = await db.deployment.findUnique({
       where: { id },
       include: {
-        website: { select: { id: true, domain: true } },
+        website: { select: { id: true, domain: true, ownerId: true } },
         logs: {
           orderBy: { timestamp: 'asc' },
         },
@@ -33,7 +33,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       );
     }
 
-    return NextResponse.json(apiSuccess(deployment));
+    assertWebsiteAccess(user, deployment.website);
+
+    return NextResponse.json(apiSuccess({
+      ...deployment,
+      website: { id: deployment.website.id, domain: deployment.website.domain },
+    }));
   } catch (e) {
     return handleErr(e);
   }

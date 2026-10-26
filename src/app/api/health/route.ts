@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
-import { apiSuccess } from '@/lib/response';
+import { apiSuccess, apiError } from '@/lib/response';
 import { db } from '@/lib/db';
 
 const startTime = Date.now();
 
 export async function GET() {
+  const basePayload = {
+    uptime: Math.floor((Date.now() - startTime) / 1000),
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV ?? 'unknown',
+    version: process.env.npm_package_version ?? '1.0.0',
+  };
+
   try {
     // Probe both connectivity and the current hosting schema. SELECT 1 alone
     // reports healthy for an old SQLite file whose app queries still fail.
@@ -12,25 +19,22 @@ export async function GET() {
     await db.$queryRaw`SELECT "domainName", "sslStatus", "vhostPath", "serverId" FROM "hosting_sites" LIMIT 0`;
     return NextResponse.json(
       apiSuccess({
-        uptime: Math.floor((Date.now() - startTime) / 1000),
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV ?? 'unknown',
-        version: process.env.npm_package_version ?? '0.0.0',
+        ...basePayload,
         databaseStatus: 'connected' as const,
         schemaStatus: 'current' as const,
       }),
     );
   } catch {
-    return NextResponse.json(
-      apiSuccess({
-        uptime: Math.floor((Date.now() - startTime) / 1000),
-        timestamp: new Date().toISOString(),
-        environment: process.env.NODE_ENV ?? 'unknown',
-        version: process.env.npm_package_version ?? '0.0.0',
+    const errBody = apiError(
+      'Database connectivity or schema check failed',
+      'DATABASE_UNAVAILABLE',
+      {
+        ...basePayload,
         databaseStatus: 'disconnected' as const,
         schemaStatus: 'unavailable' as const,
-      }),
-      { status: 503 },
+      },
+      503,
     );
+    return NextResponse.json(errBody, { status: 503 });
   }
 }

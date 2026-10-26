@@ -8,9 +8,9 @@
 
 import { db } from "@/lib/db";
 import { completeWithAI } from "@/lib/ai/client";
-import { HOSTING_TOOLS } from "./tools";
+import { createScopedHostingTools } from "./tools";
 import { parseStoredWorkflow } from "./graph";
-import { runWorkflowGraph, type WorkflowRunResult } from "./engine";
+import { runWorkflowGraph, type WorkflowActor, type WorkflowRunResult } from "./engine";
 
 export interface StoredWorkflow {
   id: string;
@@ -24,6 +24,7 @@ export interface ExecuteOptions {
   dryRun?: boolean;
   trigger?: "manual" | "schedule" | "webhook";
   userId?: string | null;
+  isAdmin?: boolean;
   continueOnError?: boolean;
   signal?: AbortSignal;
   /** Skip writing an AiWorkflowRun row (used by tests / previews). */
@@ -73,6 +74,11 @@ export async function executeStoredWorkflow(
     runId = run.id;
   }
 
+  const actor: WorkflowActor = {
+    userId: options.userId ?? null,
+    isAdmin: Boolean(options.isAdmin),
+  };
+
   let result: WorkflowRunResult;
   try {
     result = await runWorkflowGraph(
@@ -93,13 +99,14 @@ export async function executeStoredWorkflow(
             tokensUsed: completion.tokensUsed,
           };
         },
-        tools: HOSTING_TOOLS,
+        tools: createScopedHostingTools(actor),
       },
       {
         input: options.input ?? null,
         dryRun,
         continueOnError: options.continueOnError,
         signal: options.signal,
+        actor,
       },
     );
   } catch (error) {

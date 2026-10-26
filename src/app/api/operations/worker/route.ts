@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { env } from '@/lib/env';
+import { verifyInternalSecretValue } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import {
   getPendingOperations,
@@ -67,10 +67,10 @@ const OPERATION_HELPERS: Record<string, HelperMapping> = {
 
 function verifyInternalSecret(request: NextRequest): boolean {
   const authHeader = request.headers.get('authorization');
-  const querySecret = new URL(request.url).searchParams.get('secret');
+  const headerSecret = request.headers.get('x-internal-secret');
   const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  const provided = bearer ?? querySecret;
-  return provided === env.INTERNAL_SECRET;
+  const provided = bearer ?? headerSecret;
+  return verifyInternalSecretValue(provided);
 }
 
 function handleErr(e: unknown): NextResponse {
@@ -188,3 +188,5 @@ export async function GET(request: NextRequest) {
     return handleErr(e);
   }
 }
+
+export const POST = GET;

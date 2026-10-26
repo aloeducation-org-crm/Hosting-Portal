@@ -1,147 +1,308 @@
 #!/usr/bin/env bash
-# ALO Labs - Site Restore Helper
-# Restores a website from a backup tar.gz
-# Usage: alo-site-restore <domain> <backup_file>
-
+#
+# ALO Labs Hosting Portal — Site Restore
+# Restores a site from a verified backup archive.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
 set -euo pipefail
 
 SITE_BASE="/srv/alo-sites"
 BACKUP_BASE="/var/backups/alo-sites"
-CADDY_DIR="/etc/caddy/sites-enabled"
-LOG_DIR="/var/log/caddy/alo-sites"
+CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
+APP_USER="alo-panel"
 
-DOMAIN="${1:?Usage: alo-site-restore <domain> <backup_file>}"
-BACKUP_FILE="${2:?Usage: alo-site-restore <domain> <backup_file>}"
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-site-restore] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-site-restore] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
 
-# Validate domain (alphanumeric, hyphens, dots only)
-if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-  echo '{"success":false,"error":"Invalid domain name"}' >&2
+die() {
+  local step="${1:-unknown}"
+  local msg="${2:-}"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
   exit 1
-fi
-
-# Resolve and validate backup file path
-BACKUP_RESOLVED=$(realpath "$BACKUP_FILE" 2>/dev/null || echo "")
-if [[ -z "$BACKUP_RESOLVED" ]]; then
-  echo '{"success":false,"error":"Backup file not found"}' >&2
-  exit 1
-fi
-
-# Backup must be under backup base or /tmp
-if [[ "$BACKUP_RESOLVED" != "$BACKUP_BASE/"* && "$BACKUP_RESOLVED" != "/tmp/"* ]]; then
-  echo '{"success":false,"error":"Backup file must be under backup directory or /tmp"}' >&2
-  exit 1
-fi
-
-if [[ ! -f "$BACKUP_RESOLVED" ]]; then
-  echo '{"success":false,"error":"Backup file does not exist"}' >&2
-  exit 1
-fi
-
-SITE_DIR="$SITE_BASE/$DOMAIN"
-
-output_json() {
-  local success="$1"
-  local message="$2"
-  local extra="${3:-}"
-  if [[ -n "$extra" ]]; then
-    echo "{\"success\":$success,\"domain\":\"$DOMAIN\",\"backupFile\":\"$BACKUP_RESOLVED\",\"message\":\"$message\",$extra,\"restoredAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-  else
-    echo "{\"success\":$success,\"domain\":\"$DOMAIN\",\"backupFile\":\"$BACKUP_RESOLVED\",\"message\":\"$message\",\"restoredAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-  fi
 }
 
-# Create temp extraction directory
-TEMP_DIR=$(mktemp -d /tmp/alo-restore-XXXXXX)
-trap "rm -rf '$TEMP_DIR'" EXIT
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 2 ]]; then
+  die "arg-validation" "Usage: alo-site-restore <domain> <backup-filepath>"
+fi
 
-echo '{"status":"extracting"}' >&2
-tar -xzf "$BACKUP_RESOLVED" -C "$TEMP_DIR" 2>/dev/null
-if [[ $? -ne 0 ]]; then
-  output_json false "Failed to extract backup archive"
+DOMAIN="$1"
+BACKUP_FILE="$2"
+
+# Domain: alphanumeric, hyphens, dots only – no path traversal
+if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+  die "arg-validation" "Invalid domain format"
+fi
+
+if [[ ! -f "$BACKUP_FILE" ]]; then
+  die "arg-validation" "Backup file not found: ${BACKUP_FILE}"
+fi
+
+SHA_FILE="${BACKUP_FILE}.sha256"
+if [[ ! -f "$SHA_FILE" ]]; then
+  die "arg-validation" "SHA-256 checksum file not found: ${SHA_FILE}"
+fi
+
+SITE_DIR="${SITE_BASE}/${DOMAIN}"
+SERVICE_NAME="alo-site-${DOMAIN}"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+CADDY_FRAGMENT="${CADDY_CONFIG_DIR}/${DOMAIN}.caddy"
+
+RESTORE_TMP="/tmp/alo-restore-${DOMAIN}-$(date +%s)"
+PRE_RESTORE_BACKUP="${BACKUP_BASE}/${DOMAIN}/pre-restore-$(date +%Y%m%d%H%M%S)"
+
+# Track current step for error reporting
+CURRENT_STEP=""
+
+cleanup_and_die() {
+  local step="$1"
+  local msg="$2"
+  log_err "FAILED at step '${step}': ${msg}"
+  # Attempt rollback
+  if [[ -n "${PRE_RESTORE_BACKUP}" && -d "${PRE_RESTORE_BACKUP}" ]]; then
+    log_info "Rolling back from pre-restore backup..."
+    rollback || log_err "Rollback also failed"
+  fi
+  # Clean temp dir
+  if [[ -d "${RESTORE_TMP}" ]]; then
+    rm -rf "${RESTORE_TMP}" 2>/dev/null || true
+  fi
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
   exit 1
-fi
+}
 
-# Check for site files in the extracted backup
-EXTRACTED_SITE="$TEMP_DIR"
-if [[ -d "$TEMP_DIR/site" ]]; then
-  EXTRACTED_SITE="$TEMP_DIR/site"
-elif [[ -d "$TEMP_DIR/$DOMAIN" ]]; then
-  EXTRACTED_SITE="$TEMP_DIR/$DOMAIN"
-fi
-
-# Stop the site service if it exists
-SERVICE_NAME="alo-site-$DOMAIN"
-if systemctl list-unit-files "$SERVICE_NAME.service" &>/dev/null; then
-  echo '{"status":"stopping_service"}' >&2
-  sudo systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-fi
-
-# Backup current site if exists
-if [[ -d "$SITE_DIR" ]]; then
-  echo '{"status":"backing_up_current"}' >&2
-  CURRENT_BACKUP="$BACKUP_BASE/$DOMAIN/pre-restore-$(date +%Y%m%d%H%M%S).tar.gz"
-  mkdir -p "$(dirname "$CURRENT_BACKUP")"
-  tar -czf "$CURRENT_BACKUP" -C "$SITE_BASE" "$DOMAIN" 2>/dev/null || true
-fi
-
-# Restore site files
-echo '{"status":"restoring_files"}' >&2
-mkdir -p "$SITE_DIR"
-if [[ -d "$EXTRACTED_SITE/public" ]]; then
-  cp -a "$EXTRACTED_SITE/public/"* "$SITE_DIR/public/" 2>/dev/null || true
-fi
-if [[ -d "$EXTRACTED_SITE/current" ]]; then
-  cp -a "$EXTRACTED_SITE/current/"* "$SITE_DIR/current/" 2>/dev/null || true
-fi
-if [[ -d "$EXTRACTED_SITE/releases" ]]; then
-  cp -a "$EXTRACTED_SITE/releases/"* "$SITE_DIR/releases/" 2>/dev/null || true
-fi
-if [[ -d "$EXTRACTED_SITE/shared" ]]; then
-  cp -a "$EXTRACTED_SITE/shared/"* "$SITE_DIR/shared/" 2>/dev/null || true
-fi
-# If no subdirs, copy root contents
-if [[ ! -d "$EXTRACTED_SITE/public" && ! -d "$EXTRACTED_SITE/current" ]]; then
-  cp -a "$EXTRACTED_SITE/"* "$SITE_DIR/" 2>/dev/null || true
-fi
-
-# Ensure correct ownership
-sudo chown -R aloedu:aloedu "$SITE_DIR" 2>/dev/null || true
-
-# Restore database if dump exists
-DB_RESTORED="false"
-if [[ -f "$TEMP_DIR/database.sql" ]]; then
-  echo '{"status":"restoring_database"}' >&2
-  DOMAIN_SAFE=$(echo "$DOMAIN" | tr '.' '_')
-  # Try PostgreSQL first
-  if sudo -u postgres psql -lqt 2>/dev/null | cut -d '|' -f 1 | grep -qw "alo_${DOMAIN_SAFE}"; then
-    sudo -u postgres psql "alo_${DOMAIN_SAFE}" < "$TEMP_DIR/database.sql" 2>/dev/null && DB_RESTORED="true"
+rollback() {
+  log_info "Restoring ${SITE_DIR} from pre-restore backup..."
+  if [[ -d "${PRE_RESTORE_BACKUP}/site" ]]; then
+    rm -rf "${SITE_DIR:?}" 2>/dev/null || true
+    cp -a "${PRE_RESTORE_BACKUP}/site" "${SITE_DIR}"
+    chown -R "${APP_USER}:${APP_USER}" "${SITE_DIR}"
   fi
-  # Try MariaDB
-  if [[ "$DB_RESTORED" == "false" ]]; then
-    if mysql -e "SHOW DATABASES LIKE 'alo_${DOMAIN_SAFE}%'" 2>/dev/null | grep -q "alo_${DOMAIN_SAFE}"; then
-      DB_NAME=$(mysql -e "SHOW DATABASES LIKE 'alo_${DOMAIN_SAFE}%'" 2>/dev/null | tail -1)
-      mysql "$DB_NAME" < "$TEMP_DIR/database.sql" 2>/dev/null && DB_RESTORED="true"
+  if [[ -f "${PRE_RESTORE_BACKUP}/caddy-fragment" ]]; then
+    cp "${PRE_RESTORE_BACKUP}/caddy-fragment" "${CADDY_FRAGMENT}"
+  elif [[ -f "${CADDY_FRAGMENT}" ]]; then
+    rm -f "${CADDY_FRAGMENT}"
+  fi
+  if [[ -f "${PRE_RESTORE_BACKUP}/systemd-unit" ]]; then
+    cp "${PRE_RESTORE_BACKUP}/systemd-unit" "${SERVICE_FILE}"
+    systemctl daemon-reload
+  fi
+  systemctl start "${SERVICE_NAME}" 2>/dev/null || true
+  systemctl reload caddy 2>/dev/null || true
+  log_info "Rollback complete."
+}
+
+# ── main flow ────────────────────────────────────────────────────────────────
+log_info "Starting restore of ${DOMAIN} from ${BACKUP_FILE}"
+
+# Step 1: Verify SHA-256 checksum
+CURRENT_STEP="checksum-verify"
+log_info "Verifying SHA-256 checksum..."
+EXPECTED_SHA=$(awk '{print $1}' "$SHA_FILE")
+ACTUAL_SHA=$(sha256sum "$BACKUP_FILE" | awk '{print $1}')
+if [[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]]; then
+  cleanup_and_die "$CURRENT_STEP" "SHA-256 checksum mismatch"
+fi
+log_info "Checksum verified."
+
+# Step 2: Create pre-restore backup
+CURRENT_STEP="pre-restore-backup"
+log_info "Creating pre-restore backup..."
+mkdir -p "${PRE_RESTORE_BACKUP}"
+if [[ -d "${SITE_DIR}" ]]; then
+  cp -a "${SITE_DIR}" "${PRE_RESTORE_BACKUP}/site"
+fi
+if [[ -f "${CADDY_FRAGMENT}" ]]; then
+  cp "${CADDY_FRAGMENT}" "${PRE_RESTORE_BACKUP}/caddy-fragment"
+fi
+if [[ -f "${SERVICE_FILE}" ]]; then
+  cp "${SERVICE_FILE}" "${PRE_RESTORE_BACKUP}/systemd-unit"
+fi
+log_info "Pre-restore backup saved to ${PRE_RESTORE_BACKUP}"
+
+# Step 3: Stop systemd service
+CURRENT_STEP="stop-service"
+log_info "Stopping service ${SERVICE_NAME}..."
+if systemctl is-enabled "${SERVICE_NAME}" &>/dev/null; then
+  systemctl stop "${SERVICE_NAME}" || cleanup_and_die "$CURRENT_STEP" "Failed to stop service"
+fi
+
+# Step 4: Extract backup to temp directory
+CURRENT_STEP="extract-backup"
+log_info "Extracting backup to ${RESTORE_TMP}..."
+mkdir -p "${RESTORE_TMP}"
+tar xzf "$BACKUP_FILE" -C "${RESTORE_TMP}" || \
+  cleanup_and_die "$CURRENT_STEP" "Failed to extract backup archive"
+
+# Step 5: Read manifest
+CURRENT_STEP="read-manifest"
+MANIFEST_FILE="${RESTORE_TMP}/manifest.json"
+if [[ ! -f "$MANIFEST_FILE" ]]; then
+  cleanup_and_die "$CURRENT_STEP" "manifest.json not found in backup"
+fi
+log_info "Reading manifest..."
+
+# Parse manifest fields safely
+if command -v jq &>/dev/null; then
+  BACKUP_ENGINE=$(jq -r '.database.engine // empty' "$MANIFEST_FILE" 2>/dev/null || echo "")
+  BACKUP_DBNAME=$(jq -r '.database.name // empty' "$MANIFEST_FILE" 2>/dev/null || echo "")
+  BACKUP_PORT=$(jq -r '.port // empty' "$MANIFEST_FILE" 2>/dev/null || echo "")
+else
+  # Fallback: simple grep parsing (jq is standard on 22.04 but just in case)
+  BACKUP_ENGINE=$(grep -oP '"engine"\s*:\s*"\K[^"]+' "$MANIFEST_FILE" 2>/dev/null || echo "")
+  BACKUP_DBNAME=$(grep -oP '"name"\s*:\s*"\K[^"]+' "$MANIFEST_FILE" 2>/dev/null || echo "")
+  BACKUP_PORT=$(grep -oP '"port"\s*:\s*"\K[^"]+' "$MANIFEST_FILE" 2>/dev/null || echo "")
+fi
+HEALTH_PATH="${BACKUP_PORT:+/}"
+log_info "Manifest loaded. engine=${BACKUP_ENGINE:-none} db=${BACKUP_DBNAME:-none}"
+
+# Step 6: Restore site files
+CURRENT_STEP="restore-files"
+log_info "Restoring site files to ${SITE_DIR}..."
+if [[ -d "${RESTORE_TMP}/site" ]]; then
+  rm -rf "${SITE_DIR:?}"
+  cp -a "${RESTORE_TMP}/site" "${SITE_DIR}"
+  chown -R "${APP_USER}:${APP_USER}" "${SITE_DIR}"
+else
+  cleanup_and_die "$CURRENT_STEP" "No site/ directory in backup"
+fi
+
+# Step 7: Restore Caddy config
+CURRENT_STEP="restore-caddy"
+if [[ -f "${RESTORE_TMP}/caddy/${DOMAIN}.caddy" ]]; then
+  cp "${RESTORE_TMP}/caddy/${DOMAIN}.caddy" "${CADDY_FRAGMENT}"
+  log_info "Caddy fragment restored."
+fi
+
+# Step 8: Restore systemd unit
+CURRENT_STEP="restore-systemd"
+if [[ -f "${RESTORE_TMP}/systemd/alo-site-${DOMAIN}.service" ]]; then
+  cp "${RESTORE_TMP}/systemd/alo-site-${DOMAIN}.service" "${SERVICE_FILE}"
+  systemctl daemon-reload
+  log_info "Systemd unit restored."
+fi
+
+# Step 9: Restore database
+CURRENT_STEP="restore-database"
+if [[ -n "$BACKUP_ENGINE" && -n "$BACKUP_DBNAME" ]]; then
+  DUMP_FILE=""
+  if [[ "$BACKUP_ENGINE" == "mariadb" && -f "${RESTORE_TMP}/database/dump.sql" ]]; then
+    DUMP_FILE="${RESTORE_TMP}/database/dump.sql"
+    log_info "Restoring MariaDB database ${BACKUP_DBNAME}..."
+    # Read credentials from the backup manifest or environment
+    if [[ -f "${RESTORE_TMP}/database/.credentials" ]]; then
+      # Read credentials safely (line-by-line) instead of sourcing — prevents code execution from malicious backup
+      while IFS='=' read -r key value; do
+        # Only accept known credential keys, strip quotes
+        value="${value%\"}" value="${value#\"}"
+        case "$key" in
+          DB_USER) DB_USER="$value" ;;
+          DB_PASS) DB_PASS="$value" ;;
+          *) ;; # Ignore unknown keys
+        esac
+      done < "${RESTORE_TMP}/database/.credentials"
     fi
+    DB_USER="${DB_USER:-alo-panel}"
+    DB_PASS="${DB_PASS:-}"
+    if [[ -n "$DB_PASS" ]]; then
+      MYSQL_PWD="$DB_PASS" mysql -u "$DB_USER" "$BACKUP_DBNAME" < "$DUMP_FILE" || \
+        cleanup_and_die "$CURRENT_STEP" "MariaDB restore failed"
+    else
+      mysql -u "$DB_USER" "$BACKUP_DBNAME" < "$DUMP_FILE" || \
+        cleanup_and_die "$CURRENT_STEP" "MariaDB restore failed"
+    fi
+    log_info "MariaDB restore complete."
+  elif [[ "$BACKUP_ENGINE" == "postgresql" && -f "${RESTORE_TMP}/database/dump.sql" ]]; then
+    DUMP_FILE="${RESTORE_TMP}/database/dump.sql"
+    log_info "Restoring PostgreSQL database ${BACKUP_DBNAME}..."
+    if [[ -f "${RESTORE_TMP}/database/.credentials" ]]; then
+      # Read credentials safely (line-by-line) instead of sourcing — prevents code execution from malicious backup
+      while IFS='=' read -r key value; do
+        # Only accept known credential keys, strip quotes
+        value="${value%\"}" value="${value#\"}"
+        case "$key" in
+          DB_USER) DB_USER="$value" ;;
+          DB_PASS) DB_PASS="$value" ;;
+          *) ;; # Ignore unknown keys
+        esac
+      done < "${RESTORE_TMP}/database/.credentials"
+    fi
+    DB_USER="${DB_USER:-alo-panel}"
+    DB_PASS="${DB_PASS:-}"
+    if [[ -n "$DB_PASS" ]]; then
+      PGPASSWORD="$DB_PASS" psql -U "$DB_USER" -d "$BACKUP_DBNAME" -f "$DUMP_FILE" || \
+        cleanup_and_die "$CURRENT_STEP" "PostgreSQL restore failed"
+    else
+      psql -U "$DB_USER" -d "$BACKUP_DBNAME" -f "$DUMP_FILE" || \
+        cleanup_and_die "$CURRENT_STEP" "PostgreSQL restore failed"
+    fi
+    log_info "PostgreSQL restore complete."
+  else
+    log_info "No database dump found or unsupported engine, skipping."
+  fi
+else
+  log_info "No database in manifest, skipping."
+fi
+
+# Step 10: Validate Caddy config
+CURRENT_STEP="validate-caddy"
+log_info "Validating Caddy configuration..."
+if [[ -f "/etc/caddy/Caddyfile" ]]; then
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || \
+    cleanup_and_die "$CURRENT_STEP" "Caddy config validation failed"
+fi
+
+# Step 11: Start systemd service
+CURRENT_STEP="start-service"
+log_info "Starting service ${SERVICE_NAME}..."
+if [[ -f "$SERVICE_FILE" ]]; then
+  systemctl start "${SERVICE_NAME}" || \
+    cleanup_and_die "$CURRENT_STEP" "Failed to start service"
+  log_info "Service started."
+else
+  log_info "No systemd unit to start."
+fi
+
+# Step 12: Health check
+CURRENT_STEP="health-check"
+HEALTH_OK=true
+HEALTH_MSG=""
+if [[ -n "$BACKUP_PORT" ]]; then
+  HEALTH_URL="http://127.0.0.1:${BACKUP_PORT}${HEALTH_PATH}"
+  HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" 2>/dev/null || echo "000")
+  if [[ "$HTTP_CODE" =~ ^[23] ]]; then
+    log_info "Health check passed (HTTP ${HTTP_CODE})."
+  else
+    HEALTH_OK=false
+    HEALTH_MSG="HTTP ${HTTP_CODE}"
+    log_err "Health check returned ${HTTP_CODE}"
+  fi
+else
+  # Try public domain
+  HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://${DOMAIN}" 2>/dev/null || echo "000")
+  if [[ "$HTTP_CODE" =~ ^[23] ]]; then
+    log_info "Health check passed (HTTP ${HTTP_CODE})."
+  else
+    HEALTH_OK=false
+    HEALTH_MSG="HTTP ${HTTP_CODE}"
+    log_err "Health check returned ${HTTP_CODE}"
   fi
 fi
 
-# Restore Caddy config if exists
-CADDY_RESTORED="false"
-if [[ -f "$TEMP_DIR/caddy.conf" ]]; then
-  echo '{"status":"restoring_caddy_config"}' >&2
-  sudo cp "$TEMP_DIR/caddy.conf" "$CADDY_DIR/$DOMAIN.conf" 2>/dev/null && CADDY_RESTORED="true"
-fi
+# Step 13: Cleanup
+CURRENT_STEP="cleanup"
+rm -rf "${RESTORE_TMP}" 2>/dev/null || true
+# Keep pre-restore backup for safety (cleaned up by retention policy)
+log_info "Restore temp directory cleaned."
 
-# Reload Caddy if config was restored
-if [[ "$CADDY_RESTORED" == "true" ]]; then
-  echo '{"status":"reloading_caddy"}' >&2
-  sudo systemctl reload caddy 2>/dev/null || true
-fi
+# Reload caddy
+systemctl reload caddy 2>/dev/null || log_err "Caddy reload warning (non-fatal)"
 
-# Restart site service if it exists
-if systemctl list-unit-files "$SERVICE_NAME.service" &>/dev/null; then
-  echo '{"status":"starting_service"}' >&2
-  sudo systemctl start "$SERVICE_NAME" 2>/dev/null || true
+# Output result
+if [[ "$HEALTH_OK" == true ]]; then
+  json_out "{\"success\":true,\"step\":\"complete\",\"domain\":\"${DOMAIN}\"}"
+else
+  json_out "{\"success\":true,\"step\":\"complete\",\"domain\":\"${DOMAIN}\",\"healthWarning\":\"${HEALTH_MSG}\"}"
 fi
-
-output_json true "Site restored successfully" ",\"databaseRestored\":$DB_RESTORED,\"caddyRestored\":$CADDY_RESTORED

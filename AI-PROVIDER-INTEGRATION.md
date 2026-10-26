@@ -14,8 +14,9 @@ GitHub/npm/PyPI), so latency, quotas, model quality and real free-tier limits ar
 
 | Layer | File | What it does |
 |---|---|---|
-| Provider registry | `src/lib/ai/providers.ts` | Catalogue of OpenAI-compatible backends, env-driven chain resolution, base-URL validation, secret redaction |
-| Client | `src/lib/ai/client.ts` | Chat completions with ordered failover, bounded retries, circuit breaker, timeouts, JSON mode, live model list, real health probes |
+| Provider registry | `src/lib/ai/providers.ts` | Catalogue of 10 OpenAI-compatible backends (`llm7`, `unorouter`, `openai`, `openrouter`, `qwen`, `glm`, `groq`, `gateway`, `ollama`, `localai`), `ProviderCapabilities`, SSRF metadata/wildcard blocking, topology-aware redaction |
+| Client | `src/lib/ai/client.ts` | Chat completions with ordered failover, bounded retries, circuit breaker + `getProviderCircuitStates()`, `redirect: "error"`, capability-clamped `max_tokens`, `requestId` correlation, JSON mode, live model list, real health probes |
+| Self-hosted agents & sizing | `src/lib/ai/self-hosted-agents.ts`, `src/lib/ai/hardware-sizing.ts`, `src/lib/ai/deploy-assistant.ts` | Zod-validated pinned-tag agent catalog, 13-use-case decision matrix, GPU/VRAM/KV-cache sizing calculator, and hardened loopback container deployment assistant (see `docs/SELF-HOSTED-AI-AGENTS.md`) |
 | Usage accounting | `src/lib/ai/usage.ts` | Persists real `usage` from the upstream against the acting user (`token_usage`) |
 | Automation engine | `src/lib/ai/automation/engine.ts` | DAG execution with per-step results, budgets, timeouts, dry-run |
 | Graph model / validation | `src/lib/ai/automation/graph.ts` | Strict DAG validation, node-type allowlist, size caps |
@@ -53,8 +54,13 @@ AI_MODEL_UNOROUTER=<model id enabled for your token>
 # Optional extra providers
 GROQ_API_KEY=
 PROVIDER_OPENAI_API_KEY=      # deliberately separate from OPENAI_API_KEY
+GLM_API_KEY=                  # Z.ai / Zhipu OpenAI-compatible or self-hosted GLM-4/GLM-5
+GLM_BASE_URL=                 # confirm regional host (api.z.ai vs open.bigmodel.cn)
 AI_GATEWAY_URL=http://127.0.0.1:4000/v1   # self-hosted LiteLLM/vLLM
 AI_GATEWAY_KEY=
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 # opt-in local Ollama
+LOCALAI_BASE_URL=http://127.0.0.1:18080/v1 # opt-in local LocalAI
+LOCALAI_API_KEY=
 
 # Chain behaviour
 AI_PROVIDER_ORDER=unorouter,llm7,groq

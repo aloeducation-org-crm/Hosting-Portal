@@ -103,11 +103,6 @@ export default function AgentsMarketplacePage() {
     return () => { cancelled = true }
   }, [activeCategory, search])
 
-  // Auto-seed agents on first load
-  useEffect(() => {
-    fetch('/api/agents/seed', { method: 'POST' }).catch(() => {})
-  }, [])
-
   const featuredAgent = agents.find((a) => a.slug === 'gpt5-code')
   const otherAgents = agents.filter((a) => a.slug !== 'gpt5-code')
 
@@ -123,8 +118,18 @@ export default function AgentsMarketplacePage() {
             <div>
               <h1 className="text-2xl font-bold text-[#1E293B]">AI Agents</h1>
               <p className="text-sm text-[#475569]">
-                15 free agents included with every plan
+                15 built-in portal agents + hardened self-hosted container deployments
               </p>
+            </div>
+            <div className="ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push('/ai/self-hosted')}
+                className="text-xs"
+              >
+                Self-Hosted AI Deploy &amp; Sizing <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+              </Button>
             </div>
           </div>
         </div>

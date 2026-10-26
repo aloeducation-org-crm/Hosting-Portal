@@ -1,140 +1,231 @@
 #!/usr/bin/env bash
-# ALO Labs - Log Helper
-# Streams and retrieves logs from various sources
-# Usage: alo-log-helper <command> [args...]
-
+#
+# ALO Labs Hosting Portal — Log Helper
+# Reads application and infrastructure logs for hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
 set -euo pipefail
 
 CADDY_LOG_DIR="/var/log/caddy/alo-sites"
+SITE_BASE="/srv/alo-sites"
+APP_USER="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-log-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-log-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
 
 validate_domain() {
-  local d="$1"
-  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-    echo '{"success":false,"error":"Invalid domain name"}'
-    exit 1
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
   fi
 }
 
-validate_lines() {
-  local n="$1"
-  if ! [[ "$n" =~ ^[0-9]+$ ]] || [[ $n -lt 1 ]] || [[ $n -gt 10000 ]]; then
-    echo '{"success":false,"error":"Lines must be between 1 and 10000"}'
-    exit 1
+# Safely encode log content to base64 for JSON transport
+encode_logs() {
+  local file_path="$1"
+  local max_lines="$2"
+
+  if [[ ! -f "$file_path" ]]; then
+    printf '[]'
+    return
   fi
+
+  local log_content
+  if [[ "$max_lines" -gt 0 ]]; then
+    log_content=$(tail -n "$max_lines" "$file_path" 2>/dev/null || echo "")
+  else
+    log_content=$(cat "$file_path" 2>/dev/null || echo "")
+  fi
+
+  if [[ -z "$log_content" ]]; then
+    printf '[]'
+    return
+  fi
+
+  local encoded
+  encoded=$(printf '%s' "$log_content" | base64 -w 0)
+  printf '%s' "[{\"encoding\":\"base64\",\"lines\":${max_lines},\"content\":\"${encoded}\"}]"
 }
 
-COMMAND="${1:?Usage: alo-log-helper <command> [args...]}
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-log-helper <action> <domain> [args...]"
+fi
+
+ACTION="$1"
 shift
 
-case "$COMMAND" in
-  caddy-access)
-    DOMAIN="${1:?Usage: caddy-access <domain> [lines]}"
-    LINES="${2:-100}"
-    validate_domain "$DOMAIN"
-    validate_lines "$LINES"
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-log-helper <action> <domain> [args...]"
+fi
 
-    LOG_FILE="$CADDY_LOG_DIR/$DOMAIN.access.log"
-    if [[ ! -f "$LOG_FILE" ]]; then
-      echo "{\"success\":true,\"source\":\"caddy-access\",\"domain\":\"$DOMAIN\",\"lines\":[],\"totalLines\":0,\"message\":\"No access log found\"}"
-      exit 0
-    fi
+DOMAIN="$1"
+shift
+validate_domain "$DOMAIN"
 
-    TOTAL=$(wc -l < "$LOG_FILE")
-    # Convert log lines to JSON array
-    LINES_JSON=$(tail -n "$LINES" "$LOG_FILE" | jq -R . | jq -s .)
-    echo "{\"success\":true,\"source\":\"caddy-access\",\"domain\":\"$DOMAIN\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
-    ;;
+SERVICE_NAME="alo-site-${DOMAIN}"
+DEFAULT_LINES=100
 
-  caddy-error)
-    DOMAIN="${1:?Usage: caddy-error <domain> [lines]}"
-    LINES="${2:-100}"
-    validate_domain "$DOMAIN"
-    validate_lines "$LINES"
+# ── action: application ─────────────────────────────────────────────────────
+action_application() {
+  local lines="${1:-${DEFAULT_LINES}}"
 
-    ERROR_LOG="$CADDY_LOG_DIR/$DOMAIN.error.log"
-    LINES_JSON="[]"
-    TOTAL=0
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [[ "$lines" -eq 0 ]]; then
+    lines="$DEFAULT_LINES"
+  fi
+  # Clamp to safe range
+  if [[ "$lines" -gt 10000 ]]; then
+    lines=10000
+  fi
 
-    if [[ -f "$ERROR_LOG" ]]; then
-      TOTAL=$(wc -l < "$ERROR_LOG")
-      LINES_JSON=$(tail -n "$LINES" "$ERROR_LOG" | jq -R . | jq -s .)
-    fi
+  local log_content
+  log_content=$(journalctl -u "${SERVICE_NAME}.service" -n "$lines" --no-pager --output=cat 2>/dev/null || echo "")
 
-    echo "{\"success\":true,\"source\":\"caddy-error\",\"domain\":\"$DOMAIN\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
-    ;;
+  if [[ -z "$log_content" ]]; then
+    json_out "{\"success\":true,\"step\":\"application\",\"domain\":\"${DOMAIN}\",\"lines\":[],\"count\":0}"
+    return
+  fi
 
-  systemd)
-    DOMAIN="${1:?Usage: systemd <domain> [lines]}"
-    LINES="${2:-100}"
-    validate_domain "$DOMAIN"
-    validate_lines "$LINES"
+  local encoded
+  encoded=$(printf '%s' "$log_content" | base64 -w 0)
+  local line_count
+  line_count=$(printf '%s' "$log_content" | wc -l)
 
-    UNIT_NAME="alo-site-$DOMAIN"
-    # Use journalctl to get logs
-    LOG_OUTPUT=$(journalctl -u "$UNIT_NAME" -n "$LINES" --no-pager -o cat 2>/dev/null || echo "")
-    TOTAL=$(journalctl -u "$UNIT_NAME" --no-pager 2>/dev/null | wc -l || echo 0)
-    LINES_JSON=$(echo "$LOG_OUTPUT" | grep -v '^$' | jq -R . | jq -s .)
+  json_out "{\"success\":true,\"step\":\"application\",\"domain\":\"${DOMAIN}\",\"lines\":[{\"encoding\":\"base64\",\"count\":${line_count},\"content\":\"${encoded}\"}]}"
+}
 
-    echo "{\"success\":true,\"source\":\"systemd\",\"domain\":\"$DOMAIN\",\"unitName\":\"$UNIT_NAME\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
-    ;;
+# ── action: access ───────────────────────────────────────────────────────────
+action_access() {
+  local lines="${1:-${DEFAULT_LINES}}"
 
-  php-fpm)
-    DOMAIN="${1:?Usage: php-fpm <domain> [lines]}"
-    LINES="${2:-100}"
-    validate_domain "$DOMAIN"
-    validate_lines "$LINES"
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [[ "$lines" -eq 0 ]]; then
+    lines="$DEFAULT_LINES"
+  fi
+  if [[ "$lines" -gt 10000 ]]; then
+    lines=10000
+  fi
 
-    PHP_LOG="/var/log/php8.2-fpm.log"
-    LINES_JSON="[]"
-    TOTAL=0
+  local access_log="${CADDY_LOG_DIR}/${DOMAIN}-access.log"
 
-    if [[ -f "$PHP_LOG" ]]; then
-      # Filter by domain pool name
-      FILTERED=$(grep "alo-$DOMAIN" "$PHP_LOG" 2>/dev/null | tail -n "$LINES" || echo "")
-      TOTAL=$(grep -c "alo-$DOMAIN" "$PHP_LOG" 2>/dev/null || echo 0)
-      LINES_JSON=$(echo "$FILTERED" | grep -v '^$' | jq -R . | jq -s .)
-    fi
+  if [[ ! -f "$access_log" ]]; then
+    json_out "{\"success\":true,\"step\":\"access\",\"domain\":\"${DOMAIN}\",\"lines\":[],\"count\":0,\"message\":\"No access log found\"}"
+    return
+  fi
 
-    echo "{\"success\":true,\"source\":\"php-fpm\",\"domain\":\"$DOMAIN\",\"lines\":$LINES_JSON,\"totalLines\":$TOTAL}"
-    ;;
+  local encoded
+  encoded=$(tail -n "$lines" "$access_log" | base64 -w 0)
+  local line_count
+  line_count=$(tail -n "$lines" "$access_log" | wc -l)
 
-  list-available)
-    DOMAIN="${1:?Usage: list-available <domain>}"
-    validate_domain "$DOMAIN"
+  json_out "{\"success\":true,\"step\":\"access\",\"domain\":\"${DOMAIN}\",\"lines\":[{\"encoding\":\"base64\",\"count\":${line_count},\"content\":\"${encoded}\"}]}"
+}
 
-    SOURCES="[]"
-    ITEMS=""
+# ── action: error ───────────────────────────────────────────────────────────
+action_error() {
+  local lines="${1:-${DEFAULT_LINES}}"
 
-    # Check caddy access log
-    if [[ -f "$CADDY_LOG_DIR/$DOMAIN.access.log" ]]; then
-      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
-      ITEMS="\"caddy-access\"$ITEMS"
-    fi
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [[ "$lines" -eq 0 ]]; then
+    lines="$DEFAULT_LINES"
+  fi
+  if [[ "$lines" -gt 10000 ]]; then
+    lines=10000
+  fi
 
-    # Check caddy error log
-    if [[ -f "$CADDY_LOG_DIR/$DOMAIN.error.log" ]]; then
-      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
-      ITEMS="\"caddy-error\"$ITEMS"
-    fi
+  local error_log="${CADDY_LOG_DIR}/${DOMAIN}-error.log"
 
-    # Check systemd service
-    if systemctl list-unit-files "alo-site-$DOMAIN.service" &>/dev/null; then
-      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
-      ITEMS="\"systemd\"$ITEMS"
-    fi
+  if [[ ! -f "$error_log" ]]; then
+    json_out "{\"success\":true,\"step\":\"error\",\"domain\":\"${DOMAIN}\",\"lines\":[],\"count\":0,\"message\":\"No error log found\"}"
+    return
+  fi
 
-    # Check PHP-FPM log
-    if [[ -f "/var/log/php8.2-fpm.log" ]] && grep -q "alo-$DOMAIN" "/var/log/php8.2-fpm.log" 2>/dev/null; then
-      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
-      ITEMS="\"php-fpm\"$ITEMS"
-    fi
+  local encoded
+  encoded=$(tail -n "$lines" "$error_log" | base64 -w 0)
+  local line_count
+  line_count=$(tail -n "$lines" "$error_log" | wc -l)
 
-    SOURCES="[$ITEMS]"
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"availableSources\":$SOURCES}"
-    ;;
+  json_out "{\"success\":true,\"step\":\"error\",\"domain\":\"${DOMAIN}\",\"lines\":[{\"encoding\":\"base64\",\"count\":${line_count},\"content\":\"${encoded}\"}]}"
+}
 
-  *)
-    echo "Available commands: caddy-access, caddy-error, systemd, php-fpm, list-available" >&2
-    exit 1
-    ;;
+# ── action: caddy ────────────────────────────────────────────────────────────
+action_caddy() {
+  local lines="${1:-${DEFAULT_LINES}}"
+
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [[ "$lines" -eq 0 ]]; then
+    lines="$DEFAULT_LINES"
+  fi
+  if [[ "$lines" -gt 10000 ]]; then
+    lines=10000
+  fi
+
+  local access_log="${CADDY_LOG_DIR}/${DOMAIN}-access.log"
+  local error_log="${CADDY_LOG_DIR}/${DOMAIN}-error.log"
+
+  local access_encoded="[]"
+  local access_count=0
+  local error_encoded="[]"
+  local error_count=0
+
+  if [[ -f "$access_log" ]]; then
+    access_encoded=$(tail -n "$lines" "$access_log" | base64 -w 0)
+    access_count=$(tail -n "$lines" "$access_log" | wc -l)
+  fi
+
+  if [[ -f "$error_log" ]]; then
+    error_encoded=$(tail -n "$lines" "$error_log" | base64 -w 0)
+    error_count=$(tail -n "$lines" "$error_log" | wc -l)
+  fi
+
+  json_out "{\"success\":true,\"step\":\"caddy\",\"domain\":\"${DOMAIN}\",\"access\":{\"encoding\":\"base64\",\"count\":${access_count},\"content\":\"${access_encoded}\"},\"error\":{\"encoding\":\"base64\",\"count\":${error_count},\"content\":\"${error_encoded}\"}}"
+}
+
+# ── action: deployment ───────────────────────────────────────────────────────
+action_deployment() {
+  if [[ $# -lt 1 ]]; then
+    die "deployment" "Usage: deployment <domain> <deployment-id>"
+  fi
+
+  local deployment_id="$1"
+
+  # Validate deployment ID: alphanumeric, hyphens only
+  if [[ ! "$deployment_id" =~ ^[a-zA-Z0-9-]+$ ]]; then
+    die "deployment" "Invalid deployment ID format"
+  fi
+
+  local site_dir="${SITE_BASE}/${DOMAIN}"
+  local deploy_log="${site_dir}/releases/${deployment_id}/deploy.log"
+
+  # Also check log directory
+  if [[ ! -f "$deploy_log" ]]; then
+    deploy_log="${site_dir}/logs/deploy-${deployment_id}.log"
+  fi
+
+  if [[ ! -f "$deploy_log" ]]; then
+    json_out "{\"success\":true,\"step\":\"deployment\",\"domain\":\"${DOMAIN}\",\"deploymentId\":\"${deployment_id}\",\"lines\":[],\"count\":0,\"message\":\"Deployment log not found\"}"
+    return
+  fi
+
+  local encoded
+  encoded=$(cat "$deploy_log" | base64 -w 0)
+  local line_count
+  line_count=$(wc -l < "$deploy_log")
+
+  json_out "{\"success\":true,\"step\":\"deployment\",\"domain\":\"${DOMAIN}\",\"deploymentId\":\"${deployment_id}\",\"lines\":[{\"encoding\":\"base64\",\"count\":${line_count},\"content\":\"${encoded}\"}]}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  application) action_application "$@" ;;
+  access)      action_access "$@" ;;
+  error)       action_error "$@" ;;
+  caddy)       action_caddy "$@" ;;
+  deployment)  action_deployment "$@" ;;
+  *)           die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

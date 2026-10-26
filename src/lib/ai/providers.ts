@@ -11,12 +11,27 @@
  *    that operators can change it without a rebuild and tests can stub it.
  *  - A provider that is misconfigured is *skipped with a reason*, never thrown
  *    from, so one bad environment variable cannot take the panel down.
- *  - "Free" here means the provider documents a free/anonymous tier. It is not
- *    a promise of unmetered capacity; see AI-PROVIDER-INTEGRATION.md.
+ *  - Optional self-hosted inference servers (LiteLLM/vLLM gateway, Ollama,
+ *    LocalAI) are opt-in and never stall startup or requests when unconfigured.
+ *  - Cloud metadata and unspecified addresses (169.254.0.0/16, 0.0.0.0, IMDSv6)
+ *    are unconditionally rejected even in operator env vars.
  */
 
 export type ProviderTier = "free" | "paid" | "self-hosted";
 export type ProviderKind = "openai-compatible" | "local-openai-compatible";
+
+export interface ProviderCapabilities {
+  /** Conservative default context window for the default model (tokens). */
+  contextWindowTokens: number;
+  /** Maximum completion tokens requested per call unless overridden safely. */
+  maxOutputTokens: number;
+  /** Whether `response_format: { type: "json_object" }` is generally accepted. */
+  supportsJsonMode: boolean;
+  /** Whether SSE streaming is supported by the upstream protocol. */
+  supportsStreaming: boolean;
+  /** Whether OpenAI-style `tools` / function calling is generally supported. */
+  supportsToolCalls: boolean;
+}
 
 export interface ProviderDefinition {
   /** Stable id used in env vars (AI_MODEL_<ID>, <ID>_BASE_URL, AI_PROVIDER_ORDER). */
@@ -35,6 +50,7 @@ export interface ProviderDefinition {
   /** True when the provider documents an anonymous/free tier that works without a key. */
   anonymousAccess: boolean;
   defaultModel: string;
+  capabilities: ProviderCapabilities;
   docs: string;
   /** Operational caveats worth surfacing in the UI and docs. */
   notes: string;
@@ -54,6 +70,13 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     requiresKey: false,
     anonymousAccess: true,
     defaultModel: "gpt-oss:20b",
+    capabilities: {
+      contextWindowTokens: 32_768,
+      maxOutputTokens: 4_096,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: false,
+    },
     docs: "https://docs.llm7.io",
     notes:
       "Free token tier: roughly 60 requests/min and 250/hour, daily token quota. Anonymous calls reach a small subset of models. " +
@@ -71,6 +94,13 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     requiresKey: true,
     anonymousAccess: false,
     defaultModel: "gpt-4o-mini",
+    capabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://unorouter.com",
     notes:
       "UnoRouter's public repo is an AGPL storefront/dashboard for the UnoRouter gateway (a new-api fork reselling 130+ upstream providers). " +
@@ -88,6 +118,13 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     requiresKey: true,
     anonymousAccess: false,
     defaultModel: "gpt-4o-mini",
+    capabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://platform.openai.com/docs/api-reference",
     notes: "Paid. Use a dedicated key with a spend limit; it is distinct from OPENAI_API_KEY so the legacy adapter keeps working.",
     baseUrlVerified: true,
@@ -103,12 +140,43 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     requiresKey: true,
     anonymousAccess: false,
     defaultModel: "openai/gpt-4o-mini",
+    capabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://openrouter.ai/docs/quick-start",
     notes:
       "Model aggregator: one OpenAI-compatible key reaches many upstream models. Credits are required. " +
       "Model IDs and free variants rotate — read GET /models and pin AI_MODEL_OPENROUTER to an enabled id. " +
       "Set HTTP-Referer/X-Title per OpenRouter's attribution guidance; never send the key to the browser.",
     baseUrlVerified: true,
+  },
+  {
+    id: "okrouter",
+    label: "OKRouter unified gateway",
+    tier: "paid",
+    kind: "openai-compatible",
+    baseUrl: "https://api.okrouter.com/v1",
+    baseUrlEnv: "OKROUTER_BASE_URL",
+    apiKeyEnv: "OKROUTER_API_KEY",
+    requiresKey: true,
+    anonymousAccess: false,
+    defaultModel: "gpt-4o-mini",
+    capabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
+    docs: "https://github.com/okrouter/okrouter-python",
+    notes:
+      "Unified OpenAI-compatible multi-model router (OpenAI/Claude/Gemini/Grok; official SDK okrouter/okrouter-python is MIT). " +
+      "Opt-in only via AI_PROVIDER_ORDER + OKROUTER_API_KEY; confirm OKROUTER_BASE_URL against your account dashboard.",
+    baseUrlVerified: false,
   },
   {
     id: "qwen",
@@ -121,12 +189,43 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     requiresKey: true,
     anonymousAccess: false,
     defaultModel: "qwen-plus",
+    capabilities: {
+      contextWindowTokens: 131_072,
+      maxOutputTokens: 8_192,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://help.aliyun.com/en/model-studio/compatibility-of-openai-with-dashscope",
     notes:
       "Alibaba Cloud Model Studio exposes an OpenAI-compatible endpoint. Confirm your REGION's host " +
       "(intl vs mainland) and enabled model ids in your own console, then set QWEN_BASE_URL; the default " +
       "host is intentionally marked unverified. Qwen Coder is a coding agent CLI, not an inference API — " +
       "it is not wired into the panel process.",
+    baseUrlVerified: false,
+  },
+  {
+    id: "glm",
+    label: "GLM (Z.ai / Zhipu OpenAI-compatible or self-hosted)",
+    tier: "paid",
+    kind: "openai-compatible",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    baseUrlEnv: "GLM_BASE_URL",
+    apiKeyEnv: "GLM_API_KEY",
+    requiresKey: true,
+    anonymousAccess: false,
+    defaultModel: "glm-4-plus",
+    capabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 4_096,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
+    docs: "https://docs.z.ai",
+    notes:
+      "Supports Z.ai / Zhipu BigModel cloud OpenAI-compatible endpoints (set GLM_BASE_URL for international api.z.ai vs open.bigmodel.cn) " +
+      "or a locally hosted vLLM/SGLang server serving GLM-4/GLM-5 weights. Default host is marked unverified until confirmed for your account.",
     baseUrlVerified: false,
   },
   {
@@ -139,6 +238,13 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     requiresKey: true,
     anonymousAccess: false,
     defaultModel: "llama-3.3-70b-versatile",
+    capabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 8_192,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://console.groq.com/docs/openai",
     notes: "Free tier with rate limits, key required. Model IDs are retired over time, so verify against GET /models.",
     baseUrlVerified: true,
@@ -153,11 +259,18 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     apiKeyEnv: "AI_GATEWAY_KEY",
     requiresKey: false,
     anonymousAccess: true,
-    defaultModel: "gemma3:4b",
+    defaultModel: "qwen2.5:7b",
+    capabilities: {
+      contextWindowTokens: 32_768,
+      maxOutputTokens: 4_096,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://docs.litellm.ai/docs/proxy/quick_start",
     notes:
-      "Completely free of per-token charges but needs a GPU host, model weights, electricity and ops. " +
-      "Bound to loopback by default: do not expose the gateway to the internet without auth.",
+      "Completely free of per-token charges when backed by local models, or routes across upstreams via LiteLLM on :4000. " +
+      "Bound to loopback by default: do not expose the gateway to the public internet without strong authentication.",
     baseUrlVerified: true,
   },
   {
@@ -170,9 +283,39 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     apiKeyEnv: "OLLAMA_API_KEY",
     requiresKey: false,
     anonymousAccess: true,
-    defaultModel: "llama3.1",
+    defaultModel: "llama3.1:8b",
+    capabilities: {
+      contextWindowTokens: 32_768,
+      maxOutputTokens: 4_096,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
     docs: "https://github.com/ollama/ollama/blob/main/docs/openai.md",
-    notes: "Runs on the same box as the panel; slow without a GPU. Model must be pulled first (ollama pull <model>).",
+    notes: "Runs on the same box as the panel (port 11434); slow without a GPU. Model must be pulled first (ollama pull <model>).",
+    baseUrlVerified: true,
+  },
+  {
+    id: "localai",
+    label: "LocalAI (self-hosted)",
+    tier: "self-hosted",
+    kind: "local-openai-compatible",
+    baseUrl: "http://127.0.0.1:8080/v1",
+    baseUrlEnv: "LOCALAI_BASE_URL",
+    apiKeyEnv: "LOCALAI_API_KEY",
+    requiresKey: false,
+    anonymousAccess: true,
+    defaultModel: "qwen2.5-7b-instruct",
+    capabilities: {
+      contextWindowTokens: 16_384,
+      maxOutputTokens: 4_096,
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsToolCalls: true,
+    },
+    docs: "https://localai.io/basics/getting_started/",
+    notes:
+      "Drop-in local OpenAI-compatible server (MIT, CPU/GPU GGUF/vLLM/whisper/embeddings). Opt-in only: enabled when LOCALAI_BASE_URL is set or 'localai' is listed in AI_PROVIDER_ORDER. Ensure port 8080 does not collide with reverse-proxy listeners.",
     baseUrlVerified: true,
   },
 ] as const;
@@ -188,6 +331,7 @@ export interface ResolvedProvider {
   apiKey: string;
   model: string;
   anonymous: boolean;
+  capabilities: ProviderCapabilities;
   docs: string;
   notes: string;
   baseUrlVerified: boolean;
@@ -208,7 +352,7 @@ export interface ProviderResolution {
   order: string[];
 }
 
-export const DEFAULT_PROVIDER_ORDER = ["unorouter", "llm7", "groq", "gateway", "ollama"];
+export const DEFAULT_PROVIDER_ORDER = ["unorouter", "llm7", "groq", "gateway", "ollama", "localai"];
 
 type EnvSource = Record<string, string | undefined>;
 
@@ -237,7 +381,69 @@ export function parseOrder(raw: string): string[] {
     .filter(Boolean);
 }
 
-/** Normalize and validate an OpenAI-compatible base URL. Returns null when unusable. */
+const BLOCKED_METADATA_HOSTS = new Set([
+  "0.0.0.0",
+  "169.254.169.254",
+  "100.100.100.200",
+  "metadata.google.internal",
+  "metadata.goog",
+  "metadata",
+  "instance-data",
+  "[::]",
+  "::",
+  "[fd00:ec2::254]",
+  "fd00:ec2::254",
+]);
+
+/**
+ * Returns true if the hostname targets cloud instance metadata, link-local
+ * ranges (169.254.0.0/16, fe80::/10), or unspecified wildcard addresses.
+ */
+export function isBlockedMetadataOrWildcardHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase();
+  if (!host) return true;
+  if (BLOCKED_METADATA_HOSTS.has(host)) return true;
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  const bareIpv6 = host.replace(/^\[|\]$/g, "");
+  if (bareIpv6 === "::" || bareIpv6.startsWith("fe80:") || bareIpv6 === "fd00:ec2::254") return true;
+  return false;
+}
+
+/**
+ * Returns true when a URL points at loopback, RFC1918 private LAN, CGNAT/Tailscale,
+ * link-local, or cloud metadata addresses. Used to block SSRF in user-supplied URLs.
+ */
+export function isPrivateOrInternalUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return true;
+  }
+  const host = url.hostname.toLowerCase();
+  if (isBlockedMetadataOrWildcardHost(host)) return true;
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]" || host.endsWith(".local") || host.endsWith(".internal")) {
+    return true;
+  }
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+  const m172 = host.match(/^172\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (m172) {
+    const second = Number.parseInt(m172[1]!, 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+  const m100 = host.match(/^100\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (m100) {
+    const second = Number.parseInt(m100[1]!, 10);
+    if (second >= 64 && second <= 127) return true;
+  }
+  const bareIpv6 = host.replace(/^\[|\]$/g, "");
+  if (bareIpv6 === "::1" || bareIpv6.startsWith("fc") || bareIpv6.startsWith("fd")) return true;
+  return false;
+}
+
+/** Normalize and validate an OpenAI-compatible base URL. Returns null when unusable or unsafe. */
 export function normalizeBaseUrl(raw: string): string | null {
   let url: URL;
   try {
@@ -248,6 +454,8 @@ export function normalizeBaseUrl(raw: string): string | null {
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   // Credentials in the URL would end up in logs and error messages.
   if (url.username || url.password) return null;
+  // Block cloud metadata and unspecified addresses even from env misconfiguration.
+  if (isBlockedMetadataOrWildcardHost(url.hostname)) return null;
   url.search = "";
   url.hash = "";
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
@@ -260,12 +468,30 @@ export function chatCompletionsUrl(baseUrl: string): string {
 
 export function isLocalHost(baseUrl: string): boolean {
   try {
-    const host = new URL(baseUrl).hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host.endsWith(".local");
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]" || host.endsWith(".local");
   } catch {
     return false;
   }
 }
+
+/** Scrub bearer tokens, OpenAI/Groq/LiteLLM/Google keys, and URL credentials from log strings. */
+export function redactSecretsInText(input: string): string {
+  if (!input) return "";
+  return input
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]")
+    .replace(/\b(sk|gsk|rk|pk|xoxb|xoxp|ghp|gho|ghs|glpat)-[A-Za-z0-9_-]{10,}\b/g, "$1-[REDACTED]")
+    .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, "AIza[REDACTED]")
+    .replace(/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, "$1[REDACTED]@");
+}
+
+const DEFAULT_CUSTOM_CAPABILITIES: ProviderCapabilities = {
+  contextWindowTokens: 64_000,
+  maxOutputTokens: 8_192,
+  supportsJsonMode: true,
+  supportsStreaming: true,
+  supportsToolCalls: true,
+};
 
 /**
  * Build the ordered failover chain for this process.
@@ -309,7 +535,7 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
     const baseRaw = read(source, "OPENAI_BASE_URL") || "https://api.openai.com/v1";
     const baseUrl = normalizeBaseUrl(baseRaw);
     if (!baseUrl) {
-      warnings.push("OPENAI_BASE_URL is not a valid http(s) URL; the legacy gateway was skipped.");
+      warnings.push("OPENAI_BASE_URL is not a valid or permitted http(s) URL; the legacy gateway was skipped.");
     } else {
       add({
         id: "custom",
@@ -320,6 +546,7 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
         apiKey: legacyKey,
         model: globalModel || "gpt-4o-mini",
         anonymous: false,
+        capabilities: DEFAULT_CUSTOM_CAPABILITIES,
         docs: "https://platform.openai.com/docs/api-reference/chat",
         notes: "Legacy OPENAI_API_KEY / OPENAI_BASE_URL pair from this deployment's .env.",
         baseUrlVerified: true,
@@ -339,9 +566,9 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
       continue;
     }
 
-    const baseRawEnv = definition.baseUrlEnv ? read(source, definition.baseUrlEnv) : '';
-    // Self-hosted endpoints are opt-in: a fresh install should not spend 2s
-    // failing to reach 127.0.0.1:11434 on every request.
+    const baseRawEnv = definition.baseUrlEnv ? read(source, definition.baseUrlEnv) : "";
+    // Self-hosted endpoints are opt-in: a fresh install must never waste time
+    // or stall startup dialling 127.0.0.1:11434 / :4000 / :8080 when unused.
     const explicitlyListed = rawOrder ? true : false;
     if (definition.kind === "local-openai-compatible" && !baseRawEnv && !explicitlyListed) {
       skipped.push({
@@ -355,8 +582,8 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
     const baseRaw = baseRawEnv || definition.baseUrl;
     const baseUrl = normalizeBaseUrl(baseRaw);
     if (!baseUrl) {
-      warnings.push(`${definition.baseUrlEnv ?? definition.id} is not a valid http(s) URL; ${definition.label} was skipped.`);
-      skipped.push({ id, label: definition.label, reason: "invalid base URL" });
+      warnings.push(`${definition.baseUrlEnv ?? definition.id} is not a valid or permitted http(s) URL; ${definition.label} was skipped.`);
+      skipped.push({ id, label: definition.label, reason: "invalid or blocked base URL" });
       continue;
     }
 
@@ -387,6 +614,7 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
       apiKey,
       model: perProviderModel || globalModel || definition.defaultModel,
       anonymous: !apiKey,
+      capabilities: definition.capabilities,
       docs: definition.docs,
       notes: definition.notes,
       baseUrlVerified: definition.baseUrlVerified,
@@ -407,32 +635,48 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
   return { providers, skipped, warnings, order };
 }
 
-/** Strip secrets so a provider can be serialized to a client response. */
-export function redactProvider(provider: ResolvedProvider) {
+export interface RedactProviderOptions {
+  /**
+   * When false (used for non-admin client responses), hides internal host/IP
+   * topology so unprivileged tenants cannot enumerate private inference servers.
+   * Defaults to true for backwards compatibility with internal/admin callers.
+   */
+  includeTopology?: boolean;
+}
+
+/** Strip secrets (and optionally internal topology) so a provider can be serialized safely. */
+export function redactProvider(provider: ResolvedProvider, options: RedactProviderOptions = {}) {
+  const includeTopology = options.includeTopology !== false;
+  const maskedUrl = isPrivateOrInternalUrl(provider.baseUrl)
+    ? "internal-endpoint (redacted)"
+    : "configured-endpoint";
+
   return {
     id: provider.id,
     label: provider.label,
     tier: provider.tier,
     kind: provider.kind,
-    baseUrl: provider.baseUrl,
+    baseUrl: includeTopology ? provider.baseUrl : maskedUrl,
     model: provider.model,
     anonymous: provider.anonymous,
     hasKey: Boolean(provider.apiKey),
+    capabilities: provider.capabilities,
     docs: provider.docs,
     notes: provider.notes,
     baseUrlVerified: provider.baseUrlVerified,
   };
 }
 
-/** Client/operation tunables, all optional. */
+/** Client/operation tunables, all optional and bounded safely. */
 export function aiRuntimeConfig(source: EnvSource = process.env) {
+  const rawTemp = Number(read(source, "AI_TEMPERATURE") || 0.7);
   return {
-    timeoutMs: readInt(source, "AI_TIMEOUT_MS", 60_000),
-    retriesPerProvider: Math.min(readInt(source, "AI_RETRIES_PER_PROVIDER", 1), 3),
+    timeoutMs: Math.min(Math.max(readInt(source, "AI_TIMEOUT_MS", 60_000), 1_000), 300_000),
+    retriesPerProvider: Math.min(Math.max(readInt(source, "AI_RETRIES_PER_PROVIDER", 1), 0), 3),
     /** After this many consecutive failures a provider is skipped for the cooldown window. */
     breakerThreshold: Math.max(readInt(source, "AI_BREAKER_THRESHOLD", 3), 1),
-    breakerCooldownMs: readInt(source, "AI_BREAKER_COOLDOWN_MS", 60_000),
-    maxTokens: readInt(source, "AI_MAX_TOKENS", 4096),
-    temperature: Number(read(source, "AI_TEMPERATURE") || 0.7),
+    breakerCooldownMs: Math.min(Math.max(readInt(source, "AI_BREAKER_COOLDOWN_MS", 60_000), 1_000), 3_600_000),
+    maxTokens: Math.min(Math.max(readInt(source, "AI_MAX_TOKENS", 4096), 1), 32_768),
+    temperature: Number.isFinite(rawTemp) ? Math.min(Math.max(rawTemp, 0), 2) : 0.7,
   };
 }

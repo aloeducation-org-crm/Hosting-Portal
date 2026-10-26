@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { db } from '@/lib/db';
-import { env } from '@/lib/env';
-import { v4 as uuidv4 } from 'uuid';
+import { verifyInternalSecretValue } from '@/lib/auth';
 import { createAuditLog } from '@/lib/audit';
 
 function handleErr(e: unknown): NextResponse {
@@ -15,9 +14,13 @@ function handleErr(e: unknown): NextResponse {
 
 export async function POST(request: NextRequest) {
   try {
-    // Webhook auth via header secret
+    // Webhook auth via constant-time header secret check (fails closed if secret is unset or weak)
+    const configuredSecret = process.env.DEPLOY_WEBHOOK_SECRET ?? process.env.INTERNAL_SECRET;
+    if (!configuredSecret || configuredSecret.trim().length < 16) {
+      throw apiError('Deploy webhook secret is not configured', 'WEBHOOK_NOT_CONFIGURED', undefined, 503);
+    }
     const webhookSecret = request.headers.get('x-webhook-secret');
-    if (!webhookSecret || webhookSecret !== env.INTERNAL_SECRET) {
+    if (!verifyInternalSecretValue(webhookSecret, configuredSecret)) {
       throw apiError('Invalid or missing webhook secret', 'UNAUTHORIZED', undefined, 401);
     }
 

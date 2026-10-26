@@ -178,9 +178,12 @@ function LoginForm({
           />
           <span className="text-sm text-muted-foreground">Remember me</span>
         </label>
-        <button type="button" className="text-sm text-[#E8501A] hover:text-[#C73D12] transition-colors">
+        <a
+          href="/login?recovery=1"
+          className="text-sm text-[#E8501A] hover:text-[#C73D12] transition-colors"
+        >
           Forgot password?
-        </button>
+        </a>
       </div>
 
       {/* Submit */}

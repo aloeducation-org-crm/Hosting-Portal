@@ -60,6 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       continueOnError: body.continueOnError === true,
       trigger: 'manual',
       userId: user.id,
+      isAdmin: isAdminRole(user.role),
       signal: request.signal,
     });
 

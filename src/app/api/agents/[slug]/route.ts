@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { isAdminRole, requireSession } from '@/lib/auth';
 import { apiError, type ApiResponse } from '@/lib/response';
 
 function handleErr(e: unknown): NextResponse {
@@ -11,10 +12,11 @@ function handleErr(e: unknown): NextResponse {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ slug: string }> },
 ) {
   try {
+    const user = await requireSession(request);
     const { slug } = await params;
     const agent = await db.aiAgent.findUnique({
       where: { slug },
@@ -30,7 +32,12 @@ export async function GET(
       );
     }
 
-    const config = agent.config as Record<string, unknown> | null;
+    const rawConfig = (agent.config as Record<string, unknown> | null) ?? {};
+    const safeConfig = {
+      temperature: typeof rawConfig.temperature === 'number' ? rawConfig.temperature : undefined,
+      maxTokens: typeof rawConfig.maxTokens === 'number' ? rawConfig.maxTokens : undefined,
+      ...(isAdminRole(user.role) && typeof rawConfig.model === 'string' ? { model: rawConfig.model } : {}),
+    };
 
     return NextResponse.json({
       success: true,
@@ -41,10 +48,10 @@ export async function GET(
         description: agent.description ?? '',
         category: agent.category ?? 'utility',
         icon: agent.icon ?? 'Code2',
-        systemPrompt: (config?.systemPrompt as string) ?? '',
+        systemPrompt: isAdminRole(user.role) ? ((rawConfig.systemPrompt as string) ?? '') : '',
         isFree: true,
         usageCount: agent._count.runs,
-        config: JSON.stringify(config ?? {}),
+        config: JSON.stringify(safeConfig),
       },
     });
   } catch (e) {
