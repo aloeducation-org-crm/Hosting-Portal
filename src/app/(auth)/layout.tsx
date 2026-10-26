@@ -1,6 +1,7 @@
 import React from "react";
 import Link from "next/link";
-import { Zap, ShieldCheck, Globe, Cpu } from "lucide-react";
+import Image from "next/image";
+import { ShieldCheck, Globe, Cpu } from "lucide-react";
 
 export default function AuthLayout({
   children,
@@ -16,9 +17,14 @@ export default function AuthLayout({
 
         <div className="relative z-10">
           <Link href="/" className="inline-flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#E8501A] shadow-lg shadow-[#E8501A]/30">
-              <Zap className="h-5 w-5 text-white" />
-            </div>
+            <Image
+              src="/alolabs-agentos-mark.png"
+              alt=""
+              width={40}
+              height={45}
+              className="h-11 w-10 object-contain"
+              priority
+            />
             <div>
               <span className="text-xl font-bold tracking-tight text-white">
                 ALO Labs

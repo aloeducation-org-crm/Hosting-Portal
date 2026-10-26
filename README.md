@@ -143,19 +143,34 @@ status for all ten platform capabilities: [docs/ROADMAP-STATUS.md](docs/ROADMAP-
 
 ## Deploying
 
-Canonical production path (systemd + nginx + Cloudflare Tunnel), all templates in
-`deploy/`:
+Canonical production path is systemd + nginx + Cloudflare Tunnel, with templates
+in `deploy/`. The one-time bootstrap below prepares the host; after that, deploys
+are driven by the dashboard's Git-connected deployment engine or the CI pipeline.
+Use `bash scripts/server-doctor.sh` for a read-only audit before changing a live
+server. Do not manually copy a legacy PM2/PostgreSQL recipe onto this SQLite build.
+
+After the one-time server bootstrap below, a push to `main` runs the single
+`.github/workflows/ci-cd.yml` pipeline: CI checks the repository root, builds a
+standalone artifact on GitHub-hosted runners, then activates that immutable
+release on the production self-hosted runner. It swaps the `current` symlink,
+restarts systemd, verifies database/schema health and `/login`, and restores the
+previous release automatically if verification fails. The obsolete SSH-based
+duplicate workflow has been removed; no GitHub SSH private-key secrets are
+needed.
+
+One-time server setup (run from the repository root on the production host):
 
 ```bash
-bash scripts/server-doctor.sh          # audit the whole chain first
-sudo bash scripts/init-production-db.sh
-sudo cp deploy/systemd/alo-hosting-panel.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now alo-hosting-panel
+npm ci
+sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net
 ```
 
-Push to `main` and `.github/workflows/deploy.yml` builds on the self-hosted
-runner, assembles an immutable release directory, swaps a symlink, restarts the
-service, health-checks `/api/health` and rolls back automatically on failure.
+Register the GitHub Actions runner on that same host with labels
+`self-hosted`, `linux`, and `production`, running as the same account that owns
+`~/alo-hosting` (normally `alamin`). The bootstrap installs the service, secrets,
+external SQLite database, and narrowly scoped sudoers policy. Then merge changes
+to `main`; CI deploys them without an SSH action or a manual `git pull`/PM2
+restart. Do not copy the commands from the legacy `alo-hosting-portal/` subtree.
 
 Full procedure, request path and troubleshooting: `DEPLOY.md` and
 `docs/RECOVERY-hosting.alolabs.net.md`.
@@ -167,14 +182,17 @@ Full procedure, request path and troubleshooting: `DEPLOY.md` and
 | `scripts/server-doctor.sh` | Non-destructive audit of app → nginx → tunnel → DNS → cert → DB |
 | `scripts/init-production-db.sh` | One-time DB bootstrap outside the repo + admin password rotation |
 | `scripts/deploy-alo-portal.sh` | Full 7-phase bare-metal provisioning (`/opt/alo-hosting-portal`, Caddy) |
-| `scripts/healthcheck.sh` | Liveness/readiness probe used by CI and the deploy workflow |
+| `scripts/healthcheck.sh` | Manual HTTP liveness probe |
+| `scripts/deploy-production.sh` | Atomic production release activation, health verification and rollback |
 | `scripts/backup.sh` / `scripts/restore.sh` / `scripts/rollback.sh` | Data and release rollback |
 
 ## CI
 
-`.github/workflows/ci-cd.yml` runs lint, typecheck, tests and a production build
-on every push/PR and asserts `.next/standalone/server.js` exists. It never sets
-`NODE_ENV=production` (that makes `npm ci` skip devDependencies and breaks lint).
+`.github/workflows/ci-cd.yml` runs lint, typecheck and tests on every branch
+push and on PRs targeting `main` or `develop`, builds the canonical root app, and checks
+`.next/standalone/server.js`. `npm ci --include=dev` ensures type definitions are
+installed even if the runner has production-only npm settings. `NODE_ENV=production`
+is scoped to the build step only; it is not set during dependency installation.
 
 ## Tech stack
 

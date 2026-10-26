@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   keywords: ["ALO Labs", "web hosting", "domain", "website builder", "VPS", "cloud hosting", "WordPress"],
   authors: [{ name: "ALO Labs" }],
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>",
+    icon: "/alolabs-agentos-mark.png",
   },
   openGraph: {
     title: "ALO Labs - Bring Your Idea Online With a Website",

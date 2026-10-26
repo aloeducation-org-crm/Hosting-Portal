@@ -23,7 +23,7 @@ Complete guide to deploy ALO Labs Hosting Platform on Ubuntu 22.04 / 24.04 LTS.
 > Current production (`hosting.alolabs.net` on `alo-server-lap`) uses nginx +
 > Let's Encrypt behind a Cloudflare Tunnel, systemd, and the self-hosted Actions
 > runner. Templates: `deploy/systemd/`, `deploy/nginx/`, `deploy/cloudflared/`,
-> `deploy/sudoers/`. Workflow: `.github/workflows/deploy.yml`.
+> `deploy/sudoers/`. Workflow: `.github/workflows/ci-cd.yml` (one CI/build/deploy pipeline).
 > Recovery runbook: **`docs/RECOVERY-hosting.alolabs.net.md`**.
 > Audit the whole chain at any time with `bash scripts/server-doctor.sh`.
 >

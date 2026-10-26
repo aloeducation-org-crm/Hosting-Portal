@@ -22,7 +22,7 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-type AgentType = 'nova' | 'code-assistant' | 'website-builder' | 'domain-advisor';
+type AgentType = 'alolabs' | 'code-assistant' | 'website-builder' | 'domain-advisor';
 
 interface AgentTab {
   id: AgentType;
@@ -33,7 +33,7 @@ interface AgentTab {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const AGENT_TABS: AgentTab[] = [
-  { id: 'nova', label: 'General', icon: <Sparkles className='h-3 w-3' /> },
+  { id: 'alolabs', label: 'General', icon: <Sparkles className='h-3 w-3' /> },
   { id: 'code-assistant', label: 'Code', icon: <Code2 className='h-3 w-3' /> },
   { id: 'website-builder', label: 'Website', icon: <Globe className='h-3 w-3' /> },
   { id: 'domain-advisor', label: 'Domain', icon: <MessageSquare className='h-3 w-3' /> },
@@ -42,7 +42,7 @@ const AGENT_TABS: AgentTab[] = [
 const WELCOME_MESSAGE: ChatMessage = {
   role: 'assistant',
   content:
-    "Hi! I'm Nova, your ALO Labs AI assistant. I can help you with hosting, domains, coding, and building websites. What can I help you with today?",
+    "Hi! I'm ALOlabs, your ALO Labs AI assistant. I can help you with hosting, domains, coding, and building websites. What can I help you with today?",
   timestamp: new Date(),
 };
 
@@ -112,7 +112,7 @@ export default function AIChatWidget() {
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
-  const [agentType, setAgentType] = useState<AgentType>('nova');
+  const [agentType, setAgentType] = useState<AgentType>('alolabs');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [showTabDropdown, setShowTabDropdown] = useState(false);
   const [hasBounced, setHasBounced] = useState(false);
@@ -155,14 +155,14 @@ export default function AIChatWidget() {
     }
   }, [isOpen]);
 
-  // ── Listen for external open events (e.g. from PricingSection "Ask Nova") ──
+  // ── Listen for external open events (e.g. from PricingSection "Ask ALOlabs") ──
 
   useEffect(() => {
-    function handleNovaOpen() {
+    function handleALOlabsOpen() {
       setIsOpen(true);
     }
-    window.addEventListener('nova:open', handleNovaOpen);
-    return () => window.removeEventListener('nova:open', handleNovaOpen);
+    window.addEventListener('alolabs:open', handleALOlabsOpen);
+    return () => window.removeEventListener('alolabs:open', handleALOlabsOpen);
   }, []);
 
   // ── Close dropdown on outside click ───────────────────────────────────────
@@ -212,26 +212,31 @@ export default function AIChatWidget() {
         }),
       });
 
-      if (!res.ok) throw new Error('Failed to get response');
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = typeof payload.error === 'string' ? payload.error : payload.error?.message;
+        throw new Error(detail || 'ALOlabs could not answer right now. Please try again.');
+      }
 
-      const data = await res.json();
-
-      if (data.sessionId) {
-        setSessionId(data.sessionId);
+      const data = payload.data ?? payload;
+      if (data.sessionId) setSessionId(data.sessionId);
+      const reply = typeof data.reply === 'string' ? data.reply : data.message;
+      if (typeof reply !== 'string' || !reply.trim()) {
+        throw new Error('ALOlabs returned an empty response. Please try again.');
       }
 
       const assistantMessage: ChatMessage = {
         role: 'assistant',
-        content: data.message ?? 'Sorry, I could not generate a response.',
+        content: reply,
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-    } catch {
+    } catch (error) {
       const errorMessage: ChatMessage = {
         role: 'assistant',
         content:
-          "I'm sorry, something went wrong. Please try again in a moment.",
+          error instanceof Error ? error.message : 'ALOlabs ran into a problem. Please try again in a moment.',
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -290,7 +295,7 @@ export default function AIChatWidget() {
                 </div>
                 <div>
                   <h2 className="text-sm font-semibold text-white">
-                    Nova — AI Assistant
+                    ALOlabs — AI Assistant
                   </h2>
                   {/* Agent type selector (compact dropdown) */}
                   <div className="relative" ref={dropdownRef}>
@@ -451,7 +456,7 @@ export default function AIChatWidget() {
               }
             : { duration: 0 }
         }
-        aria-label={isOpen ? 'Close Nova chat' : 'Open Nova chat'}
+        aria-label={isOpen ? 'Close ALOlabs chat' : 'Open ALOlabs chat'}
       >
         {/* Label pill */}
         <span
@@ -466,7 +471,7 @@ export default function AIChatWidget() {
               : '0 4px 14px rgba(232,80,26,0.25)',
           }}
         >
-          Ask Nova
+          Ask ALOlabs
         </span>
 
         {/* Icon circle */}

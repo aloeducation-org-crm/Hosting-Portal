@@ -43,8 +43,8 @@ so a failure stops instead of cascading.
 
 ### 1.0 …or do §1.2–§1.5 in one command
 
-`scripts/bootstrap-server.sh` performs the whole server-side prerequisite set
-that `.github/workflows/deploy.yml` checks for, and it is safe to re-run:
+`scripts/bootstrap-server.sh` performs the server-side prerequisites required
+by `.github/workflows/ci-cd.yml`, and it is safe to re-run:
 
 ```bash
 cd ~/projects/Hosting-Portal
@@ -267,37 +267,26 @@ curl -sS  https://hosting.alolabs.net/api/health          # databaseStatus: conn
 
 ## 3. Turn on auto-deploy
 
-Your self-hosted runner **is** correctly registered and running
-(`actions.runner.aloeducation-org-crm-Hosting-Portal.alo-server-lap`, labels
-`self-hosted, linux, production`). The registration failures earlier were a
-placeholder token and an outdated runner tarball; the 2.338.0 attempt succeeded.
-What was missing is the workflow — every attempt to write it failed because
-`~/Downloads/alo-master` does not exist on the server (that path is your Mac).
+The repository has one CI/deploy workflow: `.github/workflows/ci-cd.yml`. It
+checks and builds the canonical repository root on GitHub-hosted runners, then
+uses the production self-hosted runner (labels `self-hosted, linux, production`)
+to atomically activate the artifact. The one-time bootstrap installs the
+production env file, external SQLite DB, systemd unit and narrowly-scoped
+sudoers rules. The runner must run as the same account that owns
+`~/alo-hosting` (normally `alamin`).
 
-.github/workflows/deploy.yml` is now in the repo. Before the first run, install
-the sudoers policy it needs (it grants exactly: restart/status the panel unit,
-read its journal, `nginx -t` + reload, restart cloudflared, run
-`/usr/local/sbin/alo-init-db`, and refresh that one file from a release
-directory — nothing else):
+After merging a change to `main`, the workflow creates
+`/home/alamin/alo-hosting/releases/<sha>`, repoints `current`, restarts the
+systemd service, verifies `/api/health` reports a connected/current database
+and `/login` returns HTTP 200, and restores the previous release if either
+probe fails. It refuses to deploy if the production env/DB prerequisites are
+missing or inconsistent. There is no SSH action, PM2 restart or GitHub SSH key
+secret in this path; the duplicate SSH-based workflow has been removed.
 
-```bash
-sudo cp ~/projects/Hosting-Portal/deploy/sudoers/alo-hosting-deploy /etc/sudoers.d/
-sudo chown root:root /etc/sudoers.d/alo-hosting-deploy
-sudo chmod 0440 /etc/sudoers.d/alo-hosting-deploy
-sudo visudo -cf /etc/sudoers.d/alo-hosting-deploy     # must print "parsed OK"
-```
-
-Then push to `main` (or Actions → Deploy → Run workflow). It builds on the
-runner, writes `/home/alamin/alo-hosting/releases/<sha>`, repoints `current`,
-restarts the unit, health-checks `/api/health` for 30 s, and **rolls the symlink
-back to the previous release if the check fails**. It also refuses to start when
-`DATABASE_URL` is relative, points into the repo, or is `postgresql://`.
-
-No repository *variables* are required — the earlier `gh variable set …` /
-`gh secret set …` commands never ran (`gh` is not installed on the server) and
-are not needed. If you want them for other workflows, do it from your Mac or
-install `gh` with the official apt repo (`sudo apt install gh` gives 2.4.0,
-which is too old for `gh variable`).
+No repository SSH secrets are required. GitHub Actions must be enabled, and the
+production runner must be online and carry the `production` label before a push
+to `main` can deploy. A missing/incorrect runner label will leave the deploy job
+queued rather than silently using a different host.
 
 ---
 

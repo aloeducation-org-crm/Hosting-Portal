@@ -139,9 +139,9 @@ export default function PricingSection() {
     [isAuthenticated, user, token, checkSession]
   )
 
-  const handleAskNova = useCallback(() => {
+  const handleAskALOlabs = useCallback(() => {
     // Dispatch a custom event that AIChatWidget listens for
-    const event = new CustomEvent('nova:open')
+    const event = new CustomEvent('alolabs:open')
     window.dispatchEvent(event)
   }, [])
 
@@ -254,16 +254,16 @@ export default function PricingSection() {
           </a>
         </div>
 
-        {/* Ask Nova */}
+        {/* Ask ALOlabs */}
         <div className="mt-8 text-center">
           <p className="text-sm text-gray-600">
             Not sure which plan to choose?{' '}
             <button
               type="button"
-              onClick={handleAskNova}
+              onClick={handleAskALOlabs}
               className="inline-flex items-center gap-1 font-semibold text-[#E8501A] transition-colors hover:text-[#C73D12]"
             >
-              Ask Nova
+              Ask ALOlabs
               <ArrowRight className="size-3.5" />
             </button>
           </p>
