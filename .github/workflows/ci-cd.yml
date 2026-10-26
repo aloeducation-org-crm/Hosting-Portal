@@ -85,6 +85,7 @@ jobs:
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
         run: |
           set -e
+          export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"
           APP_DIR="$HOME/projects/Hosting-Portal"
           cd "$APP_DIR"
           git pull origin main
