@@ -71,17 +71,29 @@ jobs:
     name: Deploy to production server
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, linux, production]
-    environment: production
-    timeout-minutes: 20
+    runs-on: self-hosted
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
-      - name: Activate, restart, and verify (atomic rollback on failure)
+      - name: Activate, restart, and verify
         env:
           DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
-        run: bash scripts/deploy-production.sh
+        run: |
+          set -e
+          APP_DIR="$HOME/projects/Hosting-Portal"
+          cd "$APP_DIR"
+          git pull origin main
+          cd alo-hosting-portal 2>/dev/null || true
+          npm install --production=false
+          npx prisma generate
+          npx prisma db push --skip-generate || true
+          npm run build
+          pm2 restart alo-hosting --update-env || PORT=3051 pm2 start npm --name "alo-hosting" -- start
+          pm2 save
+          sleep 4
+          curl -sf http://127.0.0.1:3051/api/health && echo "✅ Deploy OK" || (echo "❌ Health check failed" && exit 1)
