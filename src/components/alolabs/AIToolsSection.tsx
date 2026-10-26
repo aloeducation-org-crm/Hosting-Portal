@@ -56,16 +56,16 @@ export default function AIToolsSection() {
 
         {/* Feature Cards */}
         <div className="mt-16 grid grid-cols-1 gap-6 md:grid-cols-3">
-          {/* Card 1 - Nova */}
+          {/* Card 1 - ALOlabs */}
           <div className="group rounded-2xl border border-gray-200 bg-white p-6 transition-shadow hover:shadow-lg">
             <div className="flex size-12 items-center justify-center rounded-xl bg-[#E8501A]/10">
               <Bot className="size-6 text-[#E8501A]" />
             </div>
             <h3 className="mt-4 text-lg font-semibold text-gray-900">
-              Your AI agent, Nova
+              Your AI agent, ALOlabs
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-gray-600">
-              Meet Nova, your personal AI assistant that helps you manage your
+              Meet ALOlabs, your personal AI assistant that helps you manage your
               online presence effortlessly. From answering questions to guiding
               you through every step of building and growing your website.
             </p>
@@ -104,13 +104,13 @@ export default function AIToolsSection() {
           </div>
         </div>
 
-        {/* Start with Nova */}
+        {/* Start with ALOlabs */}
         <div className="mt-16 mx-auto max-w-2xl text-center">
           <h3 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-            Start with Nova
+            Start with ALOlabs
           </h3>
           <p className="mt-3 text-base leading-relaxed text-gray-600">
-            Get instant help via chat or WhatsApp. Nova is available 24/7 to
+            Get instant help via chat or WhatsApp. ALOlabs is available 24/7 to
             answer your questions, troubleshoot issues, and help you make the
             most of ALO Labs products and services.
           </p>

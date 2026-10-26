@@ -14,6 +14,16 @@ function handleErr(e: unknown): NextResponse {
 
 const MAX_MESSAGES = 20;
 const MAX_MESSAGE_CHARS = 12_000;
+const AGENT_PROMPTS = {
+  alolabs:
+    'You are ALOlabs, the official AI assistant for ALO Labs. Help users with web hosting, domains, websites, and application deployment in a clear, friendly way. You do not have access to live account or server state and cannot perform actions; never claim that you changed settings or deployed anything.',
+  'code-assistant':
+    'You are ALOlabs Code Assistant. Help users understand, write, and debug application code. Be practical and security-conscious. You cannot access their repository or deploy code unless an authorized tool explicitly says so.',
+  'website-builder':
+    'You are ALOlabs Website Builder Assistant. Help users plan, write, and improve websites, including layout, accessibility, SEO, and content. Do not claim that you published or changed a website.',
+  'domain-advisor':
+    'You are ALOlabs Domain Advisor. Help users choose domains and understand DNS and SSL concepts. You cannot check live availability or modify DNS unless a tool explicitly provides that capability.',
+} satisfies Record<string, string>;
 
 /** POST /api/ai/chat — { message } or { messages: [...] } */
 export async function POST(request: NextRequest) {
@@ -21,26 +31,32 @@ export async function POST(request: NextRequest) {
     const user = await requireSession(request);
     const body = await request.json().catch(() => ({}));
     const rawHistory = body.messages;
+    const requestedAgent =
+      typeof body.agentType === 'string' && Object.hasOwn(AGENT_PROMPTS, body.agentType)
+        ? (body.agentType as keyof typeof AGENT_PROMPTS)
+        : 'alolabs';
+    const systemPrompt = AGENT_PROMPTS[requestedAgent];
 
     let messages: AIMessage[] = [];
     if (Array.isArray(rawHistory) && rawHistory.length) {
-      messages = rawHistory
-        .filter((entry): entry is { role: string; content: string } =>
+      const history = rawHistory
+        .filter((entry): entry is { role: 'user' | 'assistant'; content: string } =>
           Boolean(entry) && typeof entry === 'object' &&
           typeof (entry as { content?: unknown }).content === 'string' &&
-          ['system', 'user', 'assistant'].includes(String((entry as { role?: unknown }).role)))
+          ['user', 'assistant'].includes(String((entry as { role?: unknown }).role)))
         .slice(-MAX_MESSAGES)
         .map((entry) => ({
-          role: entry.role as AIMessage['role'],
+          role: entry.role,
           content: entry.content.slice(0, MAX_MESSAGE_CHARS),
         }));
+      messages = [{ role: 'system', content: systemPrompt }, ...history];
     } else {
       const message = typeof body.message === 'string' ? body.message.trim() : '';
       if (!message) {
         return NextResponse.json(apiError('Message is required', 'VALIDATION_ERROR', undefined, 400), { status: 400 });
       }
       messages = [
-        { role: 'system', content: 'You are a helpful AI assistant for an internal infrastructure control panel. Be concise and helpful.' },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: message.slice(0, MAX_MESSAGE_CHARS) },
       ];
     }

@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import {
   Linkedin,
   Facebook,
@@ -199,7 +200,8 @@ export default function Footer() {
         {/* Bottom bar */}
         <div className="mt-6 flex flex-col items-center justify-between gap-3 border-t border-white/10 py-5 sm:flex-row">
           {/* Logo */}
-          <a href="/" className="text-base font-bold tracking-tight text-white hover:opacity-80 transition-opacity">
+          <a href="/" aria-label="ALO Labs home" className="inline-flex items-center gap-2 text-base font-bold tracking-tight text-white hover:opacity-80 transition-opacity">
+            <Image src="/alolabs-agentos-mark.png" alt="" width={24} height={27} className="h-7 w-6 object-contain" />
             ALO Labs
           </a>
 

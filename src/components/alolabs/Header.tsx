@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import {
   Menu,
   ChevronDown,
@@ -383,10 +384,14 @@ function MobileMenuContent({ onClose }: { onClose: () => void }) {
 function ALOLogo({ className }: { className?: string }) {
   return (
     <a href="/" className={`inline-flex items-center gap-2 ${className ?? ''}`} aria-label="ALO Labs homepage">
-      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" className="shrink-0">
-        <path d="M16 2L28.5 9V23L16 30L3.5 23V9L16 2Z" fill="#E8501A" stroke="#E8501A" strokeWidth="1.5" strokeLinejoin="round" />
-        <path d="M18.5 8L11 17H15.5L13.5 24L21 15H16.5L18.5 8Z" fill="white" stroke="white" strokeWidth="0.5" strokeLinejoin="round" />
-      </svg>
+      <Image
+        src="/alolabs-agentos-mark.png"
+        alt=""
+        width={32}
+        height={36}
+        priority
+        className="h-9 w-8 shrink-0 object-contain"
+      />
       <span className="text-lg font-bold text-[#1E293B] tracking-tight">ALO Labs</span>
     </a>
   );
