@@ -113,7 +113,7 @@ install -d -m 0755 /var/www/letsencrypt
 cat >/usr/local/bin/alo-issue-tls.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-source /home/z/my-project/alo-server-kit/lib/common.sh 2>/dev/null || true
+[[ -f /etc/alo-server-kit/kit.conf ]] && source /etc/alo-server-kit/kit.conf
 DOMAIN="${KIT_DOMAIN:-alo.example.com}"
 EMAIL="${KIT_ADMIN_EMAIL:-alamin@example.com}"
 certbot certonly --webroot -w /var/www/letsencrypt -d "$DOMAIN" --email "$EMAIL" --agree-tos --no-eff-email --non-interactive
@@ -141,8 +141,8 @@ if sudo -u "$KIT_PRIMARY_USER" [[ ! -d "$APP_DIR/.git" ]] && [[ -d "$KIT_ROOT/de
     cp -r '$KIT_ROOT/demo-app' '$APP_DIR'
     cd '$APP_DIR'
     source $NVM_DIR/nvm.sh
-    npm ci --omit=dev
-    npm run build
+    npm ci --include=dev
+    NODE_ENV=production npm run build
   "
 fi
 

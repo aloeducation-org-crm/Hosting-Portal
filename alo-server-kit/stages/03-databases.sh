@@ -71,9 +71,12 @@ SQL
 
 MYPW=$(openssl rand -base64 24 | tr -d '/+=' | head -c 28)
 mysql -e "CREATE DATABASE IF NOT EXISTS ${KIT_MYSQL_APP_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -e "CREATE USER IF NOT EXISTS '${KIT_MYSQL_APP_USER}'@'%' IDENTIFIED BY '${MYPW}';" || true
-mysql -e "ALTER USER '${KIT_MYSQL_APP_USER}'@'%' IDENTIFIED BY '${MYPW}';"
-mysql -e "GRANT ALL PRIVILEGES ON ${KIT_MYSQL_APP_DB}.* TO '${KIT_MYSQL_APP_USER}'@'%'; FLUSH PRIVILEGES;"
+for MYHOST in 'localhost' '127.0.0.1'; do
+  mysql -e "CREATE USER IF NOT EXISTS '${KIT_MYSQL_APP_USER}'@'${MYHOST}' IDENTIFIED BY '${MYPW}';" || true
+  mysql -e "ALTER USER '${KIT_MYSQL_APP_USER}'@'${MYHOST}' IDENTIFIED BY '${MYPW}';"
+  mysql -e "GRANT ALL PRIVILEGES ON ${KIT_MYSQL_APP_DB}.* TO '${KIT_MYSQL_APP_USER}'@'${MYHOST}';"
+done
+mysql -e "FLUSH PRIVILEGES;"
 
 write_file /root/.alo-secrets/mysql-app.txt root:root 0600 <<EOF
 # MySQL app credentials
@@ -89,9 +92,10 @@ install -d -m 0755 /usr/local/sbin
 cat >/usr/local/sbin/alo-db-backup.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 BACKUP_ROOT=/var/backups/alo-db
 TS=$(date +%Y%m%d-%H%M%S)
-install -d "$BACKUP_ROOT/daily" "$BACKUP_ROOT/weekly" "$BACKUP_ROOT/monthly"
+install -d -m 0700 "$BACKUP_ROOT/daily" "$BACKUP_ROOT/weekly" "$BACKUP_ROOT/monthly"
 if command -v pg_dumpall >/dev/null; then
   sudo -u postgres pg_dumpall | gzip -c > "$BACKUP_ROOT/daily/pg-all-$TS.sql.gz"
 fi

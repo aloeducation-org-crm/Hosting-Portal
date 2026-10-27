@@ -19,8 +19,8 @@ Zero-budget, security-first, all configs in version control.
 | **L1** | Security       | SSH port 2244 · key-only · root disabled · `AllowUsers alamin` · UFW (2244/80/443 + LAN-only DB/Samba) · Fail2Ban 3→24h · sysctl hardening |
 | **L2** | Web/App       | NVM + Node LTS · PM2 cluster (×2) · Nginx reverse proxy + security headers + Let's Encrypt · Python venv-only (PEP 668) |
 | **L3** | Databases     | PostgreSQL (scram-sha-256, dedicated app user, LAN-only) · MySQL 8 (validate_password MEDIUM, no remote root, LAN-only) · daily gzip backups with 7/30/365-day retention |
-| **L4** | AI Infra      | Ollama (qwen2.5:7b, llama3.1:8b, codellama:7b, MemoryMax=8G) · LiteLLM proxy on :4000 (Gemini→Groq→Cloudflare→Ollama fallbacks, per-key budgets) · Open WebUI on :3001 |
-| **L5** | AI Coding     | VS Code + Continue.dev + Cline extensions + Aider (pipx) — all backends pointing at LiteLLM |
+| **L4** | AI Infra      | Ollama (qwen2.5:7b, llama3.1:8b, codellama:7b, MemoryMax=8G) · LiteLLM `1.106.4` on `127.0.0.1:4000` (LAN/Tailscale-restricted `/ai/`) · Open WebUI `0.12.4` on `127.0.0.1:3002` (`0600` `/etc/alo-server-kit/open-webui.env`, internal staff <=50 users, keep branding) |
+| **L5** | AI Coding     | VS Code + Continue.dev + Cline extensions + Aider (pipx) — all configs `0600` pointing at `http://127.0.0.1:4000/v1` |
 | **L6** | Ops/CI-CD     | Netdata (localhost, proxied) · 5-min cron health checks · Telegram alerts · GitHub Actions → SSH → `git pull → build → pm2 reload` |
 | **L7** | File Sync     | Syncthing (~/shared/{documents,projects}) · Samba LAN shares (documents RW, projects RW, backups RO) · Nginx proxy + basic auth |
 

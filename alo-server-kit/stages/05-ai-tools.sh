@@ -13,12 +13,12 @@ if ! command -v code >/dev/null; then
   ensure_pkg code
 fi
 
-log "install Aider via pipx"
+log "install Aider via pipx (0600 secret config)"
 sudo -u "$KIT_PRIMARY_USER" pipx install aider-chat >/dev/null 2>&1 || sudo -u "$KIT_PRIMARY_USER" pipx upgrade aider-chat
-install -d -m 0755 -o "$KIT_PRIMARY_USER" -g "$KIT_PRIMARY_USER" "$USER_HOME/.aider/conf.d"
-write_file "$USER_HOME/.aider/conf.d/alo.yml" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 0644 <<EOF
+install -d -m 0700 -o "$KIT_PRIMARY_USER" -g "$KIT_PRIMARY_USER" "$USER_HOME/.aider" "$USER_HOME/.aider/conf.d"
+write_file "$USER_HOME/.aider/conf.d/alo.yml" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 0600 <<EOF
 model: openai/qwen2.5:7b
-openai-api-base: http://127.0.0.1:${KIT_LITELLM_PORT}
+openai-api-base: http://127.0.0.1:${KIT_LITELLM_PORT}/v1
 openai-api-key: ${KIT_LITELLM_MASTER_KEY}
 edit-format: diff
 auto-commits: true
@@ -30,8 +30,8 @@ sudo -u "$KIT_PRIMARY_USER" bash -lc 'code --install-extension continue.continue
 sudo -u "$KIT_PRIMARY_USER" bash -lc 'code --install-extension saoudrizwan.claude-dev --force 2>/dev/null || true'
 
 CONTINUE_DIR="$USER_HOME/.continue"
-install -d -m 0755 -o "$KIT_PRIMARY_USER" -g "$KIT_PRIMARY_USER" "$CONTINUE_DIR"
-write_file "$CONTINUE_DIR/config.json" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 0644 <<EOF
+install -d -m 0700 -o "$KIT_PRIMARY_USER" -g "$KIT_PRIMARY_USER" "$CONTINUE_DIR"
+write_file "$CONTINUE_DIR/config.json" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 0600 <<EOF
 {
   "models": [
     {"title": "ALO LiteLLM (qwen2.5)", "provider": "openai", "model": "qwen2.5:7b",
@@ -48,8 +48,8 @@ write_file "$CONTINUE_DIR/config.json" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 064
 EOF
 
 CLINE_DIR="$USER_HOME/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings"
-install -d -m 0755 -o "$KIT_PRIMARY_USER" -g "$KIT_PRIMARY_USER" "$CLINE_DIR"
-write_file "$CLINE_DIR/alo-litellm.json" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 0644 <<EOF
+install -d -m 0700 -o "$KIT_PRIMARY_USER" -g "$KIT_PRIMARY_USER" "$CLINE_DIR"
+write_file "$CLINE_DIR/alo-litellm.json" "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" 0600 <<EOF
 {
   "apiProvider": "openai",
   "openAiBaseUrl": "http://127.0.0.1:${KIT_LITELLM_PORT}/v1",

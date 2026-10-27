@@ -3,6 +3,7 @@ set -Eeuo pipefail
 source "$(dirname "$0")/../lib/common.sh"
 require_root
 STAGE="06-ops"; log "▶ $STAGE starting"
+install -d -m 0700 -o root -g root /root/.alo-secrets
 
 log "install Netdata (kickstart, bind 127.0.0.1)"
 if ! command -v netdata >/dev/null; then
@@ -21,22 +22,36 @@ systemctl enable --now netdata
 systemctl restart netdata || true
 
 if [[ ! -f /etc/nginx/.htpasswd-netdata ]]; then
-  echo "Create a password for Netdata basic-auth user '${KIT_PRIMARY_USER}':"
-  htpasswd -c /etc/nginx/.htpasswd-netdata "$KIT_PRIMARY_USER"
+  if [[ -t 0 ]] && [[ -z "${KIT_NETDATA_BASIC_AUTH_PASS:-}" ]]; then
+    echo "Create a password for Netdata basic-auth user '${KIT_PRIMARY_USER}':"
+    htpasswd -c /etc/nginx/.htpasswd-netdata "$KIT_PRIMARY_USER"
+  else
+    ND_PASS="${KIT_NETDATA_BASIC_AUTH_PASS:-$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)}"
+    htpasswd -bc /etc/nginx/.htpasswd-netdata "$KIT_PRIMARY_USER" "$ND_PASS"
+    write_file /root/.alo-secrets/netdata-basic-auth.txt root:root 0600 <<EOF
+NETDATA_USER=${KIT_PRIMARY_USER}
+NETDATA_PASSWORD=${ND_PASS}
+EOF
+  fi
 fi
-write_file /etc/nginx/snippets/alo-netdata.conf root:root 0644 <<'EOF'
+chown root:www-data /etc/nginx/.htpasswd-netdata 2>/dev/null || true
+chmod 0640 /etc/nginx/.htpasswd-netdata
+
+write_file /etc/nginx/snippets/alo-netdata.conf root:root 0644 <<EOF
 location /netdata/ {
-    allow 192.168.0.0/24;
+    allow 127.0.0.1;
+    allow ::1;
+    allow ${KIT_LAN_CIDR};
     allow 100.64.0.0/10;
     deny all;
     auth_basic "Netdata";
     auth_basic_user_file /etc/nginx/.htpasswd-netdata;
-    proxy_pass http://127.0.0.1:19999/;
+    proxy_pass http://127.0.0.1:${KIT_NETDATA_PORT}/;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
 }
 EOF
 DEFAULT_SITE=/etc/nginx/sites-available/alo-default
@@ -50,7 +65,7 @@ install -d -m 0755 /usr/local/sbin
 cat >/usr/local/sbin/alo-healthcheck.sh <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-source /home/z/my-project/alo-server-kit/lib/common.sh 2>/dev/null || true
+[[ -f /etc/alo-server-kit/kit.conf ]] && source /etc/alo-server-kit/kit.conf
 HOST="${KIT_HOSTNAME:-alo-server-lap}"
 TG="${KIT_TELEGRAM_BOT_TOKEN:-}"; TG_CHAT="${KIT_TELEGRAM_CHAT_ID:-}"
 fail() {
@@ -90,8 +105,8 @@ sudo -u "\$USER" bash -lc "
   source \$NVM_DIR/nvm.sh
   git fetch --all
   git reset --hard origin/main
-  npm ci --omit=dev
-  npm run build
+  npm ci --include=dev
+  NODE_ENV=production npm run build
   pm2 reload ecosystem.config.cjs --update-env
   pm2 save
 "

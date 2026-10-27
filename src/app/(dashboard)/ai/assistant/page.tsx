@@ -1,5 +1,5 @@
-import AgentsPage from "@/app/dashboard/agents/page";
+import ZeroTerminalDeployAssistant from "@/components/ai/ZeroTerminalDeployAssistant";
 
 export default function AIAssistantPage() {
-  return <AgentsPage />;
+  return <ZeroTerminalDeployAssistant />;
 }

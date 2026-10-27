@@ -209,6 +209,12 @@ async function callProvider(
     stream: false,
   };
   if (options.json) body.response_format = { type: "json_object" };
+  if (provider.id === "glm") {
+    const effort = (process.env.GLM_REASONING_EFFORT ?? "").trim().toLowerCase();
+    if (effort === "low" || effort === "high" || effort === "max") {
+      body.reasoning_effort = effort;
+    }
+  }
 
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;

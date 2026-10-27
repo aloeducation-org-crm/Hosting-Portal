@@ -1,6 +1,6 @@
 /**
- * Production wiring for the workflow engine: real AI client, read-only hosting
- * tools, and run persistence.
+ * Production wiring for the workflow engine: real AI client, tenant-scoped
+ * read-only hosting tools, and run persistence.
  *
  * The engine itself has no database or network dependency — this module is the
  * only place that knows about both, which keeps the engine unit-testable.
@@ -8,12 +8,13 @@
 
 import { db } from "@/lib/db";
 import { completeWithAI } from "@/lib/ai/client";
-import { HOSTING_TOOLS } from "./tools";
+import { createHostingToolsForActor } from "./tools";
 import { parseStoredWorkflow } from "./graph";
 import { runWorkflowGraph, type WorkflowRunResult } from "./engine";
 
 export interface StoredWorkflow {
   id: string;
+  userId?: string | null;
   name?: string | null;
   nodes?: string | null;
   edges?: string | null;
@@ -24,6 +25,7 @@ export interface ExecuteOptions {
   dryRun?: boolean;
   trigger?: "manual" | "schedule" | "webhook";
   userId?: string | null;
+  isAdmin?: boolean;
   continueOnError?: boolean;
   signal?: AbortSignal;
   /** Skip writing an AiWorkflowRun row (used by tests / previews). */
@@ -56,6 +58,13 @@ export async function executeStoredWorkflow(
   const persist = options.persist !== false;
   const trigger = options.trigger ?? "manual";
   const graph = parseStoredWorkflow(workflow); // throws WorkflowValidationError
+
+  // Resolve actor scope: never fall back to cross-tenant access.
+  const effectiveUserId = options.userId ?? workflow.userId ?? null;
+  const scopedTools = createHostingToolsForActor({
+    userId: effectiveUserId,
+    isAdmin: Boolean(options.isAdmin),
+  });
 
   let runId: string | null = null;
   if (persist) {
@@ -93,7 +102,7 @@ export async function executeStoredWorkflow(
             tokensUsed: completion.tokensUsed,
           };
         },
-        tools: HOSTING_TOOLS,
+        tools: scopedTools,
       },
       {
         input: options.input ?? null,

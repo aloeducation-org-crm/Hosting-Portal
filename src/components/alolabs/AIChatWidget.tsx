@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import {
   Bot,
   X,
@@ -12,6 +13,7 @@ import {
   Globe,
   MessageSquare,
   Loader2,
+  Rocket,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -22,7 +24,7 @@ interface ChatMessage {
   timestamp: Date;
 }
 
-type AgentType = 'alolabs' | 'code-assistant' | 'website-builder' | 'domain-advisor';
+type AgentType = 'alolabs' | 'deploy-assistant' | 'code-assistant' | 'website-builder' | 'domain-advisor';
 
 interface AgentTab {
   id: AgentType;
@@ -34,6 +36,7 @@ interface AgentTab {
 
 const AGENT_TABS: AgentTab[] = [
   { id: 'alolabs', label: 'General', icon: <Sparkles className='h-3 w-3' /> },
+  { id: 'deploy-assistant', label: 'Deploy', icon: <Rocket className='h-3 w-3' /> },
   { id: 'code-assistant', label: 'Code', icon: <Code2 className='h-3 w-3' /> },
   { id: 'website-builder', label: 'Website', icon: <Globe className='h-3 w-3' /> },
   { id: 'domain-advisor', label: 'Domain', icon: <MessageSquare className='h-3 w-3' /> },
@@ -42,7 +45,7 @@ const AGENT_TABS: AgentTab[] = [
 const WELCOME_MESSAGE: ChatMessage = {
   role: 'assistant',
   content:
-    "Hi! I'm ALOlabs, your ALO Labs AI assistant. I can help you with hosting, domains, coding, and building websites. What can I help you with today?",
+    "Hi! I'm ALOlabs, your built-in AI assistant on hosting.alolabs.net. I can help you deploy Node.js, Python, Next.js, PHP, or static projects visually with zero terminal coding — plus domains, SSL, and databases. What would you like to launch today?",
   timestamp: new Date(),
 };
 
@@ -205,6 +208,7 @@ export default function AIChatWidget() {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           message: trimmed,
           sessionId,
@@ -356,6 +360,18 @@ export default function AIChatWidget() {
               >
                 <X className="h-4 w-4" />
               </button>
+            </div>
+
+            {/* ── Zero-Terminal Studio Quick Launch ───────────────────── */}
+            <div className="flex items-center justify-between gap-2 border-b border-[#E2E8F0] bg-[#FFF7ED] px-3.5 py-2 text-[11px] text-[#9A3412]">
+              <span className="truncate font-medium">Zero-terminal visual launcher ready</span>
+              <Link
+                href="/ai/assistant"
+                onClick={() => setIsOpen(false)}
+                className="shrink-0 rounded-md bg-[#E8501A] px-2.5 py-1 font-semibold text-white hover:bg-[#C73D12]"
+              >
+                Open Studio →
+              </Link>
             </div>
 
             {/* ── Messages Area ───────────────────────────────────────── */}

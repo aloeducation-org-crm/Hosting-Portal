@@ -20,7 +20,9 @@ monitoring, SSL lifecycle, site provisioning.
   return `503 AI_NOT_CONFIGURED`.
 
 Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md) (including the
-honest table of which upstream projects are integrated and which are not) and
+honest table of which upstream projects are integrated and which are not),
+[docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md)
+(full evaluation of AI, VoIP/call-center, EdTech, proxy, ops and QA tools), and
 [docs/AI-AUTOMATION.md](docs/AI-AUTOMATION.md).
 
 ---
@@ -172,8 +174,11 @@ external SQLite database, and narrowly scoped sudoers policy. Then merge changes
 to `main`; CI deploys them without an SSH action or a manual `git pull`/PM2
 restart. Do not copy the commands from the legacy `alo-hosting-portal/` subtree.
 
-Full procedure, request path and troubleshooting: `DEPLOY.md` and
-`docs/RECOVERY-hosting.alolabs.net.md`.
+Full procedure, request path and troubleshooting: `DEPLOY.md`,
+`docs/RECOVERY-hosting.alolabs.net.md`, `docs/ZERO-TERMINAL-AI-DEPLOY.md`
+(Zero-Terminal AI Deploy Assistant & 10-provider visual panel benchmark mapping),
+`docs/SELF-HOSTED-AI-AGENTS.md` (12 self-hosted AI agent platforms, LocalAI, license guardrails & GPU/VRAM sizing),
+and `docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md`.
 
 ## Repository scripts
 

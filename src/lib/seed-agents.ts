@@ -28,6 +28,19 @@ const agents: SeedAgent[] = [
     sortOrder: 0,
   },
   {
+    name: 'GLM-5 Agentic Engineer',
+    slug: 'glm5-engineer',
+    description: 'Long-horizon systems engineering, architecture planning, and full-stack refactoring powered by GLM-5.',
+    category: 'coding',
+    icon: 'Code2',
+    systemPrompt:
+      'You are an agentic systems engineer modeled on GLM-5 long-horizon engineering workflows. Break ambiguous software, infrastructure, and debugging tasks into clear phases, identify root-cause blockers, validate assumptions, and produce complete, production-grade code and operational runbooks with explicit verification steps.',
+    isFree: true,
+    isPublished: true,
+    config: JSON.stringify({ temperature: 0.2, maxTokens: 4096 }),
+    sortOrder: 1,
+  },
+  {
     name: 'Website Builder AI',
     slug: 'website-builder',
     description: 'Generate complete, responsive websites from natural language descriptions.',

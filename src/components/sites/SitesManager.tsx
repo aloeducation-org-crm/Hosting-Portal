@@ -125,7 +125,10 @@ export function SitesManager() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/ai/assistant">
+            <Button variant="outline">AI Zero-Terminal Deploy</Button>
+          </Link>
           <Link href="/ai/builder">
             <Button variant="outline">AI Site Builder</Button>
           </Link>
