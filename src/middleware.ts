@@ -452,7 +452,7 @@ export async function middleware(request: NextRequest) {
     // carry a token; they are rate-limited more strictly instead.
     hasSessionCookie(request.cookies.getAll().map((c) => c.name))
   ) {
-    const decision = validateCsrf(request.cookies.get(CSRF_COOKIE_NAME)?.value, request.headers.get(CSRF_HEADER_NAME));
+    const decision = await validateCsrf(request.cookies.get(CSRF_COOKIE_NAME)?.value, request.headers.get(CSRF_HEADER_NAME));
     if (!decision.ok) {
       return applySecurityHeaders(
         NextResponse.json(

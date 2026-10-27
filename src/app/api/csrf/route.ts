@@ -12,7 +12,7 @@ import { CSRF_COOKIE_NAME, csrfCookieAttributes, issueCsrfToken } from "@/lib/se
  * HTML or logged.
  */
 export async function GET(request: NextRequest) {
-  const issued = issueCsrfToken();
+  const issued = await issueCsrfToken();
   if (!issued) {
     // Fail closed: without a usable server secret we cannot bind a cookie value,
     // and issuing an unsigned token would let any cookie-writer forge one.

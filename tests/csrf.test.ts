@@ -32,6 +32,13 @@ const SESSION_COOKIE = "next-auth.session-token";
 
 let middleware: typeof import("@/middleware").middleware;
 
+// Set at module scope as well as in beforeAll: `src/lib/security/csrf.ts` reads
+// the secret on each call, but the isolated-database helper and the middleware
+// import both happen during module evaluation.
+process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || TEST_JWT_SECRET;
+process.env.JWT_SECRET = process.env.JWT_SECRET || TEST_JWT_SECRET;
+process.env.APP_ENCRYPTION_KEY = process.env.APP_ENCRYPTION_KEY || "a".repeat(64);
+
 beforeAll(async () => {
   process.env.NEXTAUTH_SECRET = TEST_JWT_SECRET;
   process.env.JWT_SECRET = TEST_JWT_SECRET;
@@ -77,7 +84,7 @@ function makeRequest(url: string, opts: ReqOpts = {}): NextRequest {
 
 /** A valid session cookie plus a matching CSRF cookie/header pair. */
 async function authedWithToken(url: string, init: Omit<ReqOpts, "session" | "csrfCookie" | "csrfHeader"> = {}) {
-  const issued = issueCsrfToken();
+  const issued = await issueCsrfToken();
   expect(issued).not.toBeNull();
   return makeRequest(url, {
     ...init,
@@ -95,20 +102,22 @@ async function authedNoToken(url: string, init: Omit<ReqOpts, "session"> = {}) {
 // ─── The primitive itself ────────────────────────────────────────────────────
 
 describe("CSRF token issuing and validation", () => {
-  it("issues a random token bound to an HMAC-signed cookie value", () => {
-    const a = issueCsrfToken();
-    const b = issueCsrfToken();
+  it("issues a random token bound to an HMAC-signed cookie value", async () => {
+    const a = await issueCsrfToken();
+    const b = await issueCsrfToken();
     expect(a).not.toBeNull();
     expect(b).not.toBeNull();
     expect(a!.token).toMatch(/^[a-f0-9]{64}$/);
     expect(a!.cookieValue.startsWith(`${a!.token}.`)).toBe(true);
     expect(a!.cookieValue.split(".")[1]).toMatch(/^[a-f0-9]{64}$/);
     expect(a!.token).not.toBe(b!.token); // never reused
-    expect(validateCsrf(a!.cookieValue, a!.token).ok).toBe(true);
+    expect((await validateCsrf(a!.cookieValue, a!.token)).ok).toBe(true);
   });
 
-  it("rejects every malformed or forged combination with a specific reason", () => {
-    const good = issueCsrfToken()!;
+  it("rejects every malformed or forged combination with a specific reason", async () => {
+    const good = (await issueCsrfToken())!;
+    const otherSignature = (await issueCsrfToken())!.cookieValue.split(".")[1]!;
+    const otherToken = (await issueCsrfToken())!.token;
     const cases: Array<[string | null | undefined, string | null | undefined, string]> = [
       [null, good.token, "missing-cookie"],
       [undefined, good.token, "missing-cookie"],
@@ -118,25 +127,25 @@ describe("CSRF token issuing and validation", () => {
       ["zzz.zzz", good.token, "malformed-cookie"],
       [`${"0".repeat(64)}.${"0".repeat(64)}`, "0".repeat(64), "bad-signature"],
       // A real token paired with somebody else's signature.
-      [`${good.token}.${issueCsrfToken()!.cookieValue.split(".")[1]}`, good.token, "bad-signature"],
+      [`${good.token}.${otherSignature}`, good.token, "bad-signature"],
       // A correctly signed cookie, but the header carries a different token.
-      [good.cookieValue, issueCsrfToken()!.token, "mismatch"],
+      [good.cookieValue, otherToken, "mismatch"],
     ];
     for (const [cookie, header, reason] of cases) {
-      const decision = validateCsrf(cookie, header);
+      const decision = await validateCsrf(cookie, header);
       expect(decision.ok, `cookie=${String(cookie)?.slice(0, 12)}… header=${String(header)?.slice(0, 12)}…`).toBe(false);
       expect(decision.reason).toBe(reason);
     }
   });
 
-  it("fails closed when no usable server secret is configured", () => {
+  it("fails closed when no usable server secret is configured", async () => {
     const saved = { ...process.env };
     try {
       delete process.env.CSRF_SECRET;
       delete process.env.APP_ENCRYPTION_KEY;
       process.env.NEXTAUTH_SECRET = "short";
-      expect(issueCsrfToken()).toBeNull();
-      expect(validateCsrf(`${"a".repeat(64)}.${"b".repeat(64)}`, "a".repeat(64)).ok).toBe(false);
+      expect(await issueCsrfToken()).toBeNull();
+      expect((await validateCsrf(`${"a".repeat(64)}.${"b".repeat(64)}`, "a".repeat(64))).ok).toBe(false);
     } finally {
       process.env = saved;
     }
@@ -181,7 +190,7 @@ describe("CSRF enforcement on authenticated API mutations", () => {
   });
 
   it("rejects an authenticated mutation with the cookie but no header (a cross-site form cannot set headers)", async () => {
-    const issued = issueCsrfToken()!;
+    const issued = (await issueCsrfToken())!;
     const res = await middleware(
       makeRequest("http://localhost:3000/api/websites", {
         session: await sessionValue(),
@@ -193,7 +202,7 @@ describe("CSRF enforcement on authenticated API mutations", () => {
   });
 
   it("rejects an authenticated mutation with the header but no cookie", async () => {
-    const issued = issueCsrfToken()!;
+    const issued = (await issueCsrfToken())!;
     const res = await middleware(
       makeRequest("http://localhost:3000/api/websites", {
         session: await sessionValue(),
@@ -206,7 +215,7 @@ describe("CSRF enforcement on authenticated API mutations", () => {
   });
 
   it("rejects a token whose cookie signature was forged, even though header and cookie agree", async () => {
-    const issued = issueCsrfToken()!;
+    const issued = (await issueCsrfToken())!;
     const forged = `${issued.token}.${"f".repeat(64)}`;
     const res = await middleware(
       makeRequest("http://localhost:3000/api/websites", {
@@ -220,11 +229,11 @@ describe("CSRF enforcement on authenticated API mutations", () => {
   });
 
   it("rejects a replayed token paired with a different cookie value", async () => {
-    const stolen = issueCsrfToken()!;
+    const stolen = (await issueCsrfToken())!;
     const res = await middleware(
       makeRequest("http://localhost:3000/api/websites", {
         session: await sessionValue(),
-        csrfCookie: issueCsrfToken()!.cookieValue,
+        csrfCookie: (await issueCsrfToken())!.cookieValue,
         csrfHeader: stolen.token,
       }),
     );
@@ -348,7 +357,7 @@ describe("GET /api/csrf", () => {
     const cookieValue = setCookie!.split(";")[0].slice(`${CSRF_COOKIE_NAME}=`.length);
     expect(cookieValue.split(".")).toHaveLength(2);
     expect(body).not.toContain(cookieValue.split(".")[0]); // the token itself is not rendered
-    expect(validateCsrf(decodeURIComponent(cookieValue), cookieValue.split(".")[0]).ok).toBe(true);
+    expect((await validateCsrf(decodeURIComponent(cookieValue), cookieValue.split(".")[0])).ok).toBe(true);
   });
 
   it("fails closed with 503 when no server secret is configured", async () => {
