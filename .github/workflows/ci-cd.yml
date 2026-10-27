@@ -81,6 +81,19 @@ jobs:
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
+      - name: Read-only production preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          APP_DIR="$HOME/projects/Hosting-Portal"
+          test -d "$APP_DIR/.git" || { echo "::error::Canonical production checkout is missing"; exit 1; }
+          test -f "$APP_DIR/package.json" || { echo "::error::Canonical root package.json is missing"; exit 1; }
+          test -f "$APP_DIR/package-lock.json" || { echo "::error::package-lock.json is missing; refusing npm ci"; exit 1; }
+          if [[ -n "$(git -C "$APP_DIR" status --porcelain --untracked-files=normal)" ]]; then
+            echo "::error::Production checkout has local changes. Refusing to checkout or pull and risk overwriting them."
+            git -C "$APP_DIR" status --short --untracked-files=normal
+            exit 1
+          fi
       - name: Activate canonical root release, restart, and verify
         env:
           DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
