@@ -100,6 +100,7 @@ function fail(message, details) {
 const MIGRATIONS = [
   { name: "20261026130000_github_autodeploy", kind: "ADDITIVE" },
   { name: "20261027090000_unified_orchestrator_agents", kind: "ADDITIVE" },
+  { name: "20261027120000_agent_request_nonces", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",
@@ -398,6 +399,7 @@ const REQUIRED_SCHEMA = {
   agent_enrollment_tokens: ["id", "tokenHash", "expiresAt", "usedAt"],
   agent_tasks: ["id", "agentId", "command", "args", "status", "timeoutMs", "requiresApproval"],
   agent_metrics: ["id", "agentId", "cpuPercent", "memoryUsedMb", "recordedAt"],
+  agent_nonces: ["id", "agentId", "nonce", "expiresAt"],
   replication_status: ["id", "host", "engine", "role", "binlogEnabled", "gtidMode", "lagSeconds"],
 };
 

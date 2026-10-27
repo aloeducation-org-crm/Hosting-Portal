@@ -11,6 +11,20 @@ const schema = z.object({
   hostname: z.string().max(200).optional(),
 });
 
+/**
+ * Rate-limit key source.
+ *
+ * Deliberately NOT the leftmost `x-forwarded-for` value: that header is
+ * client-controlled, so a caller could rotate it and get a fresh bucket on every
+ * request. `src/middleware.ts` documents the same rule — nginx/Caddy overwrite
+ * `x-real-ip` from the actual peer, so it is the only forwarding header trusted
+ * for a limiting decision here.
+ */
+function rateLimitIp(request: NextRequest): string {
+  return request.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
+/** Diagnostic source address, recorded on the enrollment and the agent row. */
 function clientIp(request: NextRequest): string | undefined {
   const forwarded = request.headers.get("x-forwarded-for");
   return (forwarded?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || undefined);
@@ -23,8 +37,8 @@ function clientIp(request: NextRequest): string | undefined {
  * atomically inside `enrollAgent`.
  */
 export async function POST(request: NextRequest) {
-  const ip = clientIp(request) ?? "unknown";
-  const limit = checkRateLimit(`agent-enroll:${ip}`, { maxRequests: 10, windowMs: 10 * 60_000 });
+  const ip = clientIp(request);
+  const limit = checkRateLimit(`agent-enroll:${rateLimitIp(request)}`, { maxRequests: 10, windowMs: 10 * 60_000 });
   if (!limit.allowed) {
     return NextResponse.json(apiError("Too many enrollment attempts", "RATE_LIMITED", undefined, 429), { status: 429 });
   }
