@@ -22,6 +22,38 @@ checks, 0 failed), `docs/GIT-AUTODEPLOY.md`.
 | Bluehost-style marketing AI (`marketing.alolabs.net`) | **BLOCKED** | Existing CRM/email-campaign models and APIs | Separate `marketing.alolabs.net` app not present in this checkout; no campaign publishing integration |
 | GCP-inspired scaling | **PARTIAL** | Multiple projects each with its own port, release root and immutable releases (two projects verified live simultaneously); queue serializes per project | No container orchestration, no autoscaling, no hardware-capacity planner; single-host process-local lock only |
 
+## Update 2026-10-27 — unified platform layer (orchestrator, agents, topology)
+
+Branch `arena/b2ec9268-hosting-portal`. Full plan and stage sequence:
+`docs/HYBRID-INFRASTRUCTURE-PLAN.md`.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Durable job orchestrator (persistent rows, leases, idempotency, backoff, dead-letter, approval gates, audit) | **PASS (code + tests, not deployed)** | `tests/orchestrator.test.ts` — 32 tests |
+| 10 specialized workers (repo discovery → backup/restore) | **PASS (code + tests)** | worker-catalogue cases in `tests/orchestrator.test.ts`; `BUILD_TEST` drives a real deployment end to end |
+| Secure server agent (enrollment tokens, HMAC + replay window, allowlist, redaction, SSRF guard) | **PASS (code + tests, no host enrolled)** | `tests/server-agent.test.ts` — 37 tests |
+| Human approval gate for agent tasks (PRIVILEGED/DESTRUCTIVE unclaimable until approved) | **PASS (code + tests)** | `approveAgentTask` / `rejectAgentTask`, `POST /api/agents/tasks/{id}/approve` |
+| Database placement, replication and capacity audit | **PASS (logic + tests, hosts not measured)** | `tests/db-audit.test.ts` — 40 tests; `scripts/audit-database.mjs` |
+| `/infrastructure` topology dashboard (live vs stale vs *not measured*) | **PASS (code + typecheck, no live agents)** | `src/app/api/infrastructure/topology/route.ts`, `src/components/infrastructure/UnifiedInfrastructure.tsx` |
+| Hybrid infrastructure on Office A / Office B (replica, CI, staging, offsite backup) | **NOT STARTED** | requires Stage 0–3 of the plan on real hosts |
+| Load test at 500 concurrent users, failover drill, offsite restore drill | **NOT TESTED** | no hardware purchase authorised until these exist |
+
+Whole-suite result after this work: `npx tsc --noEmit` clean, `npx vitest run`
+→ **22 files, 278 tests passed, 0 failed** (169 pre-existing tests unchanged).
+
+Two schema migrations were added and verified against a copy of `db/custom.db`:
+`20261027090000_unified_orchestrator_agents` (additive, 58 statements) and
+`20261027093000_operation_jobs_platform_scope` (table rebuild making
+`operation_jobs.websiteId` nullable, then rebuilding `audit_logs` to restore its
+foreign-key text). `scripts/apply-deploy-schema.mjs` is idempotent and skips a
+rebuild migration once its post-condition holds. **Neither migration has been
+applied to any production database.**
+
+Test hygiene fix: five pre-existing test files imported `@/lib/db` statically and
+were writing into the tracked development database. They now import
+`tests/helpers/isolated-db.ts` first, which points `DATABASE_URL` at a throwaway
+copy, so `db/custom.db` is byte-identical after a full run.
+
 ## Domain / service inventory (verification limits)
 
 `hosting.alolabs.net`, `panel.alolabs.net`, `agents.alolabs.net` and

@@ -1,4 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+/**
+ * Must be the first import in this file: it points DATABASE_URL at a throwaway
+ * copy of db/custom.db before `@/lib/db` is evaluated, so these tests cannot
+ * write into the tracked development database. See tests/helpers/isolated-db.ts.
+ */
+import { teardownIsolatedDb } from "./helpers/isolated-db";
+import { afterEach, describe, expect, it, vi, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { encode } from "next-auth/jwt";
 import {
@@ -411,4 +417,9 @@ describe("Phase 2: Middleware Security Headers & Public Form Rate Limiting (SEC-
     }
     expect(finalStatus).toBe(429);
   });
+});
+
+/** Delete this file's scratch database copy. */
+afterAll(async () => {
+  await teardownIsolatedDb();
 });

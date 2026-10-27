@@ -1,3 +1,9 @@
+/**
+ * Must be the first import in this file: it points DATABASE_URL at a throwaway
+ * copy of db/custom.db before `@/lib/db` is evaluated, so these tests cannot
+ * write into the tracked development database. See tests/helpers/isolated-db.ts.
+ */
+import { teardownIsolatedDb } from "./helpers/isolated-db";
 import crypto from "crypto";
 import { describe, expect, it, afterAll } from "vitest";
 import { NextRequest } from "next/server";
@@ -451,4 +457,9 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     expect(okRun.status).toBe("succeeded");
     expect(okRun.steps).toHaveLength(2);
   });
+});
+
+/** Delete this file's scratch database copy. */
+afterAll(async () => {
+  await teardownIsolatedDb();
 });

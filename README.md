@@ -149,6 +149,47 @@ Setup, GitHub App/OAuth credentials, API map, security model and honest
 limitations: **[docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md)**. Roadmap
 status for all ten platform capabilities: [docs/ROADMAP-STATUS.md](docs/ROADMAP-STATUS.md).
 
+## Unified orchestration layer, server agents & hybrid infrastructure
+
+Built on branch `arena/b2ec9268-hosting-portal`. **Implemented and unit-tested
+here; not yet deployed to any host** — no agent is enrolled, no replica exists,
+no failover or load test has been run. The `/infrastructure` dashboard renders
+that distinction instead of hiding it: every host carries a `dataState` of
+`live`, `stale`, `unavailable` (**"not measured"**, never a fabricated zero) or
+`revoked`.
+
+- **Durable job orchestrator** (`src/lib/orchestrator/`): work is a database row,
+  not a promise. Idempotency keys, leases, per-project serialization, retries with
+  exponential backoff, dead-lettering that only a named human can requeue,
+  approval gates for PRIVILEGED/DESTRUCTIVE work, and an audit trail on every
+  transition. Ten specialized workers cover repo discovery, framework detection,
+  build/test, security analysis, release, infrastructure, database ops,
+  domain/TLS, monitoring/recovery and backup/restore. A worker must return
+  `ok` (verified), `unverified`, or `fail` — there is no way to report success
+  that was not observed.
+- **Secure server agent** (`agent/alo-agent.mjs` + `src/lib/agents/`): single-use
+  enrollment tokens (sha256 at rest, 15-minute TTL), HMAC-SHA256 request signing
+  with a ±5-minute replay window and nonce, a nine-command argv allowlist that the
+  agent **re-validates with its own compiled-in copy**, read-only capabilities by
+  default, human approval before any privileged task is claimable, egress
+  redaction of tokens/keys/passwords, and an SSRF guard that only permits
+  loopback and RFC1918 probes. No root shell, no exposed Docker socket, no SSH or
+  database port is reachable from the AI layer.
+- **Database & capacity audit** (`src/lib/infra/db-audit.ts`,
+  `scripts/audit-database.mjs`): turns *observed* facts into verdicts — engine
+  family, `log_bin`/GTID/`server_id`, replica lag, failover readiness, capacity
+  headroom and the placement plan for Hostinger Cloud / Office A / Office B. It
+  reports "not observed" rather than guessing, and it never prints a credential.
+
+```bash
+node scripts/audit-database.mjs --json           # read-only audit of this host
+npx tsx scripts/orchestrator-worker.ts           # claim & execute queued jobs
+npx vitest run tests/orchestrator.test.ts tests/server-agent.test.ts tests/db-audit.test.ts
+```
+
+Plan, stage sequence, runbooks and the evidence required before any hardware
+purchase: **[docs/HYBRID-INFRASTRUCTURE-PLAN.md](docs/HYBRID-INFRASTRUCTURE-PLAN.md)**.
+
 ## Deploying
 
 Canonical production path is systemd + nginx + Cloudflare Tunnel, with templates
@@ -193,6 +234,8 @@ Full procedure, request path and troubleshooting: `DEPLOY.md` and
 | `scripts/healthcheck.sh` | Manual HTTP liveness probe |
 | `scripts/deploy-production.sh` | Atomic production release activation, health verification and rollback |
 | `scripts/backup.sh` / `scripts/restore.sh` / `scripts/rollback.sh` | Data and release rollback |
+| `scripts/orchestrator-worker.ts` | Claims and executes durable orchestrator jobs (leases, retries, approval gates) |
+| `scripts/audit-database.mjs` | Read-only database/replication/capacity audit of one host; never prints a credential |
 
 ## CI
 
@@ -225,3 +268,4 @@ MIT.
 - [`docs/ZERO-TERMINAL-AI-DEPLOY.md`](docs/ZERO-TERMINAL-AI-DEPLOY.md) — Zero-Terminal Stack Preset Blueprinting & Managed VPS Panel Parity
 - [`docs/SELF-HOSTED-AI-AGENTS.md`](docs/SELF-HOSTED-AI-AGENTS.md) — Revalidated 26-Platform Self-Hosted AI Agent Catalog, License Triage & VRAM Sizing
 - [`docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md`](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md) — Ecosystem & GLM-5 (`zai-org/GLM-5`) Integration Analysis
+- [`docs/HYBRID-INFRASTRUCTURE-PLAN.md`](docs/HYBRID-INFRASTRUCTURE-PLAN.md) — Hostinger Cloud + Office A + Office B: measured facts, stage sequence, failover/restore drills, hardware triggers

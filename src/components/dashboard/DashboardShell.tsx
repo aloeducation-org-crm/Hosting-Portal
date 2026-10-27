@@ -47,6 +47,7 @@ import {
   Megaphone,
   Cpu,
   Wand2,
+  Network,
 } from "lucide-react";
 
 const clientNavItems = [
@@ -72,6 +73,7 @@ const clientNavItems = [
 
 const adminNavItems = [
   { label: "Manage Users", href: "/users", altPrefix: "/dashboard/users", icon: Users },
+  { label: "Unified Infrastructure", href: "/infrastructure", altPrefix: "/dashboard/infrastructure", icon: Network },
   { label: "Servers & Nodes", href: "/servers", altPrefix: "/dashboard/servers", icon: Server },
   { label: "Hosting Plans", href: "/plans", altPrefix: "/dashboard/plans", icon: Layers },
   { label: "Audit Logs", href: "/audit", altPrefix: "/dashboard/audit", icon: FileText },

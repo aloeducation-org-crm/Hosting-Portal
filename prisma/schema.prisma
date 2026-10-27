@@ -63,12 +63,55 @@ enum OperationJobStatus {
   PENDING
   QUEUED
   VALIDATING
+  WAITING_APPROVAL
   RUNNING
   VERIFYING
+  RETRYING
   SUCCESS
   FAILED
+  CANCELLED
   ROLLING_BACK
   ROLLED_BACK
+  DEAD_LETTER
+}
+
+/// Which specialized worker may execute a job, and how much trust it needs.
+enum WorkerKind {
+  REPO_DISCOVERY
+  FRAMEWORK_DETECTION
+  BUILD_TEST
+  SECURITY_ANALYSIS
+  RELEASE
+  INFRASTRUCTURE
+  DATABASE_OPS
+  DOMAIN_TLS
+  MONITORING_RECOVERY
+  BACKUP_RESTORE
+}
+
+enum RiskLevel {
+  READ_ONLY
+  REVERSIBLE
+  PRIVILEGED
+  DESTRUCTIVE
+}
+
+enum AgentTaskStatus {
+  PENDING
+  ASSIGNED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  REFUSED
+  TIMED_OUT
+  CANCELLED
+}
+
+enum ReplicationRole {
+  PRIMARY
+  REPLICA
+  STANDBY
+  UNKNOWN
 }
 
 enum BackupStatus {
@@ -745,7 +788,8 @@ model HealthCheck {
 
 model OperationJob {
   id           String             @id @default(uuid())
-  websiteId    String
+  /// Null for platform-wide jobs (backup drills, monitoring sweeps, audits).
+  websiteId    String?
   type         String
   status       OperationJobStatus @default(PENDING)
   priority     Int                @default(100)
@@ -768,7 +812,36 @@ model OperationJob {
   durationMs   Int?
   createdAt    DateTime           @default(now())
 
-  website    Website    @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  // ── Durable orchestrator (additive; nullable / safely defaulted) ────────────
+  // Exactly-once enqueue: two webhooks or two clicks with the same key collapse
+  // into one job instead of two deployments.
+  idempotencyKey String?   @unique
+  // Correlation id propagated to workers, agent tasks, logs and audit records.
+  correlationId  String?
+  workerKind     WorkerKind?
+  riskLevel      RiskLevel @default(READ_ONLY)
+  // Retry / backoff state. `attempts` counts real executions, not enqueues.
+  attempts        Int      @default(0)
+  maxAttempts     Int      @default(1)
+  retryPolicy     String?  // JSON { baseMs, factor, maxDelayMs, jitter }
+  lastError       String?
+  availableAt     DateTime @default(now()) // not claimable before this instant
+  leaseExpiresAt  DateTime?                // worker liveness; expiry => requeue
+  leasedBy        String?                  // worker identity holding the lease
+  lockKey         String?                  // concurrency domain (usually project)
+  // Approval gate for PRIVILEGED / DESTRUCTIVE work.
+  requiresApproval Boolean   @default(false)
+  approvedBy       String?
+  approvedAt       DateTime?
+  approvalNote     String?
+  // Dead-letter handling for jobs that exhausted their retries.
+  deadLetteredAt   DateTime?
+  deadLetterReason String?
+  cancelledAt      DateTime?
+  cancelledBy      String?
+  updatedAt        DateTime  @updatedAt
+
+  website    Website?   @relation(fields: [websiteId], references: [id], onDelete: Cascade)
   actor      User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
   auditLogs  AuditLog[]
 
@@ -777,7 +850,146 @@ model OperationJob {
   @@index([type])
   @@index([requestId])
   @@index([createdAt])
+  @@index([status, availableAt])
+  @@index([lockKey])
+  @@index([correlationId])
+  @@index([leaseExpiresAt])
   @@map("operation_jobs")
+}
+
+// ─── Secure server agent ─────────────────────────────────────────────────────
+// One row per managed Linux host (Hostinger Cloud, Office A, Office B…).
+// The agent authenticates with a rotated key, never with a shared password, and
+// only ever receives allowlisted tasks.
+
+model ServerAgent {
+  id             String    @id @default(uuid())
+  serverId       String?
+  name           String
+  // Stable public identity, safe to show in the dashboard.
+  agentKey       String    @unique
+  // HMAC key used to sign heartbeats and task payloads. Stored encrypted.
+  secretEnc      String
+  status         String    @default("pending") // pending | active | revoked
+  version        String?
+  capabilities   String    @default("[]") // JSON array of allowlisted commands
+  scopes         String    @default("[]") // JSON array of permission scopes
+  lastHeartbeat  DateTime?
+  lastSeenIp     String?
+  enrolledAt     DateTime?
+  revokedAt      DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  server  Server?      @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  tasks   AgentTask[]
+  metrics AgentMetric[]
+
+  @@index([status])
+  @@index([serverId])
+  @@index([lastHeartbeat])
+  @@map("server_agents")
+}
+
+/// Short-lived, single-use enrollment token exchanged for an agent secret.
+model AgentEnrollmentToken {
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique // sha256 of the token; plaintext shown once
+  prefix     String
+  agentName  String
+  serverId   String?
+  scopes     String    @default("[]")
+  capabilities String  @default("[]")
+  expiresAt  DateTime
+  usedAt     DateTime?
+  usedByIp   String?
+  createdById String?
+  createdAt  DateTime  @default(now())
+
+  @@index([expiresAt])
+  @@map("agent_enrollment_tokens")
+}
+
+model AgentTask {
+  id            String          @id @default(uuid())
+  agentId       String
+  jobId         String?         // orchestrator job that produced this task
+  correlationId String?
+  command       String          // must be in the agent's allowlist
+  args          String          @default("{}") // JSON, validated against a schema
+  status        AgentTaskStatus @default(PENDING)
+  // Copy of the allowlist entry's limits, frozen at dispatch time.
+  timeoutMs     Int             @default(30000)
+  requiresApproval Boolean      @default(false)
+  approvedBy    String?
+  dispatchedAt  DateTime?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  exitCode      Int?
+  result        String?         // JSON structured result
+  logs          String?         // sanitized (redacted) stdout/stderr
+  error         String?
+  refuseReason  String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  agent ServerAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, status])
+  @@index([status, createdAt])
+  @@index([jobId])
+  @@map("agent_tasks")
+}
+
+/// Real metrics reported by the agent. Absence of rows means "unavailable",
+/// never a fabricated zero.
+model AgentMetric {
+  id            String   @id @default(uuid())
+  agentId       String
+  cpuPercent    Float?
+  memoryUsedMb  Float?
+  memoryTotalMb Float?
+  diskUsedGb    Float?
+  diskTotalGb   Float?
+  loadAvg1m     Float?
+  uptimeSeconds Float?
+  netInKbps     Float?
+  netOutKbps    Float?
+  services      String?  // JSON [{ name, state }]
+  recordedAt    DateTime @default(now())
+
+  agent ServerAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, recordedAt])
+  @@map("agent_metrics")
+}
+
+/// MySQL/MariaDB (or PostgreSQL) replication state as *observed*, not assumed.
+model ReplicationStatus {
+  id             String           @id @default(uuid())
+  serverId       String?
+  host           String
+  engine         String           // mysql | mariadb | postgresql | sqlite
+  version        String?
+  role           ReplicationRole  @default(UNKNOWN)
+  binlogEnabled  Boolean?
+  gtidMode       String?
+  binlogPosition String?
+  replicaOf      String?
+  lagSeconds     Int?
+  lastCheckedAt  DateTime?
+  healthy        Boolean?
+  detail         String?          // JSON, credentials removed
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  server Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+
+  @@unique([host])
+  @@index([engine])
+  @@map("replication_status")
 }
 
 // ─── Notification ─────────────────────────────────────────────────────────────
@@ -847,6 +1059,8 @@ model Server {
   ports   ServerPort[]
   metrics ServerMetric[]
   sites   Site[]
+  agents  ServerAgent[]
+  replication ReplicationStatus[]
 
   @@map("servers")
 }
