@@ -41,13 +41,14 @@ export default function AIToolsSection() {
                   ))}
                 </div>
               </div>
-              {/* Play button */}
-              <button
+              {/* Interactive AI Studio Launch */}
+              <a
+                href="/ai/auto-deploy"
                 className="relative z-10 flex size-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-colors hover:bg-white/30 sm:size-20"
-                aria-label="Play video"
+                aria-label="Launch AI Auto-Deploy Studio"
               >
                 <Play className="size-6 fill-white text-white sm:size-8" />
-              </button>
+              </a>
             </div>
           </div>
           {/* Decorative circles */}

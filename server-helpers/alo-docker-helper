@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# ALO Labs - Docker Helper
-# Manages Docker containers and images
+# ALO Labs - Hardened Docker Helper
+# Manages Docker containers and images with strict isolation defaults:
+#   - No --privileged, no --network=host, no /var/run/docker.sock mounts
+#   - Loopback-only port bindings (127.0.0.1:<hostPort>:<containerPort>)
+#   - --security-opt=no-new-privileges:true --cap-drop=ALL
+#   - Bounded CPU, RAM, and PIDs (--cpus, --memory, --pids-limit)
+#   - Ephemeral 0600 --env-file so secrets do not linger in docker CLI args
 # Usage: alo-docker-helper <command> [args...]
 
 set -euo pipefail
@@ -9,21 +14,55 @@ ts() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
-# Validate container/image name: alphanumeric, dashes, underscores, dots
+json_err() {
+  local msg="$1"
+  printf '{"success":false,"error":%s}\n' "$(printf '%s' "$msg" | jq -Rs .)"
+  exit 1
+}
+
 validate_name() {
   local n="$1"
-  if [[ ! "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
-    echo '{"success":false,"error":"Invalid name. Use alphanumeric, dashes, underscores, dots"}'
-    exit 1
+  if [[ ! "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{1,62}$ ]]; then
+    json_err "Invalid container name. Use 2-63 alphanumeric, dashes, underscores, dots."
   fi
 }
 
-# Validate lines parameter (positive integer)
+validate_image() {
+  local img="$1"
+  if [[ "$img" == -* ]] || [[ ! "$img" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{1,254}$ ]]; then
+    json_err "Invalid image reference."
+  fi
+}
+
+validate_port_mapping() {
+  local pm="$1"
+  [[ "$pm" == "-" || -z "$pm" ]] && return 0
+  if [[ ! "$pm" =~ ^127\.0\.0\.1:([0-9]{4,5}):([0-9]{1,5})$ ]]; then
+    json_err "Port mapping must bind to loopback: 127.0.0.1:<hostPort(>=1024)>:<containerPort>."
+  fi
+  local hp="${BASH_REMATCH[1]}"
+  local cp="${BASH_REMATCH[2]}"
+  if (( hp < 1024 || hp > 65535 || cp < 1 || cp > 65535 )); then
+    json_err "Port out of allowed range."
+  fi
+}
+
+validate_volume_spec() {
+  local vol="$1"
+  [[ "$vol" == "-" || -z "$vol" ]] && return 0
+  # Only allow named Docker volumes (<volume_name>:/container/path), never arbitrary host bind mounts or docker.sock
+  if [[ "$vol" == *"docker.sock"* ]] || [[ "$vol" == /* ]]; then
+    json_err "Host path bind mounts and docker.sock mounts are forbidden; use named Docker volumes."
+  fi
+  if [[ ! "$vol" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{1,62}:/[a-zA-Z0-9._/-]{1,128}$ ]]; then
+    json_err "Invalid named volume specification."
+  fi
+}
+
 validate_lines() {
   local n="$1"
-  if [[ ! "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]]; then
-    echo '{"success":false,"error":"Lines must be a positive integer"}'
-    exit 1
+  if [[ ! "$n" =~ ^[0-9]+$ ]] || [[ "$n" -lt 1 ]] || [[ "$n" -gt 5000 ]]; then
+    json_err "Lines must be a positive integer between 1 and 5000."
   fi
 }
 
@@ -32,29 +71,19 @@ shift
 
 case "$COMMAND" in
   list)
-    # docker ps -a with JSON format, wrap in array
     RAW=$(docker ps -a --format '{{json .}}' 2>/dev/null || echo "")
-
     if [[ -z "$RAW" ]]; then
       echo "{\"success\":true,\"containers\":[],\"count\":0,\"listedAt\":\"$(ts)\"}"
       exit 0
     fi
-
-    # Wrap lines in JSON array
     ITEMS=""
+    COUNT=0
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
       ITEMS="$ITEMS$line"
-    done <<< "$RAW"
-
-    # Count by counting the JSON objects (looking for { that starts a json line)
-    COUNT=0
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
       ((COUNT++)) || true
     done <<< "$RAW"
-
     echo "{\"success\":true,\"containers\":[$ITEMS],\"count\":$COUNT,\"listedAt\":\"$(ts)\"}"
     ;;
 
@@ -62,17 +91,97 @@ case "$COMMAND" in
     NAME="${1:?Usage: create <name> <image>}"
     IMAGE="${2:?Usage: create <name> <image>}"
     validate_name "$NAME"
+    validate_image "$IMAGE"
 
-    # Check if container already exists
     if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
-      echo "{\"success\":false,\"error\":\"Container '$NAME' already exists\"}"
-      exit 1
+      json_err "Container '$NAME' already exists"
     fi
 
-    OUTPUT=$(docker create --name "$NAME" "$IMAGE" 2>&1) || {
-      echo "{\"success\":false,\"error\":\"Failed to create container: $OUTPUT\"}"
-      exit 1
-    }
+    OUTPUT=$(docker create \
+      --security-opt=no-new-privileges:true \
+      --cap-drop=ALL \
+      --pids-limit=256 \
+      --memory=2g \
+      --cpus=2.0 \
+      --name "$NAME" \
+      "$IMAGE" 2>&1) || json_err "Failed to create container"
+
+    echo "{\"success\":true,\"name\":\"$NAME\",\"image\":\"$IMAGE\",\"containerId\":\"$OUTPUT\",\"createdAt\":\"$(ts)\"}"
+    ;;
+
+  run-hardened)
+    # Usage: run-hardened <name> <image> <portMapping|-> [KEY=VALUE ...]
+    # Optional resource overrides via env: ALO_CONTAINER_CPUS, ALO_CONTAINER_MEMORY, ALO_CONTAINER_VOLUME
+    NAME="${1:?Usage: run-hardened <name> <image> <portMapping|-> [KEY=VAL...]}"
+    IMAGE="${2:?Usage: run-hardened <name> <image> <portMapping|-> [KEY=VAL...]}"
+    PORT_MAP="${3:--}"
+    shift 3
+
+    validate_name "$NAME"
+    validate_image "$IMAGE"
+    validate_port_mapping "$PORT_MAP"
+
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$NAME"; then
+      json_err "Container '$NAME' already exists"
+    fi
+
+    ENV_FILE=$(mktemp /tmp/alo-docker-env.XXXXXX)
+    chmod 0600 "$ENV_FILE"
+    trap 'rm -f "$ENV_FILE"' EXIT
+
+    VOLUME_ARG=()
+    CPUS_LIMIT="2.0"
+    MEM_LIMIT="2g"
+
+    for kv in "$@"; do
+      if [[ "$kv" == __ALO_VOLUME=* ]]; then
+        VOL_SPEC="${kv#__ALO_VOLUME=}"
+        validate_volume_spec "$VOL_SPEC"
+        [[ "$VOL_SPEC" != "-" && -n "$VOL_SPEC" ]] && VOLUME_ARG+=(-v "$VOL_SPEC")
+        continue
+      fi
+      if [[ "$kv" == __ALO_CPUS=* ]]; then
+        RAW_CPU="${kv#__ALO_CPUS=}"
+        [[ "$RAW_CPU" =~ ^[0-9]+(\.[0-9]+)?$ ]] && CPUS_LIMIT="$RAW_CPU"
+        continue
+      fi
+      if [[ "$kv" == __ALO_MEMORY=* ]]; then
+        RAW_MEM="${kv#__ALO_MEMORY=}"
+        [[ "$RAW_MEM" =~ ^[0-9]+[mMgG]$ ]] && MEM_LIMIT="$RAW_MEM"
+        continue
+      fi
+      KEY="${kv%%=*}"
+      if [[ ! "$KEY" =~ ^[A-Za-z_][A-Za-z0-9_]{0,127}$ ]]; then
+        json_err "Invalid environment variable key: $KEY"
+      fi
+      printf '%s\n' "$kv" >> "$ENV_FILE"
+    done
+
+    PORT_ARG=()
+    if [[ "$PORT_MAP" != "-" && -n "$PORT_MAP" ]]; then
+      PORT_ARG=(-p "$PORT_MAP")
+    fi
+
+    OUTPUT=$(docker run -d \
+      --restart=unless-stopped \
+      --security-opt=no-new-privileges:true \
+      --cap-drop=ALL \
+      --cap-add=CHOWN \
+      --cap-add=SETUID \
+      --cap-add=SETGID \
+      --cap-add=NET_BIND_SERVICE \
+      --pids-limit=512 \
+      --cpus="$CPUS_LIMIT" \
+      --memory="$MEM_LIMIT" \
+      --add-host=host.docker.internal:host-gateway \
+      --env-file "$ENV_FILE" \
+      "${PORT_ARG[@]}" \
+      "${VOLUME_ARG[@]}" \
+      --name "$NAME" \
+      "$IMAGE" 2>&1) || json_err "Failed to start hardened container"
+
+    rm -f "$ENV_FILE"
+    trap - EXIT
 
     echo "{\"success\":true,\"name\":\"$NAME\",\"image\":\"$IMAGE\",\"containerId\":\"$OUTPUT\",\"createdAt\":\"$(ts)\"}"
     ;;
@@ -80,55 +189,40 @@ case "$COMMAND" in
   start)
     NAME="${1:?Usage: start <name>}"
     validate_name "$NAME"
-
-    if ! docker start "$NAME" 2>&1; then
-      echo "{\"success\":false,\"error\":\"Failed to start container $NAME\"}"
-      exit 1
-    fi
-
+    docker start "$NAME" >/dev/null 2>&1 || json_err "Failed to start container $NAME"
     STATE=$(docker inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo "unknown")
-
     echo "{\"success\":true,\"name\":\"$NAME\",\"status\":\"$STATE\",\"action\":\"start\",\"timestamp\":\"$(ts)\"}"
     ;;
 
   stop)
     NAME="${1:?Usage: stop <name>}"
     validate_name "$NAME"
-
-    if ! docker stop "$NAME" 2>&1; then
-      echo "{\"success\":false,\"error\":\"Failed to stop container $NAME\"}"
-      exit 1
-    fi
-
+    docker stop "$NAME" >/dev/null 2>&1 || json_err "Failed to stop container $NAME"
     STATE=$(docker inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo "unknown")
-
     echo "{\"success\":true,\"name\":\"$NAME\",\"status\":\"$STATE\",\"action\":\"stop\",\"timestamp\":\"$(ts)\"}"
     ;;
 
   restart)
     NAME="${1:?Usage: restart <name>}"
     validate_name "$NAME"
-
-    if ! docker restart "$NAME" 2>&1; then
-      echo "{\"success\":false,\"error\":\"Failed to restart container $NAME\"}"
-      exit 1
-    fi
-
+    docker restart "$NAME" >/dev/null 2>&1 || json_err "Failed to restart container $NAME"
     STATE=$(docker inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || echo "unknown")
-
     echo "{\"success\":true,\"name\":\"$NAME\",\"status\":\"$STATE\",\"action\":\"restart\",\"timestamp\":\"$(ts)\"}"
     ;;
 
   remove)
     NAME="${1:?Usage: remove <name>}"
     validate_name "$NAME"
-
-    if ! docker rm "$NAME" 2>&1; then
-      echo "{\"success\":false,\"error\":\"Failed to remove container $NAME\"}"
-      exit 1
-    fi
-
+    docker rm "$NAME" >/dev/null 2>&1 || json_err "Failed to remove container $NAME"
     echo "{\"success\":true,\"name\":\"$NAME\",\"action\":\"remove\",\"removedAt\":\"$(ts)\"}"
+    ;;
+
+  remove-force)
+    NAME="${1:?Usage: remove-force <name>}"
+    validate_name "$NAME"
+    # Intentionally preserves named volumes (no -v flag) so persistent user data is never destroyed on container removal.
+    docker rm -f "$NAME" >/dev/null 2>&1 || json_err "Failed to remove container $NAME"
+    echo "{\"success\":true,\"name\":\"$NAME\",\"action\":\"remove-force\",\"volumesPreserved\":true,\"removedAt\":\"$(ts)\"}"
     ;;
 
   logs)
@@ -136,82 +230,69 @@ case "$COMMAND" in
     LINES="${2:?Usage: logs <name> <lines>}"
     validate_name "$NAME"
     validate_lines "$LINES"
-
-    RAW_LOGS=$(docker logs --tail "$LINES" "$NAME" 2>&1) || {
-      echo "{\"success\":false,\"error\":\"Failed to retrieve logs for $NAME\"}"
-      exit 1
-    }
-
-    # Escape for JSON
-    ESCAPED_LOGS=$(echo "$RAW_LOGS" | jq -Rs .)
-
+    RAW_LOGS=$(docker logs --tail "$LINES" "$NAME" 2>&1) || json_err "Failed to retrieve logs for $NAME"
+    ESCAPED_LOGS=$(printf '%s' "$RAW_LOGS" | sed -E 's/(sk-[A-Za-z0-9_-]{12,}|Bearer [A-Za-z0-9._-]{16,})/[REDACTED]/g' | jq -Rs .)
     echo "{\"success\":true,\"name\":\"$NAME\",\"lines\":$LINES,\"logs\":$ESCAPED_LOGS,\"retrievedAt\":\"$(ts)\"}"
     ;;
 
   inspect)
     NAME="${1:?Usage: inspect <name>}"
     validate_name "$NAME"
+    # Never dump .Config.Env from inspect — return safe state/network/mount summary only.
+    INSPECT=$(docker inspect --format '{{json .State}}' "$NAME" 2>/dev/null) || json_err "Failed to inspect container $NAME"
+    echo "{\"success\":true,\"name\":\"$NAME\",\"state\":$INSPECT,\"inspectedAt\":\"$(ts)\"}"
+    ;;
 
-    INSPECT=$(docker inspect "$NAME" 2>/dev/null) || {
-      echo "{\"success\":false,\"error\":\"Failed to inspect container $NAME\"}"
-      exit 1
-    }
-
-    echo "{\"success\":true,\"name\":\"$NAME\",\"inspect\":$INSPECT,\"inspectedAt\":\"$(ts)\"}"
+  stats-one)
+    NAME="${1:?Usage: stats-one <name>}"
+    validate_name "$NAME"
+    RAW=$(docker stats --no-stream --format '{{.CPUPerc}}|{{.MemPerc}}' "$NAME" 2>/dev/null || echo "")
+    if [[ -z "$RAW" ]]; then
+      echo "{\"success\":true,\"name\":\"$NAME\",\"cpuPercent\":0,\"memoryPercent\":0}"
+      exit 0
+    fi
+    CPU_P=$(printf '%s' "${RAW%%|*}" | tr -d '%')
+    MEM_P=$(printf '%s' "${RAW##*|}" | tr -d '%')
+    [[ "$CPU_P" =~ ^[0-9]+(\.[0-9]+)?$ ]] || CPU_P=0
+    [[ "$MEM_P" =~ ^[0-9]+(\.[0-9]+)?$ ]] || MEM_P=0
+    echo "{\"success\":true,\"name\":\"$NAME\",\"cpuPercent\":$CPU_P,\"memoryPercent\":$MEM_P,\"capturedAt\":\"$(ts)\"}"
     ;;
 
   images)
     RAW=$(docker images --format '{{json .}}' 2>/dev/null || echo "")
-
     if [[ -z "$RAW" ]]; then
       echo "{\"success\":true,\"images\":[],\"count\":0,\"listedAt\":\"$(ts)\"}"
       exit 0
     fi
-
     ITEMS=""
+    IMG_COUNT=0
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
       ITEMS="$ITEMS$line"
-    done <<< "$RAW"
-
-    # Count images
-    IMG_COUNT=0
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
       ((IMG_COUNT++)) || true
     done <<< "$RAW"
-
     echo "{\"success\":true,\"images\":[$ITEMS],\"count\":$IMG_COUNT,\"listedAt\":\"$(ts)\"}"
     ;;
 
   stats)
-    # docker stats --no-stream outputs a table; parse to JSON
     RAW=$(docker stats --no-stream --format '{{json .}}' 2>/dev/null || echo "")
-
     if [[ -z "$RAW" ]]; then
       echo "{\"success\":true,\"containers\":[],\"count\":0,\"capturedAt\":\"$(ts)\"}"
       exit 0
     fi
-
     ITEMS=""
+    STAT_COUNT=0
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
       ITEMS="$ITEMS$line"
-    done <<< "$RAW"
-
-    STAT_COUNT=0
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
       ((STAT_COUNT++)) || true
     done <<< "$RAW"
-
     echo "{\"success\":true,\"containers\":[$ITEMS],\"count\":$STAT_COUNT,\"capturedAt\":\"$(ts)\"}"
     ;;
 
   *)
-    echo '{"success":false,"error":"Unknown command. Available: list, create, start, stop, restart, remove, logs, inspect, images, stats"}'
-    exit 1
+    json_err "Unknown command. Available: list, create, run-hardened, start, stop, restart, remove, remove-force, logs, inspect, stats-one, images, stats"
     ;;
 esac

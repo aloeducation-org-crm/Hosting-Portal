@@ -82,12 +82,14 @@ try {
     applied.push(label);
   }
 
-  // Post-condition: prove the tables/columns the deployment layer needs exist.
+  // Post-condition: prove the tables/columns the deployment & health layers need exist.
   const required = {
     git_connections: ["id", "accountLogin", "tokenEncrypted"],
     git_projects: ["id", "websiteId", "repository", "config", "port"],
     webhook_deliveries: ["id", "deliveryId", "signatureValid", "result"],
     deployments: ["id", "stage", "verifiedCommitSha", "configSnapshot"],
+    hosting_sites: ["id", "domainName", "sslStatus", "vhostPath", "serverId"],
+    servers: ["id", "hostname", "ipAddress", "cpuUsage", "memoryUsage", "diskUsage"],
   };
   const problems = [];
   for (const [table, cols] of Object.entries(required)) {

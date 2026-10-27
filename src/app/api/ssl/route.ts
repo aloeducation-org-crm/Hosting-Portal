@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission, ROLES } from '@/lib/auth';
+import { requireSession, requirePermission, isAdminRole, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { createAuditLog } from '@/lib/audit';
 import { callHelper } from '@/lib/helpers';
@@ -27,7 +27,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const domainId = searchParams.get('domainId');
 
-    const where = domainId ? { domainId } : {};
+    const where: Record<string, unknown> = {};
+    if (domainId) where.domainId = domainId;
+    if (!isAdminRole(user.role)) {
+      where.domain = { website: { ownerId: user.id } };
+    }
     const certificates = await db.sslCertificate.findMany({
       where,
       include: { domain: true },
@@ -85,6 +89,7 @@ export async function POST(request: NextRequest) {
     if (!domain) {
       throw apiError('Domain not found', 'NOT_FOUND', undefined, 404);
     }
+    assertWebsiteAccess(user, domain.website);
 
     // Check for existing certificate
     const existing = await db.sslCertificate.findUnique({ where: { domainId } });
@@ -179,10 +184,14 @@ export async function PUT(request: NextRequest) {
       throw apiError('domainId and autoRenew are required', 'VALIDATION_ERROR', undefined, 400);
     }
 
-    const certificate = await db.sslCertificate.findUnique({ where: { domainId } });
+    const certificate = await db.sslCertificate.findUnique({
+      where: { domainId },
+      include: { domain: { include: { website: true } } },
+    });
     if (!certificate) {
       throw apiError('Certificate not found for this domain', 'NOT_FOUND', undefined, 404);
     }
+    assertWebsiteAccess(user, certificate.domain.website);
 
     const updated = await db.sslCertificate.update({
       where: { domainId },
@@ -220,12 +229,13 @@ export async function DELETE(request: NextRequest) {
 
     const certificate = await db.sslCertificate.findUnique({
       where: { domainId },
-      include: { domain: true },
+      include: { domain: { include: { website: true } } },
     });
 
     if (!certificate) {
       throw apiError('Certificate not found for this domain', 'NOT_FOUND', undefined, 404);
     }
+    assertWebsiteAccess(user, certificate.domain.website);
 
     // === REAL: Revoke certificate via certbot ===
     const result = await callHelper('alo-ssl-helper', ['revoke', certificate.domain.domain], 120000);

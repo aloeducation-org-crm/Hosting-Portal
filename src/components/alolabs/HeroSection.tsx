@@ -106,9 +106,12 @@ export default function HeroSection() {
                     {domain.available && (
                       <>
                         <span className="text-sm font-bold text-alo-text">{domain.price}/yr</span>
-                        <button className="text-xs font-semibold text-white bg-[#E8501A] px-3 py-1 rounded-full hover:bg-[#C73D12] transition-colors">
-                          Add to cart
-                        </button>
+                        <a
+                          href={`/dashboard/domains?domain=${encodeURIComponent(domain.name)}`}
+                          className="text-xs font-semibold text-white bg-[#E8501A] px-3 py-1 rounded-full hover:bg-[#C73D12] transition-colors"
+                        >
+                          Register Domain
+                        </a>
                       </>
                     )}
                   </div>

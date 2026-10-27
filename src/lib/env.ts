@@ -78,6 +78,42 @@ const envSchema = z.object({
 
 type EnvInput = Record<string, string | undefined>;
 
+const UNSAFE_SECRET_VALUES = new Set([
+  "",
+  "dev-secret-change-in-production",
+  "dev-jwt-secret-change-in-production",
+  "change-me-in-production",
+  "change-me-internal-secret",
+  "alo-internal-secret-change-me",
+  "alo-encryption-key-change-in-production-32b",
+  "generate-with-openssl-rand-hex-32",
+  "replace_with_openssl_rand_hex_32",
+  "replace-with-openssl-rand-hex-32",
+  "replace-with-a-different-openssl-rand-hex-32",
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+]);
+
+export function isUnsafeDefaultSecret(value: string | undefined | null): boolean {
+  if (!value) return true;
+  const normalized = value.trim().toLowerCase();
+  if (UNSAFE_SECRET_VALUES.has(normalized)) return true;
+  return normalized.startsWith("replace-with-") || normalized.startsWith("replace_with_");
+}
+
+export function findUnsafeProductionSecrets(data: {
+  NEXTAUTH_SECRET: string;
+  JWT_SECRET: string;
+  APP_ENCRYPTION_KEY: string;
+  INTERNAL_SECRET: string;
+}): string[] {
+  const unsafe: string[] = [];
+  if (isUnsafeDefaultSecret(data.NEXTAUTH_SECRET)) unsafe.push("NEXTAUTH_SECRET");
+  if (isUnsafeDefaultSecret(data.JWT_SECRET)) unsafe.push("JWT_SECRET");
+  if (isUnsafeDefaultSecret(data.APP_ENCRYPTION_KEY)) unsafe.push("APP_ENCRYPTION_KEY");
+  if (isUnsafeDefaultSecret(data.INTERNAL_SECRET)) unsafe.push("INTERNAL_SECRET");
+  return unsafe;
+}
+
 function loadEnv(input?: EnvInput) {
   const raw: EnvInput = input ?? process.env;
   const result = envSchema.safeParse(raw);
@@ -91,22 +127,20 @@ function loadEnv(input?: EnvInput) {
     throw new Error("Invalid environment configuration");
   }
 
-  // Runtime security: block server startup (not build) if production uses default secrets
+  // Runtime security: block server startup (not build) if production uses default or template placeholder secrets
   const isBuildWorker =
     !!process.env.NEXT_WORKER_ID ||
     !!process.env.BUILD_ID ||
     process.env.NEXT_PHASE === "phase-production-build" ||
     process.env.npm_lifecycle_event === "build";
   const data = result.data;
-  if (data.NODE_ENV === 'production' && !isBuildWorker) {
-    if (data.NEXTAUTH_SECRET === 'dev-secret-change-in-production') {
-      console.error('[SECURITY] FATAL: NEXTAUTH_SECRET is using the default value. Refusing to start in production.');
-      console.error('[SECURITY] Set a strong random secret (64+ chars) in your .env file.');
-      process.exit(1);
-    }
-    if (data.JWT_SECRET === 'dev-jwt-secret-change-in-production') {
-      console.error('[SECURITY] FATAL: JWT_SECRET is using the default value. Refusing to start in production.');
-      console.error('[SECURITY] Set a strong random secret (64+ chars) in your .env file.');
+  if (data.NODE_ENV === "production" && !isBuildWorker) {
+    const unsafeKeys = findUnsafeProductionSecrets(data);
+    if (unsafeKeys.length > 0) {
+      for (const key of unsafeKeys) {
+        console.error(`[SECURITY] FATAL: ${key} is using a default or placeholder value. Refusing to start in production.`);
+      }
+      console.error("[SECURITY] Generate strong random secrets (`openssl rand -hex 32`) in your production .env file.");
       process.exit(1);
     }
   }

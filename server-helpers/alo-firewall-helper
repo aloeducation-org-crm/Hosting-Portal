@@ -7,13 +7,13 @@
 set -euo pipefail
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-log_err() { printf '[alo-firewall-helper] ERROR: %s\n' ""$*"" >&2; }
-log_info() { printf '[alo-firewall-helper] INFO: %s\n' ""$*"" >&2; }
-json_out() { printf '%s\n' ""$*""; }
+log_err() { printf '[alo-firewall-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-firewall-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
 
 die() {
-  local step=""$1""
-  local msg=""$2""
+  local step="$1"
+  local msg="$2"
   json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
   exit 1
 }
@@ -23,41 +23,46 @@ if [[ $# -lt 1 ]]; then
   die "arg-validation" "Usage: alo-firewall-helper <action> [args...]"
 fi
 
-ACTION=""$1""
+ACTION="$1"
 shift
 
 validate_port() {
-  if [[ ! "$1" =~ ^[0-9]+$ ]] || [[ "$1" -lt 1 ]] || [[ "$1" -gt 65535 ]]; then
+  if [[ ! "$1" =~ ^[0-9]{1,5}$ ]]; then
+    die "arg-validation" "Invalid port: $1"
+  fi
+  local port_value=$((10#$1))
+  if (( port_value < 1 || port_value > 65535 )); then
     die "arg-validation" "Invalid port: $1"
   fi
 }
 
 validate_protocol() {
-  if [[ "$1" != "tcp" && "$1" != "udp" && "$1" != "icmp" && "$1" != "any" ]]; then
-    die "arg-validation" "Invalid protocol: $1 (must be tcp/udp/icmp/any)"
+  if [[ "$1" != "tcp" && "$1" != "udp" ]]; then
+    die "arg-validation" "Invalid protocol: $1 (must be tcp or udp)"
   fi
 }
 
 validate_ip() {
-  # Simple IPv4 validation
-  if [[ ! "$1" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-    die "arg-validation" "Invalid IP address: $1"
+  # UFW accepts IPv4 addresses and CIDR ranges. Keep the accepted syntax
+  # deliberately narrow and validate every octet/prefix before invocation.
+  local value="$1" address="$1" prefix="" octet
+  if [[ "$value" == */* ]]; then
+    address="${value%/*}"
+    prefix="${value##*/}"
+    if [[ ! "$prefix" =~ ^[0-9]{1,2}$ ]] || (( 10#$prefix > 32 )); then
+      die "arg-validation" "Invalid IPv4 CIDR prefix: $value"
+    fi
   fi
-  # Validate each octet
+  if [[ ! "$address" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+    die "arg-validation" "Invalid IPv4 address or CIDR: $value"
+  fi
   local IFS='.'
-  read -ra octets <<< "$1"
-  for octet in ""${octets[@]}""; do
-    if [[ "$octet" -gt 255 ]]; then
-      die "arg-validation" "Invalid IP address: $1"
+  read -ra octets <<< "$address"
+  for octet in "${octets[@]}"; do
+    if (( 10#$octet > 255 )); then
+      die "arg-validation" "Invalid IPv4 address or CIDR: $value"
     fi
   done
-}
-
-validate_rule_name() {
-  # Alphanumeric, hyphens, underscores, spaces only; max 64 chars
-  if [[ ! "$1" =~ ^[a-zA-Z0-9_ -]{1,64}$ ]]; then
-    die "arg-validation" "Invalid rule name: $1"
-  fi
 }
 
 # ── action: status ───────────────────────────────────────────────────────────
@@ -95,9 +100,9 @@ action_allow() {
     die "allow" "Usage: allow <port> [protocol] [from-ip]"
   fi
 
-  local port=""$1""
-  local protocol=""${2:-tcp}""
-  local from_ip=""${3:-}"
+  local port="$1"
+  local protocol="${2:-tcp}"
+  local from_ip="${3:-}"
 
   validate_port "$port"
   validate_protocol "$protocol"
@@ -124,9 +129,9 @@ action_deny() {
     die "deny" "Usage: deny <port> [protocol] [from-ip]"
   fi
 
-  local port=""$1""
-  local protocol=""${2:-tcp}""
-  local from_ip=""${3:-}"
+  local port="$1"
+  local protocol="${2:-tcp}"
+  local from_ip="${3:-}"
 
   validate_port "$port"
   validate_protocol "$protocol"
@@ -146,85 +151,38 @@ action_deny() {
   json_out "{\"success\":true,\"step\":\"deny\",\"port\":${port},\"protocol\":\"${protocol}\",\"from\":\"${from_ip:-any}\",\"message\":\"Rule added\"}"
 }
 
-# ── action: delete ───────────────────────────────────────────────────────────
-action_delete() {
-  if [[ $# -lt 1 ]]; then
-    die "delete" "Usage: delete <rule-number>"
+# ── action: remove ───────────────────────────────────────────────────────────
+action_remove() {
+  if [[ $# -lt 3 || $# -gt 4 ]]; then
+    die "remove" "Usage: remove <allow|deny> <port> <protocol> [source-ip-or-cidr]"
   fi
 
-  local rule_num=""$1""
-  if ! [[ "$rule_num" =~ ^[0-9]+$ ]]; then
-    die "delete" "Rule number must be numeric"
+  local rule_action="$1" port="$2" protocol="$3" from_ip="${4:-}"
+  if [[ "$rule_action" != "allow" && "$rule_action" != "deny" ]]; then
+    die "remove" "Unsupported rule action: $rule_action"
   fi
-
-  # Use 'yes' to auto-confirm deletion
-  local output
-  output=$(yes | ufw delete "$rule_num" 2>&1) || die "delete" "Failed to delete rule ${rule_num}: ${output}"
-
-  ufw reload &>/dev/null || true
-
-  json_out "{\"success\":true,\"step\":\"delete\",\"ruleNumber\":${rule_num},\"message\":\"Rule deleted\"}"
-}
-
-# ── action: enable ───────────────────────────────────────────────────────────
-action_enable() {
-  # Ensure SSH is allowed before enabling to prevent lockout
-  ufw allow 22/tcp 2>/dev/null || true
-  ufw allow 3101/tcp 2>/dev/null || true  # Panel port
-  ufw allow 80/tcp 2>/dev/null || true   # HTTP
-  ufw allow 443/tcp 2>/dev/null || true  # HTTPS
-
-  local output
-  output=$(echo "y" | ufw enable 2>&1) || die "enable" "Failed to enable UFW: ${output}"
-
-  json_out "{\"success\":true,\"step\":\"enable\",\"status\":\"active\",\"message\":\"Firewall enabled\"}"
-}
-
-# ── action: disable ──────────────────────────────────────────────────────────
-action_disable() {
-  local output
-  output=$(ufw disable 2>&1) || die "disable" "Failed to disable UFW: ${output}"
-
-  json_out "{\"success\":true,\"step\":\"disable\",\"status\":\"inactive\",\"message\":\"Firewall disabled\"}"
-}
-
-# ── action: reset ────────────────────────────────────────────────────────────
-action_reset() {
-  local output
-  output=$(echo "y" | ufw reset 2>&1) || die "reset" "Failed to reset UFW: ${output}"
-
-  json_out "{\"success\":true,\"step\":\"reset\",\"message\":\"Firewall reset to defaults\"}"
-}
-
-# ── action: limit ────────────────────────────────────────────────────────────
-action_limit() {
-  if [[ $# -lt 1 ]]; then
-    die "limit" "Usage: limit <port> [protocol]"
-  fi
-
-  local port=""$1""
-  local protocol=""${2:-tcp}""
-
   validate_port "$port"
   validate_protocol "$protocol"
 
   local output
-  output=$(ufw limit "${port}/${protocol}" 2>&1) || die "limit" "Failed to add rate-limit rule: ${output}"
+  if [[ -n "$from_ip" ]]; then
+    validate_ip "$from_ip"
+    output=$(yes | ufw delete "$rule_action" from "$from_ip" to any port "$port" proto "$protocol" 2>&1) || \
+      die "remove" "Failed to remove firewall rule: ${output}"
+  else
+    output=$(yes | ufw delete "$rule_action" "${port}/${protocol}" 2>&1) || \
+      die "remove" "Failed to remove firewall rule: ${output}"
+  fi
 
   ufw reload &>/dev/null || true
-
-  json_out "{\"success\":true,\"step\":\"limit\",\"port\":${port},\"protocol\":\"${protocol}\",\"message\":\"Rate-limit rule added\"}"
+  json_out "{\"success\":true,\"step\":\"remove\",\"port\":${port},\"protocol\":\"${protocol}\",\"message\":\"Rule removed\"}"
 }
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
   status)  action_status "$@" ;;
+  remove)  action_remove "$@" ;;
   allow)   action_allow "$@" ;;
   deny)    action_deny "$@" ;;
-  delete)  action_delete "$@" ;;
-  enable)  action_enable "$@" ;;
-  disable) action_disable "$@" ;;
-  reset)   action_reset "$@" ;;
-  limit)   action_limit "$@" ;;
   *)       die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

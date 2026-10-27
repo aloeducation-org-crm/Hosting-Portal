@@ -7,22 +7,28 @@ monitoring, SSL lifecycle, site provisioning.
 ## AI: provider chain + automation server
 
 - **Providers** (`src/lib/ai/providers.ts`): an ordered, OpenAI-compatible chain
-  with failover, retries and a circuit breaker. A free anonymous backend (LLM7.io)
-  works with no key; UnoRouter/Groq/OpenAI/self-hosted LiteLLM/Ollama are profiles
-  you enable in `.env`. Configure with `AI_PROVIDER_ORDER`, then verify live with
-  `GET /api/ai/status?probe=1` — configuration alone is never reported as health.
+  with failover, bounded retries, SSRF/redirect guards, capability bounds, and a
+  circuit breaker. A free anonymous backend (LLM7.io) works with no key;
+  UnoRouter/Groq/OpenAI/OpenRouter/Qwen/GLM and opt-in local LiteLLM/Ollama/LocalAI
+  are profiles you enable in `.env`. Configure with `AI_PROVIDER_ORDER`, then
+  verify live with `GET /api/ai/status?probe=1` — configuration alone is never
+  reported as health.
+- **Self-Hosted AI Deploy Assistant & Sizing** (`src/lib/ai/self-hosted-agents.ts`,
+  `src/lib/ai/hardware-sizing.ts`, `src/lib/ai/deploy-assistant.ts`): Zod-validated
+  catalog of pinned-tag container presets (`Langflow`, `Flowise`, `Ollama`,
+  `LocalAI`, `Qdrant`, `Open WebUI`), commercial/open-core license gates,
+  GPU/VRAM/KV-cache hardware estimator, and 13-use-case platform decision matrix.
+  UI at `/ai/self-hosted`, API at `/api/ai/deploy-assistant`.
 - **Automations** (`src/lib/ai/automation/`): validated DAGs that mix model calls
-  with read-only hosting queries (`listSites`, `siteHealth`, `sslExpiring`),
-  executed server-side with per-step logs, dry-run and persisted run history.
-  UI at `/ai/automations`, API under `/api/ai/workflows`.
-- **No demo answers.** The old `agents/:slug/run` behaviour that emitted canned
-  text when no key was set is removed; without a reachable provider those routes
-  return `503 AI_NOT_CONFIGURED`.
+  with tenant-isolated read-only hosting queries (`listSites`, `siteHealth`,
+  `sslExpiring`), executed server-side with per-step logs, dry-run and persisted
+  run history. UI at `/ai/automations`, API under `/api/ai/workflows`.
+- **No demo answers.** The old `agents/:slug/run` and `/api/ai/token` stubs that
+  emitted canned text or fake quotas are removed; without a reachable provider AI
+  routes return `503 AI_NOT_CONFIGURED`.
 
-Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md) (including the
-honest table of which upstream projects are integrated and which are not),
-[docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md)
-(full evaluation of AI, VoIP/call-center, EdTech, proxy, ops and QA tools), and
+Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md),
+[docs/SELF-HOSTED-AI-AGENTS.md](docs/SELF-HOSTED-AI-AGENTS.md), and
 [docs/AI-AUTOMATION.md](docs/AI-AUTOMATION.md).
 
 ---
@@ -174,11 +180,8 @@ external SQLite database, and narrowly scoped sudoers policy. Then merge changes
 to `main`; CI deploys them without an SSH action or a manual `git pull`/PM2
 restart. Do not copy the commands from the legacy `alo-hosting-portal/` subtree.
 
-Full procedure, request path and troubleshooting: `DEPLOY.md`,
-`docs/RECOVERY-hosting.alolabs.net.md`, `docs/ZERO-TERMINAL-AI-DEPLOY.md`
-(Zero-Terminal AI Deploy Assistant & 10-provider visual panel benchmark mapping),
-`docs/SELF-HOSTED-AI-AGENTS.md` (12 self-hosted AI agent platforms, LocalAI, license guardrails & GPU/VRAM sizing),
-and `docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md`.
+Full procedure, request path and troubleshooting: `DEPLOY.md` and
+`docs/RECOVERY-hosting.alolabs.net.md`.
 
 ## Repository scripts
 
@@ -215,3 +218,10 @@ is scoped to the build step only; it is not set during dependency installation.
 ## Licence
 
 MIT.
+
+
+## Additional Architecture & Audit References
+
+- [`docs/ZERO-TERMINAL-AI-DEPLOY.md`](docs/ZERO-TERMINAL-AI-DEPLOY.md) — Zero-Terminal Stack Preset Blueprinting & Managed VPS Panel Parity
+- [`docs/SELF-HOSTED-AI-AGENTS.md`](docs/SELF-HOSTED-AI-AGENTS.md) — Revalidated 26-Platform Self-Hosted AI Agent Catalog, License Triage & VRAM Sizing
+- [`docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md`](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md) — Ecosystem & GLM-5 (`zai-org/GLM-5`) Integration Analysis

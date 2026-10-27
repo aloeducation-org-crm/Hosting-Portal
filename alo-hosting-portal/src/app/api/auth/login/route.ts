@@ -1,79 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
-import { signIn } from 'next-auth/react';
-import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { db } from '@/lib/db';
+import { prisma } from '@/lib/prisma';
+import bcrypt from 'bcryptjs';
 
-const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(1, 'Password is required'),
-});
-
-function handleErr(e: unknown): NextResponse {
-  if (e && typeof e === 'object' && 'status' in e) {
-    const a = e as ApiResponse;
-    return NextResponse.json(a, { status: a.status });
-  }
-  return NextResponse.json(apiError('Internal server error'), { status: 500 });
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, password } = loginSchema.parse(body);
+    const body = await req.json();
+    const { email, password } = body;
 
-    const result = await signIn('credentials', {
-      email,
-      password,
-      redirect: false,
-    });
+    if (!email || !password) {
+      return NextResponse.json({ success: false, error: 'Email and password are required' }, { status: 400 });
+    }
 
-    if (result?.error) {
-      await db.auditLog.create({
-        data: {
-          actorEmail: email,
-          action: 'LOGIN_FAILED',
-          resourceType: 'User',
-          result: 'FAILURE',
-          ipAddress: request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip'),
+    const normalizedEmail = String(email).toLowerCase().trim();
+
+    // Find user with role and permissions
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: {
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
         },
-      });
-      return NextResponse.json(apiError('Invalid credentials', 'INVALID_CREDENTIALS', undefined, 401), { status: 401 });
-    }
-
-    const user = await db.user.findUnique({
-      where: { email },
-      include: { role: { include: { permissions: { include: { permission: true } } } } },
-    });
-
-    if (!user) {
-      return NextResponse.json(apiError('User not found after login', 'USER_NOT_FOUND', undefined, 401), { status: 401 });
-    }
-
-    await db.auditLog.create({
-      data: {
-        actorUserId: user.id,
-        actorEmail: user.email,
-        actorRole: user.role.name,
-        action: 'LOGIN_SUCCESS',
-        resourceType: 'User',
-        resourceId: user.id,
-        result: 'SUCCESS',
-        ipAddress: request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip'),
       },
     });
 
-    return NextResponse.json(apiSuccess({
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role.name,
-      permissions: user.role.permissions.map((rp) => rp.permission.name),
-    }));
-  } catch (e) {
-    if (e instanceof z.ZodError) {
-      return NextResponse.json(apiError('Validation failed', 'VALIDATION_ERROR', e.flatten(), 400), { status: 400 });
+    if (!user || !user.passwordHash) {
+      return NextResponse.json({ success: false, error: 'Invalid credentials' }, { status: 401 });
     }
-    return handleErr(e);
+
+    if (user.isLocked) {
+      if (user.lockedUntil && user.lockedUntil > new Date()) {
+        return NextResponse.json({ success: false, error: 'Account is locked. Try again later.' }, { status: 423 });
+      }
+      // Unlock if lock period expired
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { isLocked: false, failedLoginAttempts: 0, lockedUntil: null },
+      });
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      const attempts = user.failedLoginAttempts + 1;
+      const lockData: Record<string, unknown> = { failedLoginAttempts: attempts };
+      if (attempts >= 5) {
+        lockData.isLocked = true;
+        lockData.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      }
+      await prisma.user.update({ where: { id: user.id }, data: lockData });
+      return NextResponse.json({ success: false, error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    // Reset failed attempts on success
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: 0, isLocked: false, lockedUntil: null, lastLoginAt: new Date() },
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role?.name || 'VIEWER',
+        permissions: user.role?.permissions.map((rp: any) => rp.permission.name) || [],
+      },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }

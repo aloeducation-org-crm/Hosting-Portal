@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession, ROLES } from '@/lib/auth';
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const orderNumber = `ORD-${Date.now()}-${randomBytes(3).toString('hex').toUpperCase()}`;
 
     const order = await db.order.create({
       data: {

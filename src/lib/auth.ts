@@ -1,9 +1,10 @@
+import { createHash, timingSafeEqual } from "crypto";
 import { getServerSession } from "next-auth/next";
 import { getToken } from "next-auth/jwt";
 import { apiError } from "@/lib/response";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
-import { env } from "@/lib/env";
+import { env, isUnsafeDefaultSecret } from "@/lib/env";
 import { authOptions, handlers, auth } from "@/lib/nextauth";
 
 export { authOptions, handlers, auth };
@@ -85,15 +86,60 @@ export function isClientRole(role?: string | null): boolean {
   return role === ROLES.CLIENT || role === ROLES.VIEWER;
 }
 
+export function canAccessWebsite(
+  user: { id: string; role: string },
+  website: { ownerId: string | null } | null | undefined,
+): boolean {
+  if (!website) return false;
+  return isAdminRole(user.role) || Boolean(website.ownerId && website.ownerId === user.id);
+}
+
+export function assertWebsiteAccess(
+  user: { id: string; role: string },
+  website: { ownerId: string | null } | null | undefined,
+): void {
+  if (!canAccessWebsite(user, website)) {
+    throw apiError("Forbidden", "FORBIDDEN", undefined, 403);
+  }
+}
+
+export function verifyInternalSecretValue(
+  supplied: string | null | undefined,
+  expected: string | null | undefined = process.env.INTERNAL_SECRET ?? env.INTERNAL_SECRET,
+): boolean {
+  const cleanSupplied = supplied?.trim() ?? "";
+  const cleanExpected = expected?.trim() ?? "";
+  if (
+    !cleanSupplied ||
+    !cleanExpected ||
+    cleanExpected.length < 16 ||
+    isUnsafeDefaultSecret(cleanExpected)
+  ) {
+    return false;
+  }
+  const actualDigest = createHash("sha256").update(cleanSupplied, "utf8").digest();
+  const expectedDigest = createHash("sha256").update(cleanExpected, "utf8").digest();
+  return timingSafeEqual(actualDigest, expectedDigest);
+}
+
 export async function requireSession(request: NextRequest): Promise<AuthUser> {
   let email: string | undefined;
 
-  const session = await getServerSession();
-  if (session?.user?.email) {
-    email = session.user.email;
-  } else if (request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (session?.user?.email) {
+      email = session.user.email;
+    }
+  } catch {
+    // Outside Next.js headers() async context (e.g., direct route unit tests); fall through to request JWT check.
+  }
+
+  if (!email && request) {
     try {
-      const token = await getToken({ req: request, secret: env.NEXTAUTH_SECRET });
+      const token = await getToken({
+        req: request,
+        secret: process.env.NEXTAUTH_SECRET || env.NEXTAUTH_SECRET,
+      });
       if (token?.email) {
         email = String(token.email);
       }
@@ -193,11 +239,17 @@ export function isRoleAtLeast(role: string, minimum: string): boolean {
 }
 
 /**
- * Verify a Bearer token against INTERNAL_SECRET.
+ * Verify a Bearer token against INTERNAL_SECRET using constant-time digest comparison.
  * Returns the decoded payload if valid, throws apiError otherwise.
  */
 export function verifyToken(token: string): { id: string; email: string; role: string } {
-  if (!token || token !== env.INTERNAL_SECRET) {
+  const secret = env.INTERNAL_SECRET;
+  if (!token || !secret || (env.NODE_ENV === "production" && isUnsafeDefaultSecret(secret))) {
+    throw apiError("Invalid or expired token", "UNAUTHORIZED", undefined, 401);
+  }
+  const actualDigest = createHash("sha256").update(token, "utf8").digest();
+  const expectedDigest = createHash("sha256").update(secret, "utf8").digest();
+  if (!timingSafeEqual(actualDigest, expectedDigest)) {
     throw apiError("Invalid or expired token", "UNAUTHORIZED", undefined, 401);
   }
   return { id: "system", email: "system@alolabs.net", role: ROLES.SUPER_ADMIN };

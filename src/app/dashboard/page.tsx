@@ -524,15 +524,17 @@ export default function DashboardOverview() {
             {quickActions.map((action) => {
               const Icon = action.icon;
               return (
-                <Link key={action.label} href={action.href}>
-                  <button className="w-full flex flex-col items-center gap-2.5 rounded-xl border border-[#E2E8F0] bg-white p-4 hover:bg-[#FFF7ED] hover:border-[#E8501A]/30 transition-all group">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFF7ED] group-hover:bg-[#E8501A] transition-colors">
-                      <Icon className="h-5 w-5 text-[#E8501A] group-hover:text-white transition-colors" />
-                    </div>
-                    <span className="text-xs font-medium text-[#1E293B]">
-                      {action.label}
-                    </span>
-                  </button>
+                <Link
+                  key={action.label}
+                  href={action.href}
+                  className="w-full flex flex-col items-center gap-2.5 rounded-xl border border-[#E2E8F0] bg-white p-4 hover:bg-[#FFF7ED] hover:border-[#E8501A]/30 transition-all group"
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#FFF7ED] group-hover:bg-[#E8501A] transition-colors">
+                    <Icon className="h-5 w-5 text-[#E8501A] group-hover:text-white transition-colors" />
+                  </div>
+                  <span className="text-xs font-medium text-[#1E293B]">
+                    {action.label}
+                  </span>
                 </Link>
               );
             })}

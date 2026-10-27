@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission, ROLES, isRoleAtLeast } from '@/lib/auth';
+import { requireSession, requirePermission, isAdminRole, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
 import { createAuditLog } from '@/lib/audit';
@@ -29,7 +29,23 @@ export async function GET(request: NextRequest) {
     const domain = searchParams.get('domain');
 
     const where: Record<string, unknown> = {};
-    if (domain) where.domain = domain;
+    if (!isAdminRole(user.role)) {
+      const ownedDomains = await db.domain.findMany({
+        where: { website: { ownerId: user.id } },
+        select: { domain: true },
+      });
+      const allowedNames = ownedDomains.map((d) => d.domain);
+      if (domain) {
+        if (!allowedNames.includes(domain)) {
+          return NextResponse.json(apiError('Forbidden', 'FORBIDDEN', undefined, 403), { status: 403 });
+        }
+        where.domain = domain;
+      } else {
+        where.domain = { in: allowedNames };
+      }
+    } else if (domain) {
+      where.domain = domain;
+    }
 
     const accounts = await db.emailAccount.findMany({
       where,
@@ -155,6 +171,14 @@ export async function PUT(request: NextRequest) {
       throw apiError('Email account not found', 'NOT_FOUND', undefined, 404);
     }
 
+    if (!isAdminRole(user.role)) {
+      const domainRecord = await db.domain.findUnique({
+        where: { domain: existing.domain },
+        include: { website: true },
+      });
+      assertWebsiteAccess(user, domainRecord?.website);
+    }
+
     const updateData: Record<string, unknown> = {};
     if (quotaMb !== undefined) updateData.quotaMb = quotaMb;
     if (isActive !== undefined) updateData.isActive = isActive;
@@ -208,14 +232,12 @@ export async function DELETE(request: NextRequest) {
       throw apiError('Email account not found', 'NOT_FOUND', undefined, 404);
     }
 
-    if (!isRoleAtLeast(user.role, ROLES.SUPER_ADMIN)) {
+    if (!isAdminRole(user.role)) {
       const domainRecord = await db.domain.findUnique({
         where: { domain: account.domain },
         include: { website: true },
       });
-      if (!domainRecord || domainRecord.website?.ownerId !== user.id) {
-        throw apiError('You do not have permission to delete this email account', 'FORBIDDEN', undefined, 403);
-      }
+      assertWebsiteAccess(user, domainRecord?.website);
     }
 
     // === REAL: Remove mail account from Postfix/Dovecot ===

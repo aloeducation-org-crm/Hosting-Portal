@@ -18,6 +18,8 @@ export type ViewId =
   | 'network'
   | 'storage'
   | 'billing'
+  | 'marketing'
+  | 'operator'
   | 'crm'
   | 'email'
   | 'settings'
@@ -76,6 +78,7 @@ export const NAV_ITEMS: {
   { id: 'containers', label: 'Containers', icon: 'Container', group: 'Hosting' },
   { id: 'servers', label: 'VPS / Servers', icon: 'Server', group: 'Hosting' },
   { id: 'agents', label: 'AI Agents', icon: 'Bot', group: 'AI & DevOps' },
+  { id: 'operator', label: 'Bill Agent AI', icon: 'Cpu', group: 'AI & DevOps' },
   { id: 'monitoring', label: 'Monitoring', icon: 'Activity', group: 'AI & DevOps' },
   { id: 'cicd', label: 'CI/CD', icon: 'GitBranch', group: 'AI & DevOps' },
   { id: 'ssl', label: 'SSL Certificates', icon: 'ShieldCheck', group: 'AI & DevOps' },
@@ -85,6 +88,7 @@ export const NAV_ITEMS: {
   { id: 'network', label: 'Network', icon: 'Network', group: 'Platform' },
   { id: 'storage', label: 'Storage', icon: 'FolderOpen', group: 'Platform' },
   { id: 'billing', label: 'Billing', icon: 'CreditCard', group: 'Business' },
+  { id: 'marketing', label: 'Digital Marketing', icon: 'Megaphone', group: 'Business' },
   { id: 'crm', label: 'CRM', icon: 'Users', group: 'Business' },
   { id: 'email', label: 'Email', icon: 'Mail', group: 'Business' },
   { id: 'settings', label: 'Settings', icon: 'Settings', group: 'Business' },

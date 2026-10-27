@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Cron Helper
+# Manages per-site cron jobs via /etc/cron.d/ files.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+CRON_DIR="/etc/cron.d"
+APP_USER="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-cron-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-cron-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+validate_cron_name() {
+  # Alphanumeric, hyphens, underscores only
+  if [[ ! "$1" =~ ^[a-zA-Z0-9_-]{1,64}$ ]]; then
+    die "arg-validation" "Invalid cron job name: $1"
+  fi
+}
+
+# Validate cron expression (5-part)
+validate_cron_expr() {
+  local expr="$1"
+  local parts
+  parts=$(echo "$expr" | awk '{print NF}')
+  if [[ "$parts" -ne 5 ]]; then
+    die "arg-validation" "Cron expression must have exactly 5 fields (got ${parts})"
+  fi
+  # Basic format check: only valid cron characters
+  if [[ ! "$expr" =~ ^[0-9*/,\ -[:space:]]+$ ]]; then
+    die "arg-validation" "Invalid characters in cron expression"
+  fi
+}
+
+# Sanitize command: no dangerous characters
+validate_command() {
+  local cmd="$1"
+  # Block obvious dangerous patterns
+  if [[ "$cmd" =~ [\$\`\;\&\|\>\<\(\)\{\}] ]]; then
+    die "arg-validation" "Command contains potentially dangerous characters"
+  fi
+  # Max length
+  if [[ ${#cmd} -gt 1024 ]]; then
+    die "arg-validation" "Command too long (max 1024 chars)"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-cron-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: add ──────────────────────────────────────────────────────────────
+action_add() {
+  if [[ $# -lt 4 ]]; then
+    die "add" "Usage: add <domain> <name> <cron-expression> <command>"
+  fi
+
+  local domain="$1"
+  local name="$2"
+  local cron_expr="$3"
+  local command="$4"
+
+  validate_domain "$domain"
+  validate_cron_name "$name"
+  validate_cron_expr "$cron_expr"
+  validate_command "$command"
+
+  local cron_file="${CRON_DIR}/alo-${domain}"
+  local job_marker="# ALO-JOB:${name}"
+
+  # Check if job already exists
+  if [[ -f "$cron_file" ]] && grep -q "ALO-JOB:${name}" "$cron_file" 2>/dev/null; then
+    die "add" "Cron job '${name}' already exists for ${domain}"
+  fi
+
+  # Create cron file header if new
+  if [[ ! -f "$cron_file" ]]; then
+    cat > "$cron_file" <<HEADER
+# ALO Labs Hosting Portal — Cron jobs for ${domain}
+# Managed by alo-cron-helper. Do not edit manually.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+HEADER
+    chown root:root "$cron_file"
+    chmod 600 "$cron_file"
+  fi
+
+  # Append the cron job
+  printf '%s\n' "${job_marker}" >> "$cron_file"
+  printf '%s %s\n' "$cron_expr" "${command}" >> "$cron_file"
+  printf '\n' >> "$cron_file"
+
+  chmod 600 "$cron_file"
+  log_info "Added cron job '${name}' for ${domain}"
+
+  json_out "{\"success\":true,\"step\":\"add\",\"domain\":\"${domain}\",\"name\":\"${name}\",\"schedule\":\"${cron_expr}\",\"cronFile\":\"${cron_file}\",\"message\":\"Cron job added\"}"
+}
+
+# ── action: remove ───────────────────────────────────────────────────────────
+action_remove() {
+  if [[ $# -lt 2 ]]; then
+    die "remove" "Usage: remove <domain> <name>"
+  fi
+
+  local domain="$1"
+  local name="$2"
+
+  validate_domain "$domain"
+  validate_cron_name "$name"
+
+  local cron_file="${CRON_DIR}/alo-${domain}"
+
+  if [[ ! -f "$cron_file" ]]; then
+    die "remove" "No cron file found for ${domain}"
+  fi
+
+  if ! grep -q "ALO-JOB:${name}" "$cron_file" 2>/dev/null; then
+    die "remove" "Cron job '${name}' not found for ${domain}"
+  fi
+
+  # Remove the job (marker line + next schedule line)
+  sed -i "/# ALO-JOB:${name}/{N;d;}" "$cron_file"
+  log_info "Removed cron job '${name}' for ${domain}"
+
+  # If file is now empty (only header), remove it
+  local line_count
+  line_count=$(grep -cv '^#' "$cron_file" 2>/dev/null | grep -cv '^$' || echo "0")
+  if [[ "$line_count" -eq 0 ]]; then
+    rm -f "$cron_file"
+    log_info "Removed empty cron file for ${domain}"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"remove\",\"domain\":\"${domain}\",\"name\":\"${name}\",\"message\":\"Cron job removed\"}"
+}
+
+# ── action: list ─────────────────────────────────────────────────────────────
+action_list() {
+  if [[ $# -lt 1 ]]; then
+    die "list" "Usage: list <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local cron_file="${CRON_DIR}/alo-${domain}"
+  local jobs_json="["
+  local first=true
+
+  if [[ -f "$cron_file" ]]; then
+    local current_name=""
+    local current_schedule=""
+
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^#\ ALO-JOB:(.+)$ ]]; then
+        current_name="${BASH_REMATCH[1]}"
+      elif [[ -n "$current_name" && -z "$current_schedule" && "$line" =~ ^[0-9*/] ]]; then
+        current_schedule="$line"
+        if [[ "$first" == true ]]; then first=false; else jobs_json+=","; fi
+        jobs_json+="{\"name\":\"${current_name}\",\"schedule\":\"${current_schedule}\"}"
+        current_name=""
+        current_schedule=""
+      fi
+    done < "$cron_file"
+  fi
+
+  jobs_json+="]"
+
+  json_out "{\"success\":true,\"step\":\"list\",\"domain\":\"${domain}\",\"jobs\":${jobs_json}}"
+}
+
+# ── action: update ───────────────────────────────────────────────────────────
+action_update() {
+  if [[ $# -lt 4 ]]; then
+    die "update" "Usage: update <domain> <name> <cron-expression> <command>"
+  fi
+
+  local domain="$1"
+  local name="$2"
+  local cron_expr="$3"
+  local command="$4"
+
+  validate_domain "$domain"
+  validate_cron_name "$name"
+  validate_cron_expr "$cron_expr"
+  validate_command "$command"
+
+  local cron_file="${CRON_DIR}/alo-${domain}"
+
+  if [[ ! -f "$cron_file" ]] || ! grep -q "ALO-JOB:${name}" "$cron_file" 2>/dev/null; then
+    die "update" "Cron job '${name}' not found for ${domain}"
+  fi
+
+  # Remove old job and add new one
+  sed -i "/# ALO-JOB:${name}/{N;d;}" "$cron_file"
+  printf '%s\n' "# ALO-JOB:${name}" >> "$cron_file"
+  printf '%s %s\n' "$cron_expr" "${command}" >> "$cron_file"
+  printf '\n' >> "$cron_file"
+
+  chmod 600 "$cron_file"
+  log_info "Updated cron job '${name}' for ${domain}"
+
+  json_out "{\"success\":true,\"step\":\"update\",\"domain\":\"${domain}\",\"name\":\"${name}\",\"schedule\":\"${cron_expr}\",\"message\":\"Cron job updated\"}"
+}
+
+# ── action: enable ───────────────────────────────────────────────────────────
+action_enable() {
+  if [[ $# -lt 1 ]]; then
+    die "enable" "Usage: enable <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local cron_file="${CRON_DIR}/alo-${domain}"
+  if [[ -f "$cron_file" ]]; then
+    chmod 600 "$cron_file"
+    json_out "{\"success\":true,\"step\":\"enable\",\"domain\":\"${domain}\",\"message\":\"Cron jobs enabled\"}"
+  else
+    json_out "{\"success\":true,\"step\":\"enable\",\"domain\":\"${domain}\",\"message\":\"No cron file found (already clean)\"}"
+  fi
+}
+
+# ── action: disable ──────────────────────────────────────────────────────────
+action_disable() {
+  if [[ $# -lt 1 ]]; then
+    die "disable" "Usage: disable <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local cron_file="${CRON_DIR}/alo-${domain}"
+  if [[ -f "$cron_file" ]]; then
+    chmod 000 "$cron_file"
+    json_out "{\"success\":true,\"step\":\"disable\",\"domain\":\"${domain}\",\"message\":\"Cron jobs disabled\"}"
+  else
+    json_out "{\"success\":true,\"step\":\"disable\",\"domain\":\"${domain}\",\"message\":\"No cron file found\"}"
+  fi
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  add)     action_add "$@" ;;
+  remove)  action_remove "$@" ;;
+  list)    action_list "$@" ;;
+  update)  action_update "$@" ;;
+  enable)  action_enable "$@" ;;
+  disable) action_disable "$@" ;;
+  *)       die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

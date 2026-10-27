@@ -16,6 +16,8 @@ export type DeployStage =
 
 export type ServiceManager = "static" | "pm2" | "systemd" | "none";
 
+export type WorkloadCategory = "web" | "server" | "mobile";
+
 /** Every command is argv, never a shell string. */
 export interface DeployConfig {
   version: 1;
@@ -42,6 +44,7 @@ export interface DeployConfig {
 }
 
 export interface DetectionResult {
+  workloadCategory?: WorkloadCategory;
   language: string;
   framework: string;
   runtime: string;

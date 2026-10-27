@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import AIChatWidget from "@/components/alolabs/AIChatWidget";
 import {
   LayoutDashboard,
   Globe,
@@ -45,19 +44,25 @@ import {
   FileText,
   Sparkles,
   Rocket,
+  Megaphone,
+  Cpu,
   Wand2,
 } from "lucide-react";
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
-  { label: "AI Deploy Assistant", href: "/ai/assistant", icon: Wand2 },
+  { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },
+  { label: "AI Auto-Deploy", href: "/ai/auto-deploy", icon: Sparkles },
+  { label: "Zero-Terminal Presets", href: "/ai/assistant", icon: Wand2 },
   { label: "Deployments", href: "/deployments", altPrefix: "/dashboard/deployments", icon: Rocket },
   { label: "Domains", href: "/dashboard/domains", icon: Globe },
   { label: "Databases", href: "/databases", icon: Database },
   { label: "Storage", href: "/storage", icon: HardDrive },
   { label: "AI Builder", href: "/ai/builder", altPrefix: "/dashboard/agents", icon: Bot },
   { label: "AI Automations", href: "/ai/automations", icon: Zap },
+  { label: "Self-Hosted AI", href: "/ai/self-hosted", icon: Server },
+  { label: "Digital Marketing", href: "/dashboard/marketing", icon: Megaphone },
   { label: "CRM", href: "/dashboard/crm", icon: Users },
   { label: "Email", href: "/dashboard/email", icon: Mail },
   { label: "Billing", href: "/dashboard/billing", altPrefix: "/billing", icon: CreditCard },
@@ -399,7 +404,6 @@ export function DashboardShell({
 
         <main className="flex-1 p-4 md:p-6">{children}</main>
       </div>
-      <AIChatWidget />
     </div>
   );
 }

@@ -1,156 +1,259 @@
 #!/usr/bin/env bash
-# ALO Labs - Node/Next.js App Helper
-# Manages Node.js and Next.js site provisioning, deployment, and rollback
-# Usage: alo-node-app-helper <command> [args...]
-
+#
+# ALO Labs Hosting Portal — Node.js App Helper
+# Manages Node.js application deployments via systemd.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
 set -euo pipefail
 
 SITE_BASE="/srv/alo-sites"
+APP_USER="alo-panel"
+APP_GROUP="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-node-app-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-node-app-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
 
 validate_domain() {
-  local d="$1"
-  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-    echo '{"success":false,"error":"Invalid domain name"}'
-    exit 1
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
   fi
 }
 
-COMMAND="${1:?Usage: alo-node-app-helper <command> [args...]}
+validate_port() {
+  if [[ ! "$1" =~ ^[0-9]+$ || "$1" -lt 1024 || "$1" -gt 65535 ]]; then
+    die "arg-validation" "Invalid port number: $1 (must be 1024-65535)"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-node-app-helper <action> [args...]"
+fi
+
+ACTION="$1"
 shift
 
-case "$COMMAND" in
-  provision)
-    DOMAIN="${1:?Usage: provision <domain> <port> <startup_command> <health_path>}"
-    PORT="${2:?Usage: provision <domain> <port> <startup_command> <health_path>}"
-    STARTUP_CMD="${3:?Usage: provision <domain> <port> <startup_command> <health_path>}"
-    HEALTH_PATH="${4:-/}"
-    validate_domain "$DOMAIN"
+# ── action: provision ──────────────────────────────────────────────────────
+action_provision() {
+  if [[ $# -lt 3 ]]; then
+    die "provision" "Usage: provision <domain> <port> <startup-command> [health-path]"
+  fi
 
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    mkdir -p "$SITE_DIR/{releases,current,shared}
+  local domain="$1"
+  local port="$2"
+  local startup_command="$3"
+  local health_path="${4:-/}"
 
-    # Create .alo-runtime and .alo-port markers
-    echo "NODE" > "$SITE_DIR/.alo-runtime"
-    echo "$PORT" > "$SITE_DIR/.alo-port"
-    echo "$STARTUP_CMD" > "$SITE_DIR/.alo-startup"
-    echo "$HEALTH_PATH" > "$SITE_DIR/.alo-health"
+  validate_domain "$domain"
+  validate_port "$port"
 
-    # Create systemd service
-    UNIT_NAME="alo-site-$DOMAIN"
-    SERVICE_FILE="/etc/systemd/system/$UNIT_NAME.service"
-    sudo tee "$SERVICE_FILE" > /dev/null << UNIT_EOF
+  local site_dir="${SITE_BASE}/${domain}"
+  local service_name="alo-site-${domain}"
+  local service_file="/etc/systemd/system/${service_name}.service"
+
+  if [[ ! -d "$site_dir" ]]; then
+    die "provision" "Site directory does not exist: ${site_dir}"
+  fi
+
+  if [[ -f "$service_file" ]]; then
+    die "provision" "Service already exists: ${service_name}"
+  fi
+
+  # Create systemd service unit
+  cat > "$service_file" <<SERVICEUNIT
 [Unit]
-Description=ALO Site: $DOMAIN
+Description=ALO Site: ${domain}
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=aloedu
-WorkingDirectory=$SITE_DIR/current
-ExecStart=/usr/bin/env bash -c '$STARTUP_CMD'
-Restart=on-failure
+User=${APP_USER}
+Group=${APP_GROUP}
+WorkingDirectory=${site_dir}/current
+ExecStart=/usr/bin/node ${startup_command}
+Restart=always
 RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${service_name}
 Environment=NODE_ENV=production
-Environment=PORT=$PORT
+Environment=PORT=${port}
+Environment=HOST=127.0.0.1
+NoNewPrivileges=true
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
-UNIT_EOF
+SERVICEUNIT
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable "$UNIT_NAME" 2>/dev/null || true
+  log_info "Service unit created at ${service_file}"
 
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"port\":$PORT,\"startupCommand\":\"$STARTUP_CMD\",\"healthPath\":\"$HEALTH_PATH\",\"serviceUnit\":\"$UNIT_NAME\",\"serviceFile\":\"$SERVICE_FILE\",\"provisionedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  # Set proper permissions
+  chown root:root "$service_file"
+  chmod 644 "$service_file"
 
-  deploy)
-    DOMAIN="${1:?Usage: deploy <domain> <release_path>}"
-    RELEASE_PATH="${2:?Usage: deploy <domain> <release_path>}"
-    validate_domain "$DOMAIN"
+  # Reload systemd and enable service
+  systemctl daemon-reload || die "provision" "Failed to reload systemd"
+  systemctl enable "$service_name" || die "provision" "Failed to enable service"
+  systemctl start "$service_name" || die "provision" "Failed to start service"
 
-    if [[ ! -d "$RELEASE_PATH" ]]; then
-      echo '{"success":false,"error":"Release path does not exist"}'
-      exit 1
+  log_info "Service ${service_name} started on port ${port}"
+
+  json_out "{\"success\":true,\"step\":\"provision\",\"domain\":\"${domain}\",\"port\":${port},\"service\":\"${service_name}\",\"healthPath\":\"${health_path}\"}"
+}
+
+# ── action: deploy ─────────────────────────────────────────────────────────
+action_deploy() {
+  if [[ $# -lt 3 ]]; then
+    die "deploy" "Usage: deploy <domain> <release-dir> <startup-command>"
+  fi
+
+  local domain="$1"
+  local release_dir="$2"
+  local startup_command="$3"
+
+  validate_domain "$domain"
+
+  # Validate release dir is under site base
+  local resolved_release
+  resolved_release=$(realpath "$release_dir" 2>/dev/null || echo "")
+  if [[ -z "$resolved_release" || "$resolved_release" != "${SITE_BASE}/"* ]]; then
+    die "deploy" "Release directory must be under ${SITE_BASE}"
+  fi
+
+  if [[ ! -d "$resolved_release" ]]; then
+    die "deploy" "Release directory does not exist: ${release_dir}"
+  fi
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local current_link="${site_dir}/current"
+  local service_name="alo-site-${domain}"
+
+  # Install dependencies
+  log_info "Installing dependencies in ${resolved_release}..."
+  if [[ -f "${resolved_release}/package.json" ]]; then
+    (cd "$resolved_release" && npm ci --production=false 2>&1) || \
+      die "deploy" "npm ci failed"
+  fi
+
+  # Build if build script exists
+  if [[ -f "${resolved_release}/package.json" ]]; then
+    if grep -q '"build"' "${resolved_release}/package.json" 2>/dev/null; then
+      log_info "Running build script..."
+      (cd "$resolved_release" && npm run build 2>&1) || \
+        die "deploy" "npm run build failed"
     fi
+  fi
 
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    TIMESTAMP=$(date +%Y%m%d%H%M%S)
-    RELEASE_DIR="$SITE_DIR/releases/$TIMESTAMP"
+  # Prisma generate + migrate if needed
+  if [[ -d "${resolved_release}/node_modules/.prisma" ]]; then
+    log_info "Running Prisma generate..."
+    (cd "$resolved_release" && npx prisma generate 2>&1) || \
+      log_err "Prisma generate failed (non-fatal)"
 
-    # Determine next version number
-    VERSION=$(ls -1d "$SITE_DIR/releases/"* 2>/dev/null | wc -l)
-    VERSION=$((VERSION + 1))
+    log_info "Running Prisma migrate deploy..."
+    (cd "$resolved_release" && npx prisma migrate deploy 2>&1) || \
+      log_err "Prisma migrate deploy failed (non-fatal)"
+  fi
 
-    cp -a "$RELEASE_PATH/"* "$RELEASE_DIR/" 2>/dev/null || true
+  # Set ownership
+  chown -R "${APP_USER}:${APP_GROUP}" "$resolved_release"
 
-    # Update current symlink
-    ln -sfn "$RELEASE_DIR" "$SITE_DIR/current"
+  # Update current symlink
+  ln -sfn "$resolved_release" "$current_link"
+  chown -h "${APP_USER}:${APP_GROUP}" "$current_link"
+  log_info "Symlinked current -> ${resolved_release}"
 
-    # Restart service
-    UNIT_NAME="alo-site-$DOMAIN"
-    sudo systemctl restart "$UNIT_NAME" 2>/dev/null || true
+  # Restart service if it exists
+  if systemctl is-enabled "$service_name" &>/dev/null; then
+    log_info "Restarting service ${service_name}..."
+    systemctl restart "$service_name" || die "deploy" "Failed to restart service"
+  fi
 
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"version\":$VERSION,\"releasePath\":\"$RELEASE_DIR\",\"currentSymlink\":\"$SITE_DIR/current\",\"deployedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+  json_out "{\"success\":true,\"step\":\"deploy\",\"domain\":\"${domain}\",\"releaseDir\":\"${resolved_release}\"}"
+}
 
-  rollback)
-    DOMAIN="${1:?Usage: rollback <domain> <version>}"
-    VERSION="${2:?Usage: rollback <domain> <version>}"
-    validate_domain "$DOMAIN"
+# ── action: health-check ─────────────────────────────────────────────────────
+action_health_check() {
+  if [[ $# -lt 2 ]]; then
+    die "health-check" "Usage: health-check <domain> <port> [health-path]"
+  fi
 
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    RELEASES=($(ls -1d "$SITE_DIR/releases/"* 2>/dev/null | sort))
+  local domain="$1"
+  local port="$2"
+  local health_path="${3:-/}"
 
-    if [[ ${#RELEASES[@]} -eq 0 ]]; then
-      echo '{"success":false,"error":"No releases available for rollback"}'
-      exit 1
-    fi
+  validate_domain "$domain"
+  validate_port "$port"
 
-    # Find the target release by version index
-    TARGET_IDX=$((VERSION - 1))
-    if [[ $TARGET_IDX -lt 0 || $TARGET_IDX -ge ${#RELEASES[@]} ]]; then
-      echo "{\"success\":false,\"error\":\"Version $VERSION not found. Available: 1-${#RELEASES[@]}\"}"
-      exit 1
-    fi
+  local health_url="http://127.0.0.1:${port}${health_path}"
+  local http_code
+  http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$health_url" 2>/dev/null || echo "000")
 
-    TARGET_RELEASE="${RELEASES[$TARGET_IDX]}"
-    ln -sfn "$TARGET_RELEASE" "$SITE_DIR/current"
+  local healthy="false"
+  if [[ "$http_code" =~ ^[23] ]]; then
+    healthy="true"
+  fi
 
-    UNIT_NAME="alo-site-$DOMAIN"
-    sudo systemctl restart "$UNIT_NAME" 2>/dev/null || true
+  json_out "{\"success\":true,\"step\":\"health-check\",\"domain\":\"${domain}\",\"port\":${port},\"httpCode\":${http_code},\"healthy\":${healthy}}"
+}
 
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"rolledBackTo\":$VERSION,\"releasePath\":\"$TARGET_RELEASE\",\"rolledBackAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
+# ── action: rollback ─────────────────────────────────────────────────────────
+action_rollback() {
+  if [[ $# -lt 2 ]]; then
+    die "rollback" "Usage: rollback <domain> <previous-release-dir>"
+  fi
 
-  start)
-    DOMAIN="${1:?Usage: start <domain>}"
-    validate_domain "$DOMAIN"
-    UNIT_NAME="alo-site-$DOMAIN"
-    sudo systemctl start "$UNIT_NAME" 2>/dev/null
-    STATUS=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "unknown")
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\",\"action\":\"started\"}"
-    ;;
+  local domain="$1"
+  local previous_release="$2"
 
-  stop)
-    DOMAIN="${1:?Usage: stop <domain>}"
-    validate_domain "$DOMAIN"
-    UNIT_NAME="alo-site-$DOMAIN"
-    sudo systemctl stop "$UNIT_NAME" 2>/dev/null
-    STATUS=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "inactive")
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\",\"action\":\"stopped\"}"
-    ;;
+  validate_domain "$domain"
 
-  restart)
-    DOMAIN="${1:?Usage: restart <domain>}"
-    validate_domain "$DOMAIN"
-    UNIT_NAME="alo-site-$DOMAIN"
-    sudo systemctl restart "$UNIT_NAME" 2>/dev/null
-    STATUS=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "unknown")
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"status\":\"$STATUS\",\"action\":\"restarted\"}"
-    ;;
+  # Validate previous release dir is under site base
+  local resolved_prev
+  resolved_prev=$(realpath "$previous_release" 2>/dev/null || echo "")
+  if [[ -z "$resolved_prev" || "$resolved_prev" != "${SITE_BASE}/"* ]]; then
+    die "rollback" "Release directory must be under ${SITE_BASE}"
+  fi
 
-  *)
-    echo "Available commands: provision, deploy, rollback, start, stop, restart" >&2
-    exit 1
-    ;;
+  if [[ ! -d "$resolved_prev" ]]; then
+    die "rollback" "Previous release directory does not exist: ${previous_release}"
+  fi
+
+  local site_dir="${SITE_BASE}/${domain}"
+  local current_link="${site_dir}/current"
+  local service_name="alo-site-${domain}"
+
+  # Update symlink
+  ln -sfn "$resolved_prev" "$current_link"
+  chown -h "${APP_USER}:${APP_GROUP}" "$current_link"
+  log_info "Rolled back: current -> ${resolved_prev}"
+
+  # Restart service
+  if systemctl is-enabled "$service_name" &>/dev/null; then
+    systemctl restart "$service_name" || die "rollback" "Failed to restart service"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"rollback\",\"domain\":\"${domain}\",\"releaseDir\":\"${resolved_prev}\"}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  provision)   action_provision "$@" ;;
+  deploy)      action_deploy "$@" ;;
+  health-check) action_health_check "$@" ;;
+  rollback)    action_rollback "$@" ;;
+  *)           die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

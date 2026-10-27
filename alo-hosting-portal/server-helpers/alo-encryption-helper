@@ -1,0 +1,416 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Encryption Helper
+# File-level encryption, hashing, and RSA keypair generation using OpenSSL.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+APP_USER="alo-panel"
+SITE_BASE="/srv/alo-sites"
+
+log_err() { printf '[alo-encryption-helper] ERROR: %s\n' "${*}" >&2; }
+log_info() { printf '[alo-encryption-helper] INFO: %s\n' "${*}" >&2; }
+json_out() { printf '%s\n' "${*}"; }
+
+json_escape() {
+  local s="$1"
+  local bs=$'\\' q=$'"' nl=$'\n' cr=$'\r' tab=$'\t'
+  s="${s//$bs/$bs$bs}"
+  s="${s//$q/\\$q}"
+  s="${s//$nl/\\n}"
+  s="${s//$cr/\\r}"
+  s="${s//$tab/\\t}"
+  printf '%s' "$s"
+}
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"$(json_escape "${step}")\",\"error\":\"$(json_escape "${msg}")\"}"}
+  exit 1
+}
+
+reject_null_bytes() {
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == *$'\x00'* ]]; then
+      die "arg-validation" "Null byte detected in argument"
+    fi
+  done
+}
+
+validate_file_path() {
+  local target="$1"
+  local allow_write="$2"
+  if [[ -z "$target" ]]; then
+    die "arg-validation" "File path cannot be empty"
+  fi
+  if [[ "$target" == *$'\x00'* ]]; then
+    die "arg-validation" "Null byte in path"
+  fi
+  if [[ "$target" == *..* ]]; then
+    die "arg-validation" "Path traversal detected: $target"
+  fi
+  if [[ "$target" != /* ]]; then
+    die "arg-validation" "Path must be absolute: $target"
+  fi
+  if [[ -e "$target" || "$allow_write" == "true" ]]; then
+    local real_dir
+    real_dir=$(dirname "$target")
+    if [[ ! -d "$real_dir" ]]; then
+      die "arg-validation" "Parent directory does not exist: $real_dir"
+    fi
+    local resolved
+    resolved=$(realpath "$real_dir" 2>/dev/null) || true
+    local is_allowed=false
+    if [[ "$resolved" == "${SITE_BASE}"* ]]; then is_allowed=true; fi
+    if [[ "$resolved" == "/tmp" || "$resolved" == "/tmp/"* ]]; then is_allowed=true; fi
+    if [[ "$resolved" == "/var/backups/alo-sites"* ]]; then is_allowed=true; fi
+    if [[ "$is_allowed" == "false" ]]; then
+      die "arg-validation" "Path not under allowed directories: $target"
+    fi
+  fi
+}
+
+validate_cipher() {
+  if [[ "$1" != "aes-256-cbc" && "$1" != "aes-256-gcm" ]]; then
+    die "arg-validation" "Invalid cipher: $1 (must be aes-256-cbc or aes-256-gcm)"
+  fi
+}
+
+validate_hash_algo() {
+  if [[ "$1" != "sha256" && "$1" != "sha384" && "$1" != "sha512" && "$1" != "sha1" ]]; then
+    die "arg-validation" "Invalid hash algorithm: $1 (must be sha256, sha384, sha512, or sha1)"
+  fi
+}
+
+validate_key_size() {
+  if ! [[ "$1" =~ ^[0-9]+$ ]] || [[ "$1" -ne 2048 && "$1" -ne 3072 && "$1" -ne 4096 ]]; then
+    die "arg-validation" "Invalid key size: $1 (must be 2048, 3072, or 4096)"
+  fi
+}
+
+require_openssl() {
+  if ! command -v openssl &>/dev/null; then
+    die "prerequisite" "OpenSSL is not installed"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-encryption-helper <action> [args...]"
+fi
+
+reject_null_bytes "$@"
+
+ACTION="$1"
+shift
+
+# ── action: encrypt-file ──────────────────────────────────────────────────────
+action_encrypt_file() {
+  require_openssl
+
+  if [[ $# -lt 3 ]]; then
+    die "encrypt-file" "Usage: encrypt-file <input-path> <output-path> <passphrase-env-var> [cipher]"
+  fi
+
+  local input_path="$1"
+  local output_path="$2"
+  local passphrase_var="$3"
+  local cipher="${4:-aes-256-cbc}"
+
+  validate_file_path "$input_path" "false"
+  validate_file_path "$output_path" "true"
+  validate_cipher "$cipher"
+
+  if [[ ! "$passphrase_var" =~ ^[A-Z][A-Z0-9_]{0,63}$ ]]; then
+    die "encrypt-file" "Invalid env var name: $passphrase_var"
+  fi
+
+  local passphrase="${!passphrase_var:-}"
+  if [[ -z "$passphrase" ]]; then
+    die "encrypt-file" "Passphrase not found in environment variable: $passphrase_var"
+  fi
+  if [[ "$passphrase" == *$'\x00'* ]]; then
+    die "encrypt-file" "Null byte in passphrase"
+  fi
+
+  if [[ ! -f "$input_path" ]]; then
+    die "encrypt-file" "Input file not found: $input_path"
+  fi
+
+  local file_size
+  file_size=$(stat -c%s "$input_path" 2>/dev/null || echo "0")
+
+  if [[ "$file_size" -gt 524288000 ]]; then
+    die "encrypt-file" "File too large: $input_path (${file_size} bytes, max 500MB)"
+  fi
+
+  local openssl_exit=0
+  if [[ "$cipher" == "aes-256-gcm" ]]; then
+    openssl enc -${cipher} -salt -pbkdf2 -iter 100000 \
+      -in "$input_path" -out "$output_path" \
+      -pass "pass:${passphrase}" 2>/dev/null || openssl_exit=$?
+  else
+    openssl enc -${cipher} -salt -pbkdf2 -iter 100000 -md sha256 \
+      -in "$input_path" -out "$output_path" \
+      -pass "pass:${passphrase}" 2>/dev/null || openssl_exit=$?
+  fi
+
+  if [[ "$openssl_exit" -ne 0 ]]; then
+    rm -f "$output_path" 2>/dev/null || true
+    die "encrypt-file" "Encryption failed (exit code ${openssl_exit})"
+  fi
+
+  local output_size
+  output_size=$(stat -c%s "$output_path" 2>/dev/null || echo "0")
+
+  chmod 600 "$output_path" 2>/dev/null || true
+  passphrase=""
+
+  log_info "Encrypted ${input_path} -> ${output_path} (${cipher})"
+
+  json_out "{\"success\":true,\"step\":\"encrypt-file\",\"inputPath\":\"$(json_escape "$input_path")\",\"outputPath\":\"$(json_escape "$output_path")\",\"cipher\":\"${cipher}\",\"inputSize\":${file_size},\"outputSize\":${output_size}}"
+}
+
+# ── action: decrypt-file ──────────────────────────────────────────────────────
+action_decrypt_file() {
+  require_openssl
+
+  if [[ $# -lt 3 ]]; then
+    die "decrypt-file" "Usage: decrypt-file <input-path> <output-path> <passphrase-env-var> [cipher]"
+  fi
+
+  local input_path="$1"
+  local output_path="$2"
+  local passphrase_var="$3"
+  local cipher="${4:-aes-256-cbc}"
+
+  validate_file_path "$input_path" "false"
+  validate_file_path "$output_path" "true"
+  validate_cipher "$cipher"
+
+  if [[ ! "$passphrase_var" =~ ^[A-Z][A-Z0-9_]{0,63}$ ]]; then
+    die "decrypt-file" "Invalid env var name: $passphrase_var"
+  fi
+
+  local passphrase="${!passphrase_var:-}"
+  if [[ -z "$passphrase" ]]; then
+    die "decrypt-file" "Passphrase not found in environment variable: $passphrase_var"
+  fi
+  if [[ "$passphrase" == *$'\x00'* ]]; then
+    die "decrypt-file" "Null byte in passphrase"
+  fi
+
+  if [[ ! -f "$input_path" ]]; then
+    die "decrypt-file" "Input file not found: $input_path"
+  fi
+
+  local file_size
+  file_size=$(stat -c%s "$input_path" 2>/dev/null || echo "0")
+
+  local openssl_exit=0
+  if [[ "$cipher" == "aes-256-gcm" ]]; then
+    openssl enc -d -${cipher} \
+      -in "$input_path" -out "$output_path" \
+      -pass "pass:${passphrase}" 2>/dev/null || openssl_exit=$?
+  else
+    openssl enc -d -${cipher} -md sha256 \
+      -in "$input_path" -out "$output_path" \
+      -pass "pass:${passphrase}" 2>/dev/null || openssl_exit=$?
+  fi
+
+  if [[ "$openssl_exit" -ne 0 ]]; then
+    rm -f "$output_path" 2>/dev/null || true
+    die "decrypt-file" "Decryption failed (wrong passphrase or corrupted file)"
+  fi
+
+  local output_size
+  output_size=$(stat -c%s "$output_path" 2>/dev/null || echo "0")
+
+  passphrase=""
+
+  log_info "Decrypted ${input_path} -> ${output_path} (${cipher})"
+
+  json_out "{\"success\":true,\"step\":\"decrypt-file\",\"inputPath\":\"$(json_escape "$input_path")\",\"outputPath\":\"$(json_escape "$output_path")\",\"cipher\":\"${cipher}\",\"inputSize\":${file_size},\"outputSize\":${output_size}}"
+}
+
+# ── action: hash-file ─────────────────────────────────────────────────────────
+action_hash_file() {
+  require_openssl
+
+  if [[ $# -lt 1 ]]; then
+    die "hash-file" "Usage: hash-file <file-path> [algorithm]"
+  fi
+
+  local file_path="$1"
+  local algo="${2:-sha256}"
+
+  validate_file_path "$file_path" "false"
+  validate_hash_algo "$algo"
+
+  if [[ ! -f "$file_path" ]]; then
+    die "hash-file" "File not found: $file_path"
+  fi
+
+  local file_size
+  file_size=$(stat -c%s "$file_path" 2>/dev/null || echo "0")
+
+  local hash_value
+  hash_value=$(openssl dgst -"$algo" "$file_path" 2>/dev/null | awk '{print $NF}') || {
+    die "hash-file" "Failed to compute ${algo} hash"
+  }
+
+  json_out "{\"success\":true,\"step\":\"hash-file\",\"path\":\"$(json_escape "$file_path")\",\"algorithm\":\"${algo}\",\"hash\":\"$(json_escape "$hash_value")\",\"size\":${file_size}}"
+}
+
+# ── action: hash-string ───────────────────────────────────────────────────────
+action_hash_string() {
+  require_openssl
+
+  if [[ $# -lt 1 ]]; then
+    die "hash-string" "Usage: hash-string <string-to-hash> [algorithm]"
+  fi
+
+  local input_string="$1"
+  local algo="${2:-sha256}"
+
+  validate_hash_algo "$algo"
+
+  if [[ ${#input_string} -gt 1048576 ]]; then
+    die "hash-string" "Input string too long (max 1MB)"
+  fi
+
+  local hash_value
+  hash_value=$(printf '%s' "$input_string" | openssl dgst -"$algo" 2>/dev/null | awk '{print $NF}') || {
+    die "hash-string" "Failed to compute ${algo} hash"
+  }
+
+  json_out "{\"success\":true,\"step\":\"hash-string\",\"algorithm\":\"${algo}\",\"hash\":\"$(json_escape "$hash_value")\",\"inputLength\":${#input_string}}"
+}
+
+# ── action: generate-keypair ─────────────────────────────────────────────────
+action_generate_keypair() {
+  require_openssl
+
+  if [[ $# -lt 1 ]]; then
+    die "generate-keypair" "Usage: generate-keypair <output-dir> [key-size]"
+  fi
+
+  local output_dir="$1"
+  local key_size="${2:-4096}"
+
+  validate_file_path "$output_dir" "true"
+  validate_key_size "$key_size"
+
+  if [[ ! -d "$output_dir" ]]; then
+    die "generate-keypair" "Output directory does not exist: $output_dir"
+  fi
+
+  local private_key="${output_dir}/alo_encryption_private.pem"
+  local public_key="${output_dir}/alo_encryption_public.pem"
+
+  if [[ -f "$private_key" ]]; then
+    die "generate-keypair" "Private key already exists: $private_key"
+  fi
+
+  openssl genrsa -out "$private_key" "$key_size" 2>/dev/null || {
+    rm -f "$private_key" 2>/dev/null || true
+    die "generate-keypair" "Failed to generate RSA ${key_size}-bit private key"
+  }
+
+  openssl rsa -in "$private_key" -pubout -out "$public_key" 2>/dev/null || {
+    rm -f "$private_key" "$public_key" 2>/dev/null || true
+    die "generate-keypair" "Failed to extract public key"
+  }
+
+  chmod 600 "$private_key" 2>/dev/null || true
+  chmod 644 "$public_key" 2>/dev/null || true
+
+  local fingerprint
+  fingerprint=$(openssl rsa -in "$private_key" -pubout -outform DER 2>/dev/null | openssl md5 2>/dev/null | awk '{print $NF}') || echo "unknown"
+
+  log_info "Generated RSA ${key_size}-bit keypair in $output_dir"
+
+  json_out "{\"success\":true,\"step\":\"generate-keypair\",\"privateKeyPath\":\"$(json_escape "$private_key")\",\"publicKeyPath\":\"$(json_escape "$public_key")\",\"keySize\":${key_size},\"fingerprint\":\"$(json_escape "$fingerprint")\"}"
+}
+
+# ── action: generate-random ──────────────────────────────────────────────────
+action_generate_random() {
+  require_openssl
+
+  local byte_count="${1:-32}"
+
+  if ! [[ "$byte_count" =~ ^[0-9]+$ ]] || [[ "$byte_count" -lt 16 ]] || [[ "$byte_count" -gt 1024 ]]; then
+    die "arg-validation" "Byte count must be between 16 and 1024"
+  fi
+
+  local random_hex
+  random_hex=$(openssl rand -hex "$byte_count" 2>/dev/null) || {
+    die "generate-random" "Failed to generate random bytes"
+  }
+
+  local random_b64
+  random_b64=$(openssl rand -base64 "$byte_count" 2>/dev/null) || {
+    die "generate-random" "Failed to generate random bytes"
+  }
+
+  json_out "{\"success\":true,\"step\":\"generate-random\",\"bytes\":${byte_count},\"hex\":\"$(json_escape "$random_hex")\",\"base64\":\"$(json_escape "$random_b64")\"}"
+}
+
+# ── action: verify-file ──────────────────────────────────────────────────────
+action_verify_file() {
+  require_openssl
+
+  if [[ $# -lt 2 ]]; then
+    die "verify-file" "Usage: verify-file <file-path> <expected-hash> [algorithm]"
+  fi
+
+  local file_path="$1"
+  local expected_hash="$2"
+  local algo="${3:-sha256}"
+
+  validate_file_path "$file_path" "false"
+  validate_hash_algo "$algo"
+
+  local expected_len
+  case "$algo" in
+    sha256) expected_len=64 ;;
+    sha384) expected_len=96 ;;
+    sha512) expected_len=128 ;;
+    sha1)   expected_len=40 ;;
+  esac
+
+  if ! [[ "$expected_hash" =~ ^[a-fA-F0-9]{${expected_len}}$ ]]; then
+    die "verify-file" "Invalid ${algo} hash format (expected ${expected_len} hex chars)"
+  fi
+
+  if [[ ! -f "$file_path" ]]; then
+    die "verify-file" "File not found: $file_path"
+  fi
+
+  local actual_hash
+  actual_hash=$(openssl dgst -"$algo" "$file_path" 2>/dev/null | awk '{print $NF}') || {
+    die "verify-file" "Failed to compute ${algo} hash"
+  }
+
+  local matches="false"
+  if [[ "$actual_hash" == "$expected_hash" ]]; then
+    matches="true"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"verify-file\",\"path\":\"$(json_escape "$file_path")\",\"algorithm\":\"${algo}\",\"expected\":\"$(json_escape "$expected_hash")\",\"actual\":\"$(json_escape "$actual_hash")\",\"matches\":${matches}}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  encrypt-file)      action_encrypt_file "$@" ;;
+  decrypt-file)      action_decrypt_file "$@" ;;
+  hash-file)         action_hash_file "$@" ;;
+  hash-string)       action_hash_string "$@" ;;
+  generate-keypair)  action_generate_keypair "$@" ;;
+  generate-random)   action_generate_random "$@" ;;
+  verify-file)       action_verify_file "$@" ;;
+  *)                 die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requirePermission } from '@/lib/auth';
+import { requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { callHelper } from '@/lib/helpers';
 import { createAuditLog } from '@/lib/audit';
@@ -25,12 +25,13 @@ export async function POST(request: NextRequest) {
 
     const certificate = await db.sslCertificate.findUnique({
       where: { domainId },
-      include: { domain: true },
+      include: { domain: { include: { website: true } } },
     });
 
     if (!certificate) {
       throw apiError('No existing certificate found for this domain', 'NOT_FOUND', undefined, 404);
     }
+    assertWebsiteAccess(user, certificate.domain.website);
 
     const domain = certificate.domain.domain;
 

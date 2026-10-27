@@ -66,7 +66,11 @@ systemctl is-active --quiet smbd && ok "smbd active" || warn "smbd not active"
 systemctl is-active --quiet nmbd && ok "nmbd active" || warn "nmbd not active"
 sudo -u "$KIT_PRIMARY_USER" systemctl --user is-active --quiet syncthing.service && ok "syncthing active" || warn "syncthing not active"
 testparm -s 2>/dev/null | grep -q '\[documents\]' && ok "Samba [documents] share present" || fail "Samba [documents] missing"
-testparm -s 2>/dev/null | grep -q '\[backups\]' && ok "Samba [backups] share present" || fail "Samba [backups] missing"
+if testparm -s 2>/dev/null | grep -q '/var/backups/alo-db'; then
+  fail "SECURITY: /var/backups/alo-db must NOT be exported over Samba"
+else
+  ok "DB backups isolated from Samba shares"
+fi
 
 banner "SUMMARY"
 printf "  Passed:    %3d\n" "$PASS"

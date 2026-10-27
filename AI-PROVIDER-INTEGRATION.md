@@ -14,8 +14,9 @@ GitHub/npm/PyPI), so latency, quotas, model quality and real free-tier limits ar
 
 | Layer | File | What it does |
 |---|---|---|
-| Provider registry | `src/lib/ai/providers.ts` | Catalogue of OpenAI-compatible backends, env-driven chain resolution, base-URL validation, secret redaction |
-| Client | `src/lib/ai/client.ts` | Chat completions with ordered failover, bounded retries, circuit breaker, timeouts, JSON mode, live model list, real health probes |
+| Provider registry | `src/lib/ai/providers.ts` | Catalogue of 10 OpenAI-compatible backends (`llm7`, `unorouter`, `openai`, `openrouter`, `qwen`, `glm`, `groq`, `gateway`, `ollama`, `localai`), `ProviderCapabilities`, SSRF metadata/wildcard blocking, topology-aware redaction |
+| Client | `src/lib/ai/client.ts` | Chat completions with ordered failover, bounded retries, circuit breaker + `getProviderCircuitStates()`, `redirect: "error"`, capability-clamped `max_tokens`, `requestId` correlation, JSON mode, live model list, real health probes |
+| Self-hosted agents & sizing | `src/lib/ai/self-hosted-agents.ts`, `src/lib/ai/hardware-sizing.ts`, `src/lib/ai/deploy-assistant.ts` | Zod-validated pinned-tag agent catalog, 13-use-case decision matrix, GPU/VRAM/KV-cache sizing calculator, and hardened loopback container deployment assistant (see `docs/SELF-HOSTED-AI-AGENTS.md`) |
 | Usage accounting | `src/lib/ai/usage.ts` | Persists real `usage` from the upstream against the acting user (`token_usage`) |
 | Automation engine | `src/lib/ai/automation/engine.ts` | DAG execution with per-step results, budgets, timeouts, dry-run |
 | Graph model / validation | `src/lib/ai/automation/graph.ts` | Strict DAG validation, node-type allowlist, size caps |
@@ -53,17 +54,16 @@ AI_MODEL_UNOROUTER=<model id enabled for your token>
 # Optional extra providers
 GROQ_API_KEY=
 PROVIDER_OPENAI_API_KEY=      # deliberately separate from OPENAI_API_KEY
-GLM_API_KEY=                  # or ZHIPU_API_KEY (matches zai-org/GLM-5 official skills)
-GLM_BASE_URL=https://api.z.ai/api/paas/v4   # or https://open.bigmodel.cn/api/paas/v4 or http://127.0.0.1:8000/v1 (local vLLM/SGLang)
-AI_MODEL_GLM=glm-5            # glm-5, glm-5.1, glm-5.2, glm-5.3, glm-5.3-flash
-GLM_REASONING_EFFORT=         # optional: low | high | max
+GLM_API_KEY=                  # Z.ai / Zhipu OpenAI-compatible or self-hosted GLM-4/GLM-5
+GLM_BASE_URL=                 # confirm regional host (api.z.ai vs open.bigmodel.cn)
 AI_GATEWAY_URL=http://127.0.0.1:4000/v1   # self-hosted LiteLLM/vLLM
-OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 # self-hosted Ollama
-LOCALAI_BASE_URL=http://127.0.0.1:8080/v1 # self-hosted LocalAI (text/vision/audio/embeddings)
 AI_GATEWAY_KEY=
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 # opt-in local Ollama
+LOCALAI_BASE_URL=http://127.0.0.1:18080/v1 # opt-in local LocalAI
+LOCALAI_API_KEY=
 
 # Chain behaviour
-AI_PROVIDER_ORDER=unorouter,llm7,groq,glm
+AI_PROVIDER_ORDER=unorouter,llm7,groq
 AI_FREE_ONLY=false
 AI_PROVIDER=                  # pin one provider id
 AI_TIMEOUT_MS=60000
@@ -78,7 +78,7 @@ Resolution rules (all covered in `tests/ai-providers.test.ts`):
 1. A legacy `OPENAI_API_KEY` + `OPENAI_BASE_URL` pair becomes `custom` and is
    tried **first**, so existing deployments keep their gateway.
 2. Remaining providers follow `AI_PROVIDER_ORDER` (default
-   `unorouter,llm7,groq,glm,gateway,ollama`).
+   `unorouter,llm7,groq,gateway,ollama`).
 3. Providers that need a key are skipped when the key is empty, with the reason
    reported by `GET /api/ai/providers`.
 4. Self-hosted endpoints (`gateway`, `ollama`) are opt-in: they join the chain
@@ -137,7 +137,7 @@ documented here instead of merged.
 |---|---|---|
 | `https://llm7.io` / `https://api.llm7.io/v1` | **Free-tier OpenAI-compatible gateway.** Own docs: anonymous access works for a subset of models; a free token from `token.llm7.io` raises limits (order of 60 req/min, 250 req/hour, daily token quota, 100k tokens/day on the free token). | Registered as provider `llm7`, default first choice for a keyless install. Model IDs rotate → read `/api/ai/models`. Quotas are the operator's to respect; the panel does not promise "unlimited free AI". |
 | `https://github.com/unorouter/unorouter` | **Not a free model and not an API server.** The repo is an AGPL-3.0 Next.js+Elysia storefront/dashboard for the UnoRouter gateway (a `new-api` fork reselling 130+ upstream providers): API keys, credits, billing, price comparison, chat client, model tester. | Registered as provider `unorouter` (paid, key required). The storefront code is **not** vendored — running a second frontend next to this panel adds nothing. Point `UNOROUTER_BASE_URL` at the gateway host from your UnoRouter dashboard and set a token; the default host in the catalogue is marked *unverified*. `tests/ai-providers.test.ts` asserts it stays flagged until you override it. |
-| `https://github.com/zai-org/GLM-5` | **Apache-2.0 open-weights model family (GLM-5, GLM-5.1, GLM-5.2, GLM-5.3, GLM-5.3-Flash; 1M context & agentic engineering) + Z.ai / Zhipu BigModel OpenAI-compatible API.** | **Integrated as provider `glm`** (`src/lib/ai/providers.ts`, `src/lib/ai/client.ts`), LiteLLM gateway route (`alo-server-kit/configs/litellm/config.yaml.tpl`), and agent preset `glm5-engineer`. Accepts `GLM_API_KEY` or `ZHIPU_API_KEY`; set `GLM_BASE_URL` to `https://api.z.ai/api/paas/v4` (international), `https://open.bigmodel.cn/api/paas/v4` (China), or `http://127.0.0.1:8000/v1` (keyless local vLLM/SGLang). Optional `GLM_REASONING_EFFORT` (`low`\|`high`\|`max`) controls thinking budget. Note: never load 320B–744B weights inside the Next.js panel process — run vLLM/SGLang on a dedicated GPU host or use the cloud API. |
+| `https://github.com/zai-org/GLM-5` | Model release (weights + inference recipe), not an endpoint. | Not installed. If you want GLM for free, host it on GPU with vLLM/Ollama and register the local endpoint (`AI_GATEWAY_URL`/`OLLAMA_BASE_URL`) — that turns it into a `self-hosted` provider in the chain. Requires GPU VRAM, disk, ops and licence review; the panel process itself must never load model weights. |
 
 ### 4.2 Free-model projects that are not safe or stable as a backend
 
@@ -172,17 +172,13 @@ its own.
 | Source | Status | What was actually done |
 |---|---|---|
 | `openrouter.ai` | **PASS (adapter)** | Registered `openrouter` provider in `src/lib/ai/providers.ts` (`OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `AI_MODEL_OPENROUTER`). It joins the existing failover/retry/breaker chain only when listed in `AI_PROVIDER_ORDER` and a key is set. Live call is **NOT TESTED** here (egress restricted). |
-| `github.com/zai-org/GLM-5` | **PASS (adapter + LiteLLM + agent)** | Registered `glm` provider in `src/lib/ai/providers.ts` (`GLM_API_KEY` / `ZHIPU_API_KEY`, `GLM_BASE_URL`, `AI_MODEL_GLM`, `GLM_REASONING_EFFORT`), added LiteLLM routes (`glm-5`, `glm-5.3-flash`) in `alo-server-kit`, and added `glm5-engineer` agent seed. Supports both Z.ai/BigModel cloud API and keyless localhost vLLM/SGLang (`http://127.0.0.1:8000/v1`). Covered by unit tests in `tests/ai-extra-providers.test.ts` and `tests/ai-client.test.ts`. |
 | `coder.qwen.ai` / Qwen | **PASS (adapter)** | Registered `qwen` provider using DashScope's OpenAI-compatible mode (`QWEN_API_KEY`, `QWEN_BASE_URL`, `AI_MODEL_QWEN`). The default host is flagged **unverified** because the correct endpoint depends on the account region; the UI warns until the operator sets `QWEN_BASE_URL`. Qwen Coder itself is a coding-agent CLI, not an inference API — it is not executed inside the panel. |
 | `cline.bot` / `github.com/cline/cline` | **BLOCKED** | Cline (and Continue) are local/IDE coding agents. They need a workspace, their own model credentials and an interactive approval loop. The panel does not spawn them; a future integration would be an authenticated job worker, not a library import. Licensing and unattended-execution risk need review first. |
 | `buffer.com`, `larksuite.com`, `refine.ink`, `hetrixtools.com` | **BLOCKED** | These are SaaS products requiring OAuth apps/API keys and webhook endpoints. No credentials were supplied, so no integration is claimed. The existing CRM/email/monitoring modules are the natural hosts for those features. |
 | `mureka.ai`, `supercool.com`, `enerpize.com`, `aipraktor.com`, `hatchable.com`, `mat3ra.com`, `astryx.atmeta.com`, `stackoverflow.com` | **NOT APPLICABLE** | Third-party products or reference sites; no public inference/hosting API was specified. Documented in §4.3, not vendored. |
 
-Provider resolution is covered by `tests/ai-extra-providers.test.ts`. These adapters are
+Provider resolution is covered by `tests/ai-extra-providers.test.ts`. Both adapters are
 disabled by default until deliberately enabled — no free-tier or quality claim is made.
-For the complete evaluation of all 52 supplied repositories and platforms (VoIP/call-center,
-CometChat, EdTech English tutors, Nginx Proxy Manager, Molx, QA tools, and SaaS integrations),
-see [docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md).
 
 ---
 
@@ -211,3 +207,8 @@ see [docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md](docs/ECOSYSTEM-INTEGRATION-ANALYSIS
 | Free-tier rate limits, model availability, response quality | **NOT VERIFIED** |
 | Scheduled (cron) automations | **NOT IMPLEMENTED** — design sketch in `docs/AI-AUTOMATION.md` §7 |
 | Mutating automation tools (restart/backup/delete) | **NOT IMPLEMENTED**, intentionally |
+
+
+## GLM-5 (`zai-org/GLM-5` — Apache-2.0)
+
+Set `GLM_API_KEY` (or `ZHIPU_API_KEY`) and `GLM_BASE_URL=https://api.z.ai/api/paas/v4` (or `http://127.0.0.1:8000/v1` for local vLLM/SGLang).

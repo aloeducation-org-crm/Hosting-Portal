@@ -1,20 +1,31 @@
-# ALO Labs Hosting Portal — Sudo Policy
-# Install to: /etc/sudoers.d/alo-hosting-portal
-# Permissions: root:root 0440
-# Validate with: visudo -cf /etc/sudoers.d/alo-hosting-portal
+# ALO Labs Hosting Control Panel - Restricted Sudoers Policy
+# Install to: /etc/sudoers.d/alo-helpers
+# Permissions: root:root 0440   (validate with `sudo visudo -cf /etc/sudoers.d/alo-helpers`)
+#
+# Allows the unprivileged Node.js process user (alo-panel) to invoke ONLY
+# root-owned helper executables at exact paths. Never grant wildcard systemctl
+# access; each helper validates arguments and enforces path/domain allowlists.
 
-# Helper script execution (root-owned, specific paths only)
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-hosting-helper
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-restore
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-database-helper
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-domain-helper
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-node-app-helper
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-file-manager-helper
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-log-helper
-aloedu ALL=(root) NOPASSWD: /usr/local/sbin/alo-health-helper
+Defaults:alo-panel secure_path="/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-# Caddy reload
-aloedu ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy
-
-# Site systemd service management (pattern-restricted)
-aloedu ALL=(root) NOPASSWD: /usr/bin/systemctl restart alo-site-*, /usr/bin/systemctl start alo-site-*, /usr/bin/systemctl stop alo-site-*, /usr/bin/systemctl enable alo-site-*, /usr/bin/systemctl disable alo-site-*
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-hosting-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-lifecycle
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-backup
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-site-restore
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-database-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-domain-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-node-app-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-file-manager-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-log-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-health-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-firewall-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssl-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-email-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-cron-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-ssh-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-encryption-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-deploy-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-dns-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-docker-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/provision-site.sh
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/ssl-lifecycle.sh

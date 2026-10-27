@@ -222,11 +222,63 @@ const agents: SeedAgent[] = [
     config: JSON.stringify({ temperature: 0.3, maxTokens: 4096 }),
     sortOrder: 14,
   },
+  {
+    name: 'Bill Agent AI — বিল এজেন্ট এআই',
+    slug: 'alo-bill-ops-autopilot',
+    description:
+      'Autonomous Billing & Master Platform Operator AI: manages plans, subscriptions, invoices, auto-deployments (ports 3062+), CRM pipeline, and digital marketing in বাংলা & English.',
+    category: 'business',
+    icon: 'Bot',
+    systemPrompt:
+      'You are Bill Agent AI (বিল এজেন্ট এআই), the built-in Autonomous Billing & Master Platform Operator for ALO Hosting Portal on alo-server-lap (103.231.239.79). You assist operators in Bengali and English across subscriptions, invoices, orders, hosting auto-deployments (protecting port 3051 and allocating 3062+), CRM deals, and digital marketing campaigns.',
+    isFree: true,
+    isPublished: true,
+    config: JSON.stringify({ temperature: 0.2, maxTokens: 4096, capabilities: ['billing', 'hosting', 'crm', 'marketing'] }),
+    sortOrder: 15,
+  },
+  {
+    name: 'Digital Marketing Director AI',
+    slug: 'alo-digital-marketing-director',
+    description:
+      '360° Digital Marketing Strategist: Meta & Google Ads, 7-day social calendars, technical SEO/Schema, UTM funnels, email broadcasts, and CRM lead conversion.',
+    category: 'marketing',
+    icon: 'Megaphone',
+    systemPrompt:
+      'You are the Digital Marketing Director AI for ALO Hosting Portal. You design full-funnel marketing campaigns in Bengali and English across Meta Ads, Google Search Ads, SEO/Schema, email broadcasts, UTM tracking, and CRM pipeline conversion.',
+    isFree: true,
+    isPublished: true,
+    config: JSON.stringify({ temperature: 0.5, maxTokens: 4096, capabilities: ['ads', 'seo', 'email', 'utm', 'crm'] }),
+    sortOrder: 16,
+  },
 ]
 
+export async function ensureDefaultAgentsSeeded(): Promise<{ seeded: number; total: number }> {
+  let seeded = 0
+  for (const def of agents) {
+    const existing = await db.aiAgent.findUnique({ where: { slug: def.slug } })
+    if (existing) continue
+    const parsedConfig = JSON.parse(def.config) as Record<string, unknown>
+    await db.aiAgent.create({
+      data: {
+        name: def.name,
+        slug: def.slug,
+        description: def.description,
+        category: def.category,
+        icon: def.icon,
+        config: {
+          systemPrompt: def.systemPrompt,
+          ...parsedConfig,
+        },
+        isActive: true,
+      },
+    })
+    seeded++
+  }
+  return { seeded, total: agents.length }
+}
+
 export async function seedAgents() {
-  // Agents are stored in-memory / API-driven, not in Prisma DB
-  // This function provides the agent definitions for API seeding
+  await ensureDefaultAgentsSeeded()
   return agents.map(a => ({ id: a.slug, name: a.name, slug: a.slug }))
 }
 

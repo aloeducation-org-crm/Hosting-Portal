@@ -19,7 +19,7 @@ import {
   LayoutDashboard, Globe, Link2, Database, Box, Server, Bot,
   Activity, GitBranch, ShieldCheck, HardDrive, CreditCard, Users,
   Mail, Settings, ChevronLeft, ChevronRight, LogOut, Bell, Command,
-  Container, Shield, ScrollText, Network, FolderOpen,
+  Container, Shield, ScrollText, Network, FolderOpen, Megaphone, Cpu,
 } from 'lucide-react'
 import { ALOLogoMark } from './ALOLogo'
 import dynamic from 'next/dynamic'
@@ -27,7 +27,7 @@ import dynamic from 'next/dynamic'
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, Globe, Link2, Database, Box, Server, Bot,
   Activity, GitBranch, ShieldCheck, HardDrive, CreditCard, Users,
-  Mail, Settings, Container, Shield, ScrollText, Network, FolderOpen,
+  Mail, Settings, Container, Shield, ScrollText, Network, FolderOpen, Megaphone, Cpu,
 }
 
 const AuthScreen = dynamic(() => import('./AuthScreen'), { ssr: false })
@@ -49,6 +49,8 @@ const LogsView = lazy(() => import('./views/LogsView'))
 const NetworkView = lazy(() => import('./views/NetworkView'))
 const StorageView = lazy(() => import('./views/StorageView'))
 const BillingView = lazy(() => import('./views/BillingView'))
+const MarketingView = lazy(() => import('@/components/marketing/DigitalMarketingHub').then((m) => ({ default: m.DigitalMarketingHub })))
+const OperatorView = lazy(() => import('@/components/ai/OperatorConsole').then((m) => ({ default: m.OperatorConsole })))
 const CRMView = lazy(() => import('./views/CRMView'))
 const EmailView = lazy(() => import('./views/EmailView'))
 const SettingsView = lazy(() => import('./views/SettingsView'))
@@ -60,6 +62,7 @@ const viewComponents: Record<ViewId, React.LazyExoticComponent<React.ComponentTy
   databases: DatabasesView,
   applications: ApplicationsView,
   agents: AgentsView,
+  operator: OperatorView,
   monitoring: MonitoringView,
   cicd: CICDView,
   ssl: SSLView,
@@ -71,6 +74,7 @@ const viewComponents: Record<ViewId, React.LazyExoticComponent<React.ComponentTy
   network: NetworkView,
   storage: StorageView,
   billing: BillingView,
+  marketing: MarketingView,
   crm: CRMView,
   email: EmailView,
   settings: SettingsView,

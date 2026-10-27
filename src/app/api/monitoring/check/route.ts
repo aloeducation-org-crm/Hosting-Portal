@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requirePermission } from '@/lib/auth';
+import { requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import tls from 'node:tls';
 import { callHelper } from '@/lib/helpers';
@@ -94,6 +94,7 @@ export async function POST(request: NextRequest) {
     if (!website) {
       return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
+    assertWebsiteAccess(user, website);
 
     const results: Record<string, unknown> = {
       websiteId: website.id,

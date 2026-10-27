@@ -28,7 +28,26 @@ const nextConfig: NextConfig = {
   // works is worse than none. The deploy workflow prunes old releases instead.
 
   reactStrictMode: true,
+  poweredByHeader: false,
   allowedDevOrigins: ["*.e2b.app"],
+  async headers() {
+    const baseHeaders = [
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      ...(process.env.ALLOW_PREVIEW_EMBED === "1"
+        ? []
+        : [{ key: "X-Frame-Options", value: "SAMEORIGIN" }]),
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+      { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+      { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
+    ];
+    return [
+      {
+        source: "/:path*",
+        headers: baseHeaders,
+      },
+    ];
+  },
   typescript: {
     ignoreBuildErrors: false,
   },

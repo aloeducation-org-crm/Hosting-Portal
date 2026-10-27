@@ -46,7 +46,7 @@ const registerSchema = z
       .regex(/[0-9]/, "Include at least one number"),
     confirmPassword: z.string(),
     agreed: z.literal(true, {
-      errorMap: () => ({ message: "You must accept the Terms of Service" }),
+      error: "You must accept the Terms of Service",
     }),
   })
   .refine((data) => data.password === data.confirmPassword, {

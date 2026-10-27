@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
+import { requireSession } from '@/lib/auth';
+import { ensureDefaultAgentsSeeded } from '@/lib/seed-agents';
+import { apiError, type ApiResponse } from '@/lib/response';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -12,9 +14,16 @@ function handleErr(e: unknown): NextResponse {
 
 export async function GET(request: NextRequest) {
   try {
+    await requireSession(request);
+
+    const existingCount = await db.aiAgent.count();
+    if (existingCount === 0) {
+      await ensureDefaultAgentsSeeded();
+    }
+
     const { searchParams } = new URL(request.url);
     const category = searchParams.get('category');
-    const search = searchParams.get('search');
+    const search = searchParams.get('search')?.trim().slice(0, 120);
 
     const where: Record<string, unknown> = { isActive: true };
     if (category && category !== 'All') {
@@ -29,6 +38,7 @@ export async function GET(request: NextRequest) {
 
     const agents = await db.aiAgent.findMany({
       where,
+      take: 100,
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { runs: true } },

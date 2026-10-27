@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# ALO Labs - DNS Helper
+# Manages DNS records via local JSON zone files
+# Usage: alo-dns-helper <command> [args...]
+
+set -euo pipefail
+
+ZONE_DIR="/etc/alo-dns/zones"
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    echo '{"success":false,"error":"Invalid domain name"}'
+    exit 1
+  fi
+}
+
+validate_record_type() {
+  local t="$1"
+  case "$t" in
+    A|AAAA|CNAME|MX|TXT|NS|SRV|CAA|SOA) return 0 ;;
+    *)
+      echo "{\"success\":false,\"error\":\"Invalid record type: $t\"}"
+      exit 1
+      ;;
+  esac
+}
+
+validate_name() {
+  local n="$1"
+  if [[ ! "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ || "$n" =~ ^\. ]]; then
+    echo '{"success":false,"error":"Invalid record name"}'
+    exit 1
+  fi
+}
+
+zone_file() {
+  echo "$ZONE_DIR/$1.json"
+}
+
+# Ensure zone file exists with default structure
+ensure_zone() {
+  local domain="$1"
+  local zf
+  zf=$(zone_file "$domain")
+  if [[ ! -f "$zf" ]]; then
+    mkdir -p "$ZONE_DIR"
+    echo "{\"domain\":\"$domain\",\"records\":[]}" | jq . > "$zf" 2>/dev/null || \
+      echo "{\"domain\":\"$domain\",\"records\":[]}" > "$zf"
+  fi
+  echo "$zf"
+}
+
+COMMAND="${1:?Usage: alo-dns-helper <command> [args...]}"
+shift
+
+case "$COMMAND" in
+  list)
+    DOMAIN="${1:?Usage: list <domain>}"
+    validate_domain "$DOMAIN"
+
+    ZF="$(zone_file "$DOMAIN")"
+    if [[ ! -f "$ZF" ]]; then
+      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"records\":[],\"count\":0,\"listedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+      exit 0
+    fi
+
+    RECORDS=$(jq -c '.records' "$ZF" 2>/dev/null || echo "[]")
+    COUNT=$(jq '.records | length' "$ZF" 2>/dev/null || echo 0)
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"records\":$RECORDS,\"count\":$COUNT,\"listedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  add)
+    DOMAIN="${1:?Usage: add <domain> <type> <name> <value> [ttl] [priority]}"
+    TYPE="${2:?Usage: add <domain> <type> <name> <value> [ttl] [priority]}"
+    NAME="${3:?Usage: add <domain> <type> <name> <value> [ttl] [priority]}"
+    VALUE="${4:?Usage: add <domain> <type> <name> <value> [ttl] [priority]}"
+    TTL="${5:-3600}"
+    PRIORITY="${6:-0}"
+    validate_domain "$DOMAIN"
+    validate_record_type "$TYPE"
+    validate_name "$NAME"
+
+    ZF=$(ensure_zone "$DOMAIN")
+
+    NEW_RECORD=$(jq -n \
+      --arg type "$TYPE" \
+      --arg name "$NAME" \
+      --arg value "$VALUE" \
+      --argjson ttl "$TTL" \
+      --argjson priority "$PRIORITY" \
+      '{type: $type, name: $name, value: $value, ttl: $ttl, priority: $priority, createdAt: (now | todate)}')
+
+    jq ".records += [$NEW_RECORD]" "$ZF" > "${ZF}.tmp" && mv "${ZF}.tmp" "$ZF"
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"type\":\"$TYPE\",\"name\":\"$NAME\",\"value\":\"$VALUE\",\"ttl\":$TTL,\"priority\":$PRIORITY,\"addedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  update)
+    DOMAIN="${1:?Usage: update <domain> <type> <name> <new_value>}"
+    TYPE="${2:?Usage: update <domain> <type> <name> <new_value>}"
+    NAME="${3:?Usage: update <domain> <type> <name> <new_value>}"
+    NEW_VALUE="${4:?Usage: update <domain> <type> <name> <new_value>}"
+    validate_domain "$DOMAIN"
+    validate_record_type "$TYPE"
+    validate_name "$NAME"
+
+    ZF="$(zone_file "$DOMAIN")"
+    if [[ ! -f "$ZF" ]]; then
+      echo "{\"success\":false,\"error\":\"Zone file not found: $DOMAIN\"}"
+      exit 1
+    fi
+
+    # Check if record exists
+    MATCH_COUNT=$(jq -r --arg type "$TYPE" --arg name "$NAME" '.records | map(select(.type == $type and .name == $name)) | length' "$ZF")
+    if [[ "$MATCH_COUNT" -eq 0 ]]; then
+      echo "{\"success\":false,\"error\":\"Record not found: $TYPE $NAME for $DOMAIN\"}"
+      exit 1
+    fi
+
+    jq --arg type "$TYPE" --arg name "$NAME" --arg value "$NEW_VALUE" \
+      '(.records[] | select(.type == $type and .name == $name)).value = $value | \
+       (.records[] | select(.type == $type and .name == $name)).updatedAt = (now | todate)' \
+      "$ZF" > "${ZF}.tmp" && mv "${ZF}.tmp" "$ZF"
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"type\":\"$TYPE\",\"name\":\"$NAME\",\"newValue\":\"$NEW_VALUE\",\"updatedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  delete)
+    DOMAIN="${1:?Usage: delete <domain> <type> <name>}"
+    TYPE="${2:?Usage: delete <domain> <type> <name>}"
+    NAME="${3:?Usage: delete <domain> <type> <name>}"
+    validate_domain "$DOMAIN"
+    validate_record_type "$TYPE"
+    validate_name "$NAME"
+
+    ZF="$(zone_file "$DOMAIN")"
+    if [[ ! -f "$ZF" ]]; then
+      echo "{\"success\":false,\"error\":\"Zone file not found: $DOMAIN\"}"
+      exit 1
+    fi
+
+    jq --arg type "$TYPE" --arg name "$NAME" \
+      '.records |= map(select(.type != $type or .name != $name))' \
+      "$ZF" > "${ZF}.tmp" && mv "${ZF}.tmp" "$ZF"
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"type\":\"$TYPE\",\"name\":\"$NAME\",\"deletedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  verify)
+    DOMAIN="${1:?Usage: verify <domain> <type> <name> <expected>}"
+    TYPE="${2:?Usage: verify <domain> <type> <name> <expected>}"
+    NAME="${3:?Usage: verify <domain> <type> <name> <expected>}"
+    EXPECTED="${4:?Usage: verify <domain> <type> <name> <expected>}"
+    validate_domain "$DOMAIN"
+    validate_record_type "$TYPE"
+
+    FQDN="${NAME}.${DOMAIN}"
+    RESOLVED=$(dig +short "$TYPE" "$FQDN" 2>/dev/null | head -1 || echo "")
+    MATCHES=false
+    if [[ "$RESOLVED" == "$EXPECTED" ]]; then
+      MATCHES=true
+    fi
+
+    RESOLVED_SAFE=$(echo "$RESOLVED" | sed 's/"/\\"/g')
+    EXPECTED_SAFE=$(echo "$EXPECTED" | sed 's/"/\\"/g')
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"type\":\"$TYPE\",\"name\":\"$NAME\",\"fqdn\":\"$FQDN\",\"expected\":\"$EXPECTED_SAFE\",\"resolved\":\"$RESOLVED_SAFE\",\"matches\":$MATCHES,\"verifiedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  propagation)
+    DOMAIN="${1:?Usage: propagation <domain>}"
+    validate_domain "$DOMAIN"
+
+    GOOGLE_RESULT=$(dig @8.8.8.8 +short A "$DOMAIN" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+    CLOUDFLARE_RESULT=$(dig @1.1.1.1 +short A "$DOMAIN" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+    LOCAL_RESULT=$(dig +short A "$DOMAIN" 2>/dev/null | sort | tr '\n' ',' | sed 's/,$//')
+
+    PROPAGATED=false
+    if [[ -n "$GOOGLE_RESULT" && -n "$CLOUDFLARE_RESULT" && "$GOOGLE_RESULT" == "$CLOUDFLARE_RESULT" ]]; then
+      PROPAGATED=true
+    fi
+
+    GOOGLE_SAFE=$(echo "$GOOGLE_RESULT" | sed 's/"/\\"/g')
+    CF_SAFE=$(echo "$CLOUDFLARE_RESULT" | sed 's/"/\\"/g')
+    LOCAL_SAFE=$(echo "$LOCAL_RESULT" | sed 's/"/\\"/g')
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"google8_8_8_8\":\"$GOOGLE_SAFE\",\"cloudflare1_1_1_1\":\"$CF_SAFE\",\"local\":\"$LOCAL_SAFE\",\"propagated\":$PROPAGATED,\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  deploy)
+    DOMAIN="${1:?Usage: deploy <domain>}"
+    validate_domain "$DOMAIN"
+
+    ZF="$(zone_file "$DOMAIN")"
+    if [[ ! -f "$ZF" ]]; then
+      echo "{\"success\":false,\"error\":\"Zone file not found: $DOMAIN\"}"
+      exit 1
+    fi
+
+    # Generate BIND zone file from JSON
+    ZONE_FILE="/etc/bind/zones/${DOMAIN}.zone"
+    ZONE_DIR_BIND="/etc/bind/zones"
+    mkdir -p "$ZONE_DIR_BIND" 2>/dev/null || true
+
+    SERIAL=$(date +%Y%m%d01)
+    ORIG_SERIAL=$(grep -oP '([0-9]{10})' "$ZONE_FILE" 2>/dev/null | head -1 || echo "")
+    if [[ -n "$ORIG_SERIAL" && "$ORIG_SERIAL" > "$SERIAL" ]]; then
+      SERIAL=$((ORIG_SERIAL + 1))
+    fi
+
+    cat > "$ZONE_FILE" << ZONE_EOF
+\$TTL 3600
+@   IN  SOA ns1.alolabs.host. admin.alolabs.host. (
+        $SERIAL       ; Serial
+        3600          ; Refresh
+        1800          ; Retry
+        604800        ; Expire
+        86400 )       ; Minimum TTL
+
+; NS records
+@   IN  NS  ns1.alolabs.host.
+@   IN  NS  ns2.alolabs.host.
+ZONE_EOF
+
+    # Add records from JSON
+    RECORD_COUNT=0
+    while IFS= read -r record; do
+      RTYPE=$(echo "$record" | jq -r '.type')
+      RNAME=$(echo "$record" | jq -r '.name')
+      RVALUE=$(echo "$record" | jq -r '.value')
+      RTTL=$(echo "$record" | jq -r '.ttl')
+      RPRIORITY=$(echo "$record" | jq -r '.priority')
+
+      if [[ "$RTYPE" == "MX" ]]; then
+        echo "$RNAME  IN  $RTYPE  $RPRIORITY $RVALUE" >> "$ZONE_FILE"
+      elif [[ "$RTYPE" == "TXT" ]]; then
+        echo "$RNAME  IN  TXT  \"$RVALUE\"" >> "$ZONE_FILE"
+      else
+        echo "$RNAME  IN  $RTYPE  $RVALUE" >> "$ZONE_FILE"
+      fi
+      RECORD_COUNT=$((RECORD_COUNT + 1))
+    done < <(jq -c '.records[]' "$ZF" 2>/dev/null)
+
+    # Reload DNS server
+    RELOADED=false
+    if command -v rndc &>/dev/null; then
+      rndc reload "$DOMAIN" 2>/dev/null && RELOADED=true
+    elif command -v systemctl &>/dev/null; then
+      systemctl reload bind9 2>/dev/null && RELOADED=true
+      systemctl reload named 2>/dev/null && RELOADED=true
+      systemctl reload nsd 2>/dev/null && RELOADED=true
+    fi
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"zoneFile\":\"$ZONE_FILE\",\"recordCount\":$RECORD_COUNT,\"serial\":\"$SERIAL\",\"reloaded\":$RELOADED,\"deployedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  *)
+    echo "Available commands: list, add, update, delete, verify, propagation, deploy" >&2
+    exit 1
+    ;;
+esac

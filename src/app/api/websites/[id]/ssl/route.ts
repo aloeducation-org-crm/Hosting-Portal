@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission, ROLES } from '@/lib/auth';
+import { requireSession, requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
 
@@ -16,6 +16,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const user = await requireSession(request);
     const { id } = await params;
+
+    const website = await db.website.findUnique({ where: { id } });
+    if (!website || website.deletedAt) {
+      return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
+    }
+    assertWebsiteAccess(user, website);
 
     const domain = await db.domain.findFirst({
       where: { websiteId: id, primary: true },
@@ -34,6 +40,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const user = await requirePermission(request, 'SSL_MANAGE');
     const { id } = await params;
+
+    const website = await db.website.findUnique({ where: { id } });
+    if (!website || website.deletedAt) {
+      return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
+    }
+    assertWebsiteAccess(user, website);
 
     const domain = await db.domain.findFirst({
       where: { websiteId: id, primary: true },

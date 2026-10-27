@@ -1,62 +1,71 @@
-import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { isAdminRole, requireSession } from '@/lib/auth';
-import { apiError, apiSuccess } from '@/lib/response';
-import { redactProviderForRole, resolveProviders } from '@/lib/ai/providers';
-import { probeChain } from '@/lib/ai/client';
+import { requireSession, isAdminRole } from '@/lib/auth';
+import { apiError, apiSuccess, type ApiResponse } from '@/lib/response';
+import { redactProvider, resolveProviders } from '@/lib/ai/providers';
+import { getProviderCircuitStates, probeChain } from '@/lib/ai/client';
 
 /**
- * GET /api/ai/status            → configuration summary (no network calls)
- * GET /api/ai/status?probe=1    → configuration + a live round-trip per provider (admin-only)
+ * GET /api/ai/status            → configuration + circuit summary (no network calls)
+ * GET /api/ai/status?probe=1    → configuration + a live round-trip per provider (60s TTL)
  *
- * `state` is CONFIGURED_NOT_CHECKED until a live probe actually succeeds, because
- * a resolved provider only proves that environment variables were set.
+ * Notice the distinction: without `probe=1` we report `CONFIGURED` or
+ * `UNCONFIGURED`, never `HEALTHY`. Only an actual completion proves a provider
+ * works. Force-bypassing the 60s probe cache (`?force=1`) is restricted to
+ * Admin/DevOps roles so unprivileged tenants cannot exhaust free-tier quotas.
  */
+function handleErr(e: unknown): NextResponse {
+  if (e && typeof e === 'object' && 'status' in e) {
+    const a = e as ApiResponse;
+    return NextResponse.json(a, { status: a.status });
+  }
+  return NextResponse.json(apiError('Internal server error'), { status: 500 });
+}
+
 export async function GET(request: NextRequest) {
-  const requestId = request.headers.get('x-request-id') || randomUUID();
   try {
     const user = await requireSession(request);
-    const admin = isAdminRole(user.role);
-    const resolution = resolveProviders(process.env);
-    const configured = resolution.providers.length > 0;
-    const url = new URL(request.url);
-    const wantProbe = url.searchParams.get('probe') === '1';
+    const isOperator = isAdminRole(user.role) || user.role === 'DEVOPS';
+    const { searchParams } = new URL(request.url);
+    const probe = searchParams.get('probe') === '1' || searchParams.get('probe') === 'true';
+    const force = isOperator && (searchParams.get('force') === '1' || searchParams.get('force') === 'true');
 
-    if (wantProbe && !admin) {
+    const resolution = resolveProviders(process.env);
+    const active = resolution.providers.map((p) => redactProvider(p, { includeTopology: isOperator }));
+    const circuits = getProviderCircuitStates(resolution.providers);
+    const safeSkipped = resolution.skipped.map((s) => ({
+      id: s.id,
+      label: s.label,
+      reason: isOperator ? s.reason : 'not configured',
+    }));
+    const safeWarnings = isOperator ? resolution.warnings : [];
+
+    if (!probe) {
       return NextResponse.json(
-        apiError('Live provider probing requires administrator privileges', 'FORBIDDEN', undefined, 403),
-        { status: 403, headers: { 'X-Request-Id': requestId } },
+        apiSuccess({
+          state: active.length > 0 ? 'CONFIGURED' : 'UNCONFIGURED',
+          probed: false,
+          active,
+          circuits,
+          skipped: safeSkipped,
+          warnings: safeWarnings,
+        }),
       );
     }
 
-    const probes = wantProbe && configured ? await probeChain(false) : null;
-    const healthy = probes ? probes.some((probe) => probe.ok) : null;
-
+    const probes = active.length > 0 ? await probeChain(force) : [];
+    const anyHealthy = probes.some((entry) => entry.ok);
     return NextResponse.json(
       apiSuccess({
-        requestId,
-        configured,
-        state: !configured
-          ? 'NOT_CONFIGURED'
-          : healthy === null
-          ? 'CONFIGURED_NOT_CHECKED'
-          : healthy
-          ? 'HEALTHY'
-          : 'UNHEALTHY',
-        // Legacy fields kept for existing clients.
-        providerType: configured ? 'openai-compatible-chain' : null,
-        model: resolution.providers[0]?.model ?? null,
-        chain: resolution.providers.map((p) => redactProviderForRole(p, admin)),
-        skipped: admin ? resolution.skipped : [],
-        warnings: admin ? resolution.warnings : [],
+        state: active.length === 0 ? 'UNCONFIGURED' : anyHealthy ? 'HEALTHY' : 'UNREACHABLE',
+        probed: true,
+        active,
+        circuits,
         probes,
+        skipped: safeSkipped,
+        warnings: safeWarnings,
       }),
-      { headers: { 'X-Request-Id': requestId } },
     );
-  } catch {
-    return NextResponse.json(
-      { success: false, error: 'Authentication required' },
-      { status: 401, headers: { 'X-Request-Id': requestId } },
-    );
+  } catch (e) {
+    return handleErr(e);
   }
 }

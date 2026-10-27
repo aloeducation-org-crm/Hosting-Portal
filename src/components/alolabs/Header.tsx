@@ -254,6 +254,7 @@ function NavDropdown({
     >
       <button
         type="button"
+        onClick={() => setOpen((prev) => !prev)}
         className={`inline-flex items-center gap-1 py-2 px-3 text-sm font-medium rounded-md transition-colors duration-150 ${
           open ? 'text-[#E8501A]' : 'text-[#1E293B] hover:text-[#E8501A]'
         }`}
@@ -443,21 +444,21 @@ export default function Header() {
                 NEW
               </span>
             </a>
-            <button
-              type="button"
+            <a
+              href="/ai/assistant"
               className="inline-flex items-center gap-1.5 py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors"
             >
               <Bot className="size-4" />
               Ask AI
-            </button>
-            <button
-              type="button"
+            </a>
+            <a
+              href="/ai/auto-deploy"
               className="inline-flex items-center gap-1 py-2 px-2 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors"
+              title="Bilingual EN / বাংলা Control Plane"
             >
               <Globe2 className="size-4" />
-              EN
-              <ChevronDown className="size-3" />
-            </button>
+              EN / বাংলা
+            </a>
           </nav>
 
           {/* Right side */}

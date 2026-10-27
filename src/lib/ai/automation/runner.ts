@@ -1,6 +1,6 @@
 /**
- * Production wiring for the workflow engine: real AI client, tenant-scoped
- * read-only hosting tools, and run persistence.
+ * Production wiring for the workflow engine: real AI client, read-only hosting
+ * tools, and run persistence.
  *
  * The engine itself has no database or network dependency — this module is the
  * only place that knows about both, which keeps the engine unit-testable.
@@ -8,13 +8,12 @@
 
 import { db } from "@/lib/db";
 import { completeWithAI } from "@/lib/ai/client";
-import { createHostingToolsForActor } from "./tools";
+import { createScopedHostingTools } from "./tools";
 import { parseStoredWorkflow } from "./graph";
-import { runWorkflowGraph, type WorkflowRunResult } from "./engine";
+import { runWorkflowGraph, type WorkflowActor, type WorkflowRunResult } from "./engine";
 
 export interface StoredWorkflow {
   id: string;
-  userId?: string | null;
   name?: string | null;
   nodes?: string | null;
   edges?: string | null;
@@ -59,13 +58,6 @@ export async function executeStoredWorkflow(
   const trigger = options.trigger ?? "manual";
   const graph = parseStoredWorkflow(workflow); // throws WorkflowValidationError
 
-  // Resolve actor scope: never fall back to cross-tenant access.
-  const effectiveUserId = options.userId ?? workflow.userId ?? null;
-  const scopedTools = createHostingToolsForActor({
-    userId: effectiveUserId,
-    isAdmin: Boolean(options.isAdmin),
-  });
-
   let runId: string | null = null;
   if (persist) {
     const run = await db.aiWorkflowRun.create({
@@ -81,6 +73,11 @@ export async function executeStoredWorkflow(
     });
     runId = run.id;
   }
+
+  const actor: WorkflowActor = {
+    userId: options.userId ?? null,
+    isAdmin: Boolean(options.isAdmin),
+  };
 
   let result: WorkflowRunResult;
   try {
@@ -102,13 +99,14 @@ export async function executeStoredWorkflow(
             tokensUsed: completion.tokensUsed,
           };
         },
-        tools: scopedTools,
+        tools: createScopedHostingTools(actor),
       },
       {
         input: options.input ?? null,
         dryRun,
         continueOnError: options.continueOnError,
         signal: options.signal,
+        actor,
       },
     );
   } catch (error) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission } from '@/lib/auth';
+import { requireSession, requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { z } from 'zod';
 
@@ -31,6 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!website || website.deletedAt) {
       return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
+    assertWebsiteAccess(user, website);
 
     const environments = await db.websiteEnvironment.findMany({
       where: { websiteId: id },
@@ -60,6 +61,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!website || website.deletedAt) {
       return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
+    assertWebsiteAccess(user, website);
 
     const body = await request.json();
     const parsed = upsertEnvSchema.safeParse(body);

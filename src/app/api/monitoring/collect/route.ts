@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSuperAdmin, ROLES } from '@/lib/auth';
+import { requireSuperAdmin, verifyInternalSecretValue } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { env } from '@/lib/env';
 import * as os from 'os';
 import { statfs } from 'node:fs/promises';
 
@@ -30,13 +29,10 @@ function handleErr(e: unknown): NextResponse {
 
 export async function POST(request: NextRequest) {
   try {
-    // Auth: either SUPER_ADMIN or internal secret
+    // Auth: either SUPER_ADMIN or constant-time verified internal secret
     const internalSecret = request.headers.get('X-Internal-Secret');
-    let user;
-    if (internalSecret && internalSecret === env.INTERNAL_SECRET) {
-      // Internal auth passed
-    } else {
-      user = await requireSuperAdmin(request);
+    if (!verifyInternalSecretValue(internalSecret)) {
+      await requireSuperAdmin(request);
     }
 
     // Collect system-level metrics
