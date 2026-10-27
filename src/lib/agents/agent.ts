@@ -77,6 +77,34 @@ export function signPayload(secret: string, body: string, timestamp: string, non
     .digest("hex");
 }
 
+/** Signature validity window. Exported so the nonce TTL matches it exactly. */
+export const SIGNATURE_MAX_SKEW_MS = 5 * 60_000;
+
+/** How long a recorded human approval of an agent task stays valid. */
+export const AGENT_APPROVAL_TTL_MS = 60 * 60_000;
+
+/**
+ * Consume a request nonce: single use, per agent.
+ *
+ * The unique index on (agentId, nonce) is the guard, not a read-then-write, so
+ * two concurrent replays of the same captured request race on the insert and
+ * exactly one wins. Rows are kept only as long as the signature window they
+ * belong to (`SIGNATURE_MAX_SKEW_MS`); after that the timestamp check rejects
+ * the request anyway, so pruning keeps the table bounded.
+ */
+export async function consumeRequestNonce(agentId: string, nonce: string, now = Date.now()): Promise<boolean> {
+  try {
+    await db.agentNonce.create({
+      data: { agentId, nonce: nonce.slice(0, 128), expiresAt: new Date(now + SIGNATURE_MAX_SKEW_MS) },
+    });
+  } catch {
+    // P2002: this (agent, nonce) pair was already consumed — a replay.
+    return false;
+  }
+  await db.agentNonce.deleteMany({ where: { expiresAt: { lt: new Date(now) } } }).catch(() => ({ count: 0 }));
+  return true;
+}
+
 export function verifySignature(opts: {
   secret: string;
   body: string;
@@ -291,6 +319,25 @@ export async function authenticateAgentRequest(opts: {
     logger.warn({ agentId: agent.id, reason: check.reason }, "agent signature rejected");
     return { ok: false as const, reason: check.reason ?? "Invalid signature", agent };
   }
+
+  // The signature is valid, so this really came from someone holding the secret.
+  // That is exactly why the nonce must be single use: without this check a
+  // captured request stays valid for the rest of the timestamp window, which on
+  // /api/agents/tasks/result would allow a forged "task succeeded".
+  if (!(await consumeRequestNonce(agent.id, opts.nonce))) {
+    await createAuditLog({
+      action: "AGENT_AUTH_FAILURE",
+      resourceType: "ServerAgent",
+      resourceId: agent.id,
+      result: "FAILURE",
+      ipAddress: opts.ip,
+      errorCode: "NONCE_REPLAY",
+      metadata: { reason: "nonce already used within the signature window" },
+    });
+    logger.warn({ agentId: agent.id }, "agent request replayed: nonce already consumed");
+    return { ok: false as const, reason: "This request was already received (nonce replay)", agent };
+  }
+
   return { ok: true as const, agent, secret };
 }
 
@@ -532,7 +579,7 @@ export async function approveAgentTask(
   // Conditional write: two admins clicking approve produce one winner.
   const updated = await db.agentTask.updateMany({
     where: { id: taskId, status: "PENDING", requiresApproval: true, approvedBy: null },
-    data: { approvedBy: actor.email },
+    data: { approvedBy: actor.email, approvedAt: new Date() },
   });
   if (updated.count !== 1) return { ok: false, reason: "Task was approved or dispatched by someone else first" };
 
@@ -577,15 +624,26 @@ export async function rejectAgentTask(
   return { ok: true };
 }
 
-/** Claim the oldest pending, approved task for an agent (atomic). */
-export async function claimTask(agentId: string) {
-  const cutoff = new Date(Date.now() - TASK_CLAIM_TTL_MS);
+/**
+ * Claim the oldest pending, approved task for an agent (atomic).
+ *
+ * A gated task is claimable only while its approval is fresh: an operator
+ * approved a specific host state at a specific moment, and a task that has sat
+ * unclaimed past `AGENT_APPROVAL_TTL_MS` must be re-approved rather than
+ * executed on stale authority.
+ */
+export async function claimTask(agentId: string, now = Date.now()) {
+  const cutoff = new Date(now - TASK_CLAIM_TTL_MS);
+  const approvalFloor = new Date(now - AGENT_APPROVAL_TTL_MS);
   const candidates = await db.agentTask.findMany({
     where: {
       agentId,
       status: "PENDING",
       createdAt: { gte: cutoff },
-      OR: [{ requiresApproval: false }, { approvedBy: { not: null } }],
+      OR: [
+        { requiresApproval: false },
+        { requiresApproval: true, approvedBy: { not: null }, approvedAt: { gte: approvalFloor } },
+      ],
     },
     orderBy: { createdAt: "asc" },
     take: 5,
@@ -604,12 +662,34 @@ export async function claimTask(agentId: string) {
 
 /** Mark tasks that were dispatched but never started as TIMED_OUT. */
 export async function expireStaleTasks() {
-  const cutoff = new Date(Date.now() - TASK_CLAIM_TTL_MS);
+  const now = Date.now();
+  const cutoff = new Date(now - TASK_CLAIM_TTL_MS);
   const res = await db.agentTask.updateMany({
     where: { status: { in: ["PENDING", "ASSIGNED"] }, createdAt: { lt: cutoff } },
     data: { status: "TIMED_OUT", finishedAt: new Date(), error: "No agent claimed this task within the claim window" },
   });
   if (res.count > 0) logger.warn({ count: res.count }, "expired stale agent tasks");
+
+  // An approval older than its window is revoked, so the task becomes
+  // unclaimable again and shows up in the dashboard as waiting for a human.
+  const staleApprovals = await db.agentTask.updateMany({
+    where: {
+      status: "PENDING",
+      requiresApproval: true,
+      approvedBy: { not: null },
+      approvedAt: { lt: new Date(now - AGENT_APPROVAL_TTL_MS) },
+    },
+    data: { approvedBy: null, approvedAt: null },
+  });
+  if (staleApprovals.count > 0) {
+    logger.warn({ count: staleApprovals.count }, "revoked expired agent task approvals");
+    await createAuditLog({
+      action: "AGENT_TASK_APPROVAL_EXPIRED",
+      resourceType: "AgentTask",
+      result: "WAITING_APPROVAL",
+      metadata: { count: staleApprovals.count, ttlMs: AGENT_APPROVAL_TTL_MS },
+    }).catch(() => {});
+  }
   return res.count;
 }
 

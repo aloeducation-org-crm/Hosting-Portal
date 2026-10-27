@@ -885,6 +885,7 @@ model ServerAgent {
   server  Server?      @relation(fields: [serverId], references: [id], onDelete: SetNull)
   tasks   AgentTask[]
   metrics AgentMetric[]
+  nonces  AgentNonce[]
 
   @@index([status])
   @@index([serverId])
@@ -893,6 +894,24 @@ model ServerAgent {
 }
 
 /// Short-lived, single-use enrollment token exchanged for an agent secret.
+/// One row per consumed agent request nonce. The unique index on
+/// (agentId, nonce) is the replay guard: a captured signed request can be
+/// presented once, and a second presentation — even concurrently — fails the
+/// insert. Rows expire with the signature window they belong to.
+model AgentNonce {
+  id        String   @id @default(uuid())
+  agentId   String
+  nonce     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  agent ServerAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, nonce])
+  @@index([expiresAt])
+  @@map("agent_nonces")
+}
+
 model AgentEnrollmentToken {
   id         String    @id @default(uuid())
   tokenHash  String    @unique // sha256 of the token; plaintext shown once
@@ -923,6 +942,10 @@ model AgentTask {
   timeoutMs     Int             @default(30000)
   requiresApproval Boolean      @default(false)
   approvedBy    String?
+  /// When the human approval was recorded. An approval is only valid for a
+  /// bounded window: a task that sits unclaimed past it must be re-approved,
+  /// because the operator's decision was about the host state at that moment.
+  approvedAt    DateTime?
   dispatchedAt  DateTime?
   startedAt     DateTime?
   finishedAt    DateTime?

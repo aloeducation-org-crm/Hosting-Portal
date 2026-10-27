@@ -54,6 +54,46 @@ were writing into the tracked development database. They now import
 `tests/helpers/isolated-db.ts` first, which points `DATABASE_URL` at a throwaway
 copy, so `db/custom.db` is byte-identical after a full run.
 
+## Update 2026-10-27 (later) — Gate A review and Gate B remediation
+
+PR #13 was **merged to `main` on 2026-10-27 11:06 UTC** (`3dd3986`), which
+triggered production workflow run
+[`40493667038`](https://github.com/aloeducation-org-crm/Hosting-Portal/actions/runs/40493667038).
+Its `verify` and `build` jobs passed; its **deploy job has been `queued` since
+11:09 UTC and no self-hosted runner has picked it up**, so production has not
+been modified. That queued job carries the *old* workflow (a run always uses the
+workflow from its own commit), which applies migrations with no backup, no
+transaction, no lock and the table rebuild enabled by default. It should be
+cancelled or superseded by someone with runner access. Details and the exact
+administrator actions: `docs/DEPLOYMENT-AND-ROLLBACK.md` §1.
+
+Gate B fixes, on `arena/b2ec9268-hosting-portal` (commits `b715531`, `2e1e128`,
+`ebf37f5`, `994d737`):
+
+| Finding | Status | Evidence |
+|---|---|---|
+| A.2 rebuild migration ran by default, unbacked, unverified | **VERIFIED FIXED (code + tests)** | `tests/migration-safety.test.ts` (27); rebuilds opt-in, transactional, backup-verified, locked, fail-closed target |
+| A.3 agent nonce not single-use → replayable signed request | **VERIFIED FIXED (code + tests)** | `agent_nonces` unique index; `tests/server-agent.test.ts` (37 → 46) |
+| Phase 2 agent approvals never expired | **VERIFIED FIXED (code + tests)** | `approvedAt` + `AGENT_APPROVAL_TTL_MS`; sweep audits `AGENT_TASK_APPROVAL_EXPIRED` |
+| A.4 Origin-less mutations bypassed CSRF; no token | **VERIFIED FIXED (code + tests)** | `src/lib/security/csrf.ts` (Web Crypto), `CsrfGuard`, `tests/csrf.test.ts` (24) |
+| A.4 enroll rate limit trusted spoofable `x-forwarded-for` | **VERIFIED FIXED** | keyed on `x-real-ip`, matching the middleware policy |
+| A.5 artifact uploaded but unused; no deployed-SHA check; no rollback; no single flight | **IMPLEMENTED, TESTING REQUIRED** | `scripts/deploy-release.sh`, `scripts/deploy-preflight.sh`, `src/lib/deploy/preflight.ts`, release identity in `/api/health`; `tests/deploy-pipeline.test.ts` (27). Never executed on a real host. |
+| A.1 no production approval gate | **BLOCKED — APPROVAL REQUIRED** | deploy job now declares `environment: production`, but the environment has `protection_rules: []` and configuring reviewers returns **403** for this token |
+| Branch protection on `main` | **UNVERIFIED** | `GET /branches/main/protection` → 403; `GET /rulesets` → `[]` |
+| Secret scanning / dependency alerts | **UNVERIFIED** | 403 / 404 for this token. `npm ci` reported 0 vulnerabilities locally. |
+| Migration header falsely claimed a transaction | **VERIFIED FIXED** | comment corrected; the runner now actually provides it |
+| CSRF module imported `node:crypto` into the Edge middleware | **VERIFIED FIXED** | caught by `npm run build` ("Ecmascript file had an error"); rewritten on Web Crypto |
+| Phases 8/9/10 (AI memory, Bangla voice, CRM/telephony) | **NOT IMPLEMENTED** | designs in `docs/AI-MEMORY-ARCHITECTURE.md`, `docs/MULTILINGUAL-VOICE-EVALUATION.md`; no voice or memory code exists |
+| Phase 11 webhook → orchestrator | **NOT IMPLEMENTED (deferred by instruction)** | webhook still uses the legacy queue; the orchestrator worker drains both, so no duplicate execution |
+
+Suite after Gate B: `npx tsc --noEmit` clean, `npm run lint` clean,
+`npm run build` succeeds (2 pre-existing Turbopack tracing warnings),
+`npx vitest run` → **25 files, 365 tests passed, 0 failed**, and `db/custom.db`
+byte-identical afterwards.
+
+Full readiness assessment, blocker list and authorization checklists:
+`docs/PRODUCTION-READINESS-REPORT.md`.
+
 ## Domain / service inventory (verification limits)
 
 `hosting.alolabs.net`, `panel.alolabs.net`, `agents.alolabs.net` and

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { CsrfGuard } from "@/components/security/CsrfGuard";
 
 export const metadata: Metadata = {
   title: "ALO Labs - Bring Your Idea Online With a Website",
@@ -26,6 +27,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+        {/* Issues the CSRF cookie and patches window.fetch so every existing
+            same-origin mutation carries the token. Renders nothing. */}
+        <CsrfGuard />
         {children}
       </body>
     </html>

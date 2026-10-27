@@ -151,8 +151,14 @@ Nothing in this table fabricates success. Where a worker cannot confirm an outco
 
 - **Enrollment**: `alo_enroll_*` token, sha256-hashed at rest, 15-minute TTL, **single use** via an atomic
   claim. Credentials `alo_agt_*` / `alo_ags_*`; the secret is returned exactly once and stored encrypted.
-- **Requests**: HMAC-SHA256 over `timestamp.nonce.sha256(body)`, ±5 minute replay window, minimum nonce
-  length, constant-time comparison. Failures are rejected **and** audited (`AGENT_AUTH_FAILURE`).
+- **Requests**: HMAC-SHA256 over `timestamp.nonce.sha256(body)`, ±5 minute replay window, constant-time
+  comparison. Failures are rejected **and** audited (`AGENT_AUTH_FAILURE`).
+- **Replay prevention**: the nonce is *single use*, not merely long enough. `agent_nonces` has a unique
+  index on `(agentId, nonce)`; the insert is the guard, so concurrent replays produce exactly one
+  success, and a replay is audited as `NONCE_REPLAY`. Nonces are consumed only **after** the signature
+  verifies, so an attacker who cannot sign cannot burn a victim's nonce space. (An earlier revision of
+  this document described "replay window and nonce" while the code only checked nonce *length* — a
+  captured request could be replayed for the rest of the window. Corrected 2026-10-27.)
 - **Allowlist**: nine commands, argv-only, never shell strings. The agent carries a **second compiled-in
   copy** and re-validates arguments, so a compromised control plane still cannot widen what a host runs.
   A new agent gets **read-only capabilities only**; `service.restart` and `backup.database` must be granted
@@ -163,6 +169,10 @@ Nothing in this table fabricates success. Where a worker cannot confirm an outco
   `approvedBy`, and `claimTask()` will not hand it to a host until an administrator approves it
   (`approveAgentTask`, `POST /api/agents/tasks/{id}/approve`, audited with the approver's identity).
   Refusing it (`rejectAgentTask`) marks it `REFUSED` so it can never be claimed.
+- **Approvals expire**: `approvedAt` is recorded and a task is claimable only while the approval is
+  within `AGENT_APPROVAL_TTL_MS` (1 hour). `expireStaleTasks()` clears aged approvals so the dashboard
+  shows the task as waiting for a human again, and audits `AGENT_TASK_APPROVAL_EXPIRED`. An operator
+  approved a specific host state at a specific moment; that authority is not open-ended.
 - **Egress redaction**: the agent strips GitHub tokens, AWS keys, private key bodies, database URLs with
   passwords and `password=…` values before anything leaves the host; the panel redacts again on write.
 - **SSRF guard**: `health.probe` accepts loopback / RFC1918 / CGNAT-Tailscale only. Hostnames are refused
@@ -348,8 +358,18 @@ applier is always safe. Always copy the database file first; the rebuild migrati
 `20261027093000_operation_jobs_platform_scope` rewrites `operation_jobs` and then rebuilds `audit_logs`
 to restore its foreign-key text (SQLite rewrites stored FK text on `RENAME`).
 
-Verified: row counts identical before/after (`audit_logs` 22, `users` 3, `websites` 1, `deployments` 2,
-`git_projects` 1), FK text intact, 11 + 6 indexes recreated.
+Verified: row counts identical before/after, FK text intact, 11 + 6 indexes recreated.
+
+**Since Gate A this applier has been hardened**, because two failure modes were reproduced against
+disposable copies: an interrupted rebuild dropped `audit_logs` while the applier printed
+`{"ok": true}` and exited 0, and a schema mismatch orphaned `operation_jobs_new` so every later deploy
+failed on `CREATE TABLE`. Rebuild migrations are now **opt-in** (`--allow-rebuild` plus a verified
+`--backup`), run inside a single `BEGIN IMMEDIATE` transaction, carry precondition and postcondition
+checks (tables, columns, row counts, FK text, indexes, no orphans, `integrity_check`,
+`foreign_key_check`, and `audit_logs` in the required-schema map), take an exclusive lock, and require
+an explicit absolute database target — there is **no** `file:./db/custom.db` fallback any more. A
+deployment never applies a rebuild. Full procedure: `docs/DATABASE-RECOVERY-RUNBOOK.md`;
+tests: `tests/migration-safety.test.ts` (27).
 
 ### 5.3 Measured numbers (fill in as drills happen)
 
@@ -423,14 +443,19 @@ recovery role. No auto-scaling is assumed anywhere in this plan.
 
 ```
 npx tsc --noEmit        → clean (exit 0)
-npx vitest run          → 22 files, 278 tests passed, 0 failed
+npm run lint            → clean (0 problems)
+npm run build           → succeeds; 2 pre-existing Turbopack tracing warnings (documented in next.config.ts)
+npx vitest run          → 25 files, 365 tests passed, 0 failed
 ```
 
 | File | Tests | Covers |
 | --- | --- | --- |
 | `tests/orchestrator.test.ts` | 32 | durability, idempotency, leases, backoff, dead-letter, approval gates, cancellation, redaction, the 10-worker catalogue, real deployment |
-| `tests/server-agent.test.ts` | 37 | allowlist, both copies of it, HMAC + replay window, enrollment single-use/expiry, task approval gate, redaction, SSRF guard, real probe, real failure |
+| `tests/server-agent.test.ts` | 46 | allowlist (both copies), HMAC, nonce replay, approval gate + expiry, redaction, SSRF guard, real probe, real failure |
 | `tests/db-audit.test.ts` | 40 | engine/version parsing, family mismatch, binlog/GTID/server_id, failover readiness, capacity verdicts, placement plan |
+| `tests/migration-safety.test.ts` | 27 | rebuild authorization, transactions, backup verification, preconditions/postconditions, both reproduced failure modes, recovery, locking |
+| `tests/deploy-pipeline.test.ts` | 27 | deployment shape decision, release identity, `/api/health`, workflow gates, script guarantees |
+| `tests/csrf.test.ts` | 24 | CSRF primitive, middleware enforcement, exemptions, issuing route |
 | `tests/deploy-e2e.test.ts` and the rest | 169 | pre-existing behaviour — unchanged and still passing |
 
 Test-suite hygiene fix included here: five pre-existing test files imported `@/lib/db` statically and

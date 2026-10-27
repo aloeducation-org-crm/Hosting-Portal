@@ -40,11 +40,17 @@ const dbPath = path.join(root, "orchestrator.db");
 beforeAll(async () => {
   await fs.mkdir(root, { recursive: true });
   await fs.copyFile(path.resolve("db/custom.db"), dbPath);
-  execFileSync(process.execPath, ["scripts/apply-deploy-schema.mjs"], {
-    cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: `file:${dbPath}` },
-    stdio: "pipe",
-  });
+  // This suite exercises platform-wide jobs (operation_jobs.websiteId IS NULL),
+  // which need the table-rebuild migration. A rebuild is opt-in and requires a
+  // verified backup, so the suite provides one: a pristine copy of the source
+  // database, exactly as an operator would before touching a real one.
+  const backupPath = path.join(root, "pre-migration-backup.db");
+  await fs.copyFile(path.resolve("db/custom.db"), backupPath);
+  execFileSync(
+    process.execPath,
+    ["scripts/apply-deploy-schema.mjs", "--allow-rebuild", "--backup", backupPath],
+    { cwd: process.cwd(), env: { ...process.env, DATABASE_URL: `file:${dbPath}` }, stdio: "pipe" },
+  );
 
   process.env.DATABASE_URL = `file:${dbPath}`;
   process.env.APP_ENCRYPTION_KEY = "a".repeat(64);

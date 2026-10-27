@@ -1,15 +1,23 @@
 name: CI and production deploy
 
+# Triggers are explicit. A bare `on: push` ran this workflow for every branch
+# push in the repository, which wasted CI minutes and made it harder to reason
+# about what can reach production. Only main and develop are deployment shapes;
+# everything else is verified through its pull request.
 on:
   push:
+    branches: [main, develop]
   pull_request:
     branches: [main, develop]
 
 permissions:
   contents: read
 
+# CI concurrency is per-ref and cancellable for PRs, so a force-push does not
+# leave two runs racing. Production deployment has its own single-flight group
+# below — one deploy at a time, never cancelled mid-flight.
 concurrency:
-  group: hosting-${{ github.workflow }}-${{ github.ref }}
+  group: hosting-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -33,6 +41,8 @@ jobs:
     name: Production build
     needs: verify
     runs-on: ubuntu-latest
+    outputs:
+      artifact-digest: ${{ steps.digest.outputs.value }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,6 +64,22 @@ jobs:
           DATABASE_URL: file:/tmp/alo-hosting-ci.db
       - name: Check standalone entrypoint
         run: test -s .next/standalone/server.js
+      # The digest travels inside the artifact and is also published as a job
+      # output, so the host can prove the payload it received is the payload CI
+      # built — and the two values can be compared in the run summary.
+      - name: Record release payload digest
+        id: digest
+        run: |
+          set -Eeuo pipefail
+          {
+            find .next/standalone .next/static public prisma helpers \
+                 scripts/init-production-db.sh scripts/apply-deploy-schema.mjs \
+                 scripts/deploy-production.sh scripts/deploy-release.sh \
+                 scripts/deploy-preflight.sh scripts/decide-release-target.mjs \
+                 -type f -print0 2>/dev/null \
+              | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1
+          } | tee .deploy-digest
+          echo "value=$(cat .deploy-digest)" >> "$GITHUB_OUTPUT"
       - name: Upload verified release payload
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
@@ -68,21 +94,49 @@ jobs:
             prisma
             helpers
             scripts/init-production-db.sh
+            scripts/apply-deploy-schema.mjs
+            scripts/deploy-production.sh
+            scripts/deploy-release.sh
+            scripts/deploy-preflight.sh
+            scripts/decide-release-target.mjs
+            .deploy-digest
 
-  deploy:
-    name: Deploy canonical root portal to production server
+  # Read-only. Runs on the production runner BEFORE any approval gate so the
+  # approver sees host evidence, and it changes nothing on the host: no checkout,
+  # no install into the app directory, no build, no migration, no restart.
+  deploy-preflight:
+    name: Read-only production preflight
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
-    timeout-minutes: 10
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.decide.outputs.mode }}
+      decision: ${{ steps.decide.outputs.reason }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Installed in the ephemeral workspace only, never in the app checkout.
+      - run: npm ci --include=dev
       - uses: actions/download-artifact@v4
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
-      - name: Read-only production preflight
-        shell: bash
+      - name: Verify the artifact digest matches what CI built
+        run: |
+          set -Eeuo pipefail
+          test -f .deploy-artifact/.deploy-digest || { echo "::error::artifact carries no digest"; exit 1; }
+          got="$(cat .deploy-artifact/.deploy-digest)"
+          want="${{ needs.build.outputs.artifact-digest }}"
+          [ "$got" = "$want" ] || { echo "::error::artifact digest mismatch: downloaded $got, CI built $want"; exit 1; }
+          echo "artifact digest verified: $got"
+      - name: Read-only host preflight
+        id: decide
+        env:
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
         run: |
           set -Eeuo pipefail
           APP_DIR="$HOME/projects/Hosting-Portal"
@@ -94,29 +148,63 @@ jobs:
             git -C "$APP_DIR" status --short --untracked-files=normal
             exit 1
           fi
-      - name: Activate canonical root release, restart, and verify
+          # Decides canonical (promote the CI artifact into an immutable release)
+          # versus inline (in place, with capture + additive-only migration +
+          # release verification + automatic restore), or blocks. Read-only.
+          ALO_INLINE_APP_DIR="$APP_DIR" bash scripts/deploy-preflight.sh
+          json="$(ALO_INLINE_APP_DIR="$APP_DIR" bash scripts/deploy-preflight.sh --json)"
+          echo "mode=$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).decision.mode))' <<<"$json")" >> "$GITHUB_OUTPUT"
+          echo "reason=$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).decision.reason))' <<<"$json")" >> "$GITHUB_OUTPUT"
+      - name: Record when this evidence was collected
+        run: date -u +"preflight evidence collected at %Y-%m-%dT%H:%M:%SZ"
+
+  # The only job that changes production. It declares the `production`
+  # environment, which is where a required reviewer must be configured so a
+  # merge to main cannot deploy unattended. Until that protection rule exists,
+  # this job starts immediately — see docs/DEPLOYMENT-AND-ROLLBACK.md, which
+  # records the exact administrator action required and why this file cannot
+  # create it.
+  deploy:
+    name: Deploy canonical root portal to production server
+    needs: [build, deploy-preflight]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: self-hosted
+    environment: production
+    timeout-minutes: 20
+    # One deployment at a time across every branch and every run, and never
+    # cancelled mid-flight: an interrupted deploy is how a host ends up half
+    # migrated. The per-ref CI group above cannot provide this.
+    concurrency:
+      group: hosting-production-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hosting-release-${{ github.sha }}
+          path: .deploy-artifact
+      - name: Re-verify the artifact digest on the deploying runner
+        run: |
+          set -Eeuo pipefail
+          got="$(cat .deploy-artifact/.deploy-digest)"
+          want="${{ needs.build.outputs.artifact-digest }}"
+          [ "$got" = "$want" ] || { echo "::error::artifact digest mismatch: downloaded $got, CI built $want"; exit 1; }
+      - name: Activate the release, verify the running commit, restore on failure
         env:
           DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_MODE: ${{ needs.deploy-preflight.outputs.mode }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
           export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$HOME/.nvm/versions/node/v22.0.0/bin:$PATH"
-          APP_DIR="$HOME/projects/Hosting-Portal"
-          cd "$APP_DIR"
-          git fetch origin main
-          git checkout main
-          git pull --ff-only origin main
-          npm ci --include=dev
-          npx prisma generate
-          node scripts/apply-deploy-schema.mjs
-          npm run build
-          mkdir -p .next/standalone/.next
-          rm -rf .next/standalone/.next/static .next/standalone/public
-          cp -R .next/static .next/standalone/.next/static
-          cp -R public .next/standalone/public
-          pm2 restart alo-hosting-portal --update-env \
-            || pm2 restart alo-hosting --update-env \
-            || PORT=3051 pm2 start npm --name "alo-hosting-portal" -- start
-          pm2 save
-          sleep 4
-          curl -sf http://127.0.0.1:3051/api/health && echo "Deploy OK" || (echo "Health check failed" && exit 1)
+          # All decisions and safety checks live in the versioned script, not in
+          # workflow YAML, so they are reviewable and testable:
+          #   - refuses to deploy a commit that is not on origin/main
+          #   - refuses to pull over local changes
+          #   - requires an explicit, absolute database target outside the checkout
+          #   - applies ADDITIVE migrations only (a rebuild needs --allow-rebuild
+          #     plus a verified backup, run by a human, never by a deploy)
+          #   - records a release identity and proves /api/health reports this
+          #     exact commit SHA plus database and schema health
+          #   - restores the previous commit and re-verifies when that fails
+          bash scripts/deploy-release.sh

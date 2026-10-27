@@ -98,6 +98,25 @@ if [[ ! -d "$RELEASE" ]]; then
   cp -a "$PAYLOAD/prisma" "$STAGING/prisma"
   install -m 0755 "$ROOT/scripts/init-production-db.sh" "$STAGING/scripts/init-production-db.sh"
   test -s "$STAGING/server.js" || fail "copied release has no server.js entrypoint"
+
+  # Record what this release is, so /api/health can prove which commit is
+  # serving and the probe below can verify it after activation. Written before
+  # the directory becomes immutable; it carries no secrets.
+  payload_digest="null"
+  if command -v sha256sum >/dev/null 2>&1; then
+    payload_digest="\"$(cd "$PAYLOAD" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)\""
+  fi
+  cat > "$STAGING/release-identity.json" <<JSON
+{
+  "commitSha": "${SHA}",
+  "mode": "canonical",
+  "artifactSha256": ${payload_digest},
+  "activatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "deploymentId": "$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+}
+JSON
+  log "recorded release identity for ${SHA}"
+
   mv "$STAGING" "$RELEASE"
   log "assembled immutable release $SHA"
 else
@@ -118,12 +137,13 @@ sudo -n /usr/bin/systemctl restart alo-hosting-panel
 healthy=0
 for attempt in $(seq 1 30); do
   body="$(curl --silent --show-error --max-time 4 "$HEALTH_URL" 2>/dev/null || true)"
-  if [[ -n "$body" ]] && printf '%s' "$body" | node -e '
+  if [[ -n "$body" ]] && printf '%s' "$body" | EXPECT_SHA="$SHA" node -e '
     let input=""; process.stdin.on("data", d => input += d).on("end", () => {
       try {
         const result = JSON.parse(input);
         const data = result.data || {};
-        process.exit(result.success === true && data.databaseStatus === "connected" && data.schemaStatus === "current" ? 0 : 1);
+        const identified = Boolean(data.release) && data.release.commitSha === process.env.EXPECT_SHA;
+        process.exit(result.success === true && data.databaseStatus === "connected" && data.schemaStatus === "current" && identified ? 0 : 1);
       } catch { process.exit(1); }
     });
   '; then
@@ -132,10 +152,10 @@ for attempt in $(seq 1 30); do
   fi
   sleep 2
 done
-(( healthy == 1 )) || fail "health/schema probe did not pass at $HEALTH_URL"
+(( healthy == 1 )) || fail "health probe did not confirm release ${SHA} (database, schema and the running commit SHA) at $HEALTH_URL"
 
 login_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}/login" || true)"
 [[ "$login_code" == 200 ]] || fail "/login returned HTTP ${login_code:-000}, expected 200"
 succeeded=1
-log "verified release $SHA: database/schema health PASS and /login HTTP 200"
+log "verified release $SHA: health reports this exact commit, database/schema PASS, /login HTTP 200"
 log "active release: $(readlink -f "$CURRENT")"

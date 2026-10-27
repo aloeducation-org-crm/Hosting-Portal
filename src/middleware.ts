@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, hasSessionCookie, validateCsrf } from "@/lib/security/csrf";
 
 const RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const RATE_MAX_CLIENTS = 10_000;
@@ -65,6 +66,9 @@ function cleanupRateLimitState(now: number): void {
 
 const PUBLIC_API_PATHS = [
   "/api/auth",
+  // Issues this browser's CSRF cookie. Must be reachable *before* login, and it
+  // grants nothing: the value is an HMAC-bound random token with no identity.
+  "/api/csrf",
   "/api/health",
   "/api/pricing",
   "/api/deploy/webhook",
@@ -421,6 +425,50 @@ export async function middleware(request: NextRequest) {
       } else {
         AI_RATE_LIMIT.set(aiKey, { count: 1, resetAt: now + AI_RATE_WINDOW_MS });
       }
+    }
+  }
+
+  // --- CSRF protection for authenticated browser mutations ---
+  // Placed last on purpose: rate limiting, the session guard and the role guard
+  // each return their own precise status first (429 / 401 / 403), so this check
+  // only ever sees a request that is already allowed to be here.
+  //
+  // The Origin comparison above remains as defence in depth, but it cannot be
+  // the whole control: it only fires when an Origin header is present, and a
+  // cross-site request can be made without one. The token below is what actually
+  // binds a mutation to code running on this origin.
+  if (
+    pathname.startsWith("/api/") &&
+    request.method !== "GET" &&
+    request.method !== "HEAD" &&
+    request.method !== "OPTIONS" &&
+    // Non-browser credentials: per-agent HMAC, or INTERNAL_SECRET for the worker
+    // tick. Neither uses cookies, so neither is CSRF-able, and each route
+    // re-verifies its own credential.
+    !HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname.startsWith(p)) &&
+    // CSRF is an attack on ambient session authority. With no session cookie
+    // there is none to abuse, so pre-authentication flows (login, signup, email
+    // verification, MFA challenge, NextAuth's own callback) are not required to
+    // carry a token; they are rate-limited more strictly instead.
+    hasSessionCookie(request.cookies.getAll().map((c) => c.name))
+  ) {
+    const decision = await validateCsrf(request.cookies.get(CSRF_COOKIE_NAME)?.value, request.headers.get(CSRF_HEADER_NAME));
+    if (!decision.ok) {
+      return applySecurityHeaders(
+        NextResponse.json(
+          {
+            status: 403,
+            success: false,
+            message: "CSRF validation failed. Reload the page and try again.",
+            data: null,
+            error: { code: "CSRF_INVALID", details: { reason: decision.reason } },
+            requestId: "",
+          },
+          { status: 403 }
+        ),
+        corsOrigin,
+        pathname
+      );
     }
   }
 

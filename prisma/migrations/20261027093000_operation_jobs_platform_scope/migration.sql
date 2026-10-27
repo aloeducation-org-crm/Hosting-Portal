@@ -16,11 +16,26 @@
 --      tables rewrites the *stored* FK text in that child table, so the rebuild
 --      finishes by rebuilding `audit_logs` with the correct reference again.
 --      Audit history is preserved row for row.
---   4. The whole thing is wrapped in a transaction: if any step fails, SQLite
---      rolls back and the original tables are untouched.
+--   4. This file contains NO transaction of its own — the statements below are
+--      plain SQL. The transaction is supplied by the runner: since 2026-10-27
+--      `scripts/apply-deploy-schema.mjs` executes a REBUILD migration inside a
+--      single `BEGIN IMMEDIATE` / `COMMIT`, with `ROLLBACK` on any error, so a
+--      failure leaves the original tables untouched. (An earlier revision of
+--      this header claimed the file was already transactional; it was not, and
+--      an interrupted run could drop `audit_logs` while the applier reported
+--      success. That is the defect the runner now prevents.)
+--
+-- Because this migration rewrites existing tables it never runs by default. It
+-- requires `--allow-rebuild` plus a verified `--backup`; before it runs the
+-- applier checks that every column it reads exists and that no *unexpected*
+-- column would be silently dropped, and after it commits it verifies table
+-- existence, row counts, foreign-key text, indexes, absence of orphaned
+-- temporaries, `PRAGMA integrity_check` and `PRAGMA foreign_key_check`.
 --
 -- `scripts/apply-deploy-schema.mjs` skips this file entirely once
--- `operation_jobs.websiteId` is already NULLable, so it can never run twice.
+-- `operation_jobs.websiteId` is already NULLable *and* every table it rebuilds
+-- is intact, so it can never run twice and can never report a half-finished
+-- rebuild as complete.
 
 PRAGMA foreign_keys = OFF;
 
