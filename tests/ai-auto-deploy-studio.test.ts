@@ -1,4 +1,10 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
+/**
+ * Must be the first import in this file: it points DATABASE_URL at a throwaway
+ * copy of db/custom.db before `@/lib/db` is evaluated, so these tests cannot
+ * write into the tracked development database. See tests/helpers/isolated-db.ts.
+ */
+import { teardownIsolatedDb } from "./helpers/isolated-db";
+import { describe, expect, it, vi, afterEach, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { detectFramework, memoryReader } from "@/lib/deploy/detect";
 import { UnsafeCommandError, validateDeployConfig } from "@/lib/deploy/config";
@@ -333,4 +339,9 @@ describe("AI Auto-Deploy Studio Architect & API Route", () => {
     expect(brief).toContain("Allocated Port: 3062 (next available)");
     expect(brief).toContain("Logs: /home/alamin/.pm2/logs/blog-*.log");
   });
+});
+
+/** Delete this file's scratch database copy. */
+afterAll(async () => {
+  await teardownIsolatedDb();
 });

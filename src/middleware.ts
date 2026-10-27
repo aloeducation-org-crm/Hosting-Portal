@@ -77,16 +77,36 @@ const PUBLIC_API_PATHS = [
   "/api/github/callback",
 ];
 
+/**
+ * Endpoints authenticated by something other than a user session:
+ *   - `/api/agents/enroll`          → short-lived single-use enrollment token
+ *   - `/api/agents/heartbeat|tasks` → per-agent HMAC over the exact request body
+ *   - `/api/orchestrator/run`       → INTERNAL_SECRET (worker tick)
+ *
+ * They are exempt from the *session* guard only. They still pass through the
+ * IP rate limiter and the security headers below, and each route re-verifies its
+ * own credential before doing anything.
+ */
+const HMAC_AUTHENTICATED_API_PATHS = [
+  "/api/agents/enroll",
+  "/api/agents/heartbeat",
+  "/api/agents/tasks/claim",
+  "/api/agents/tasks/result",
+  "/api/orchestrator/run",
+];
+
 const ADMIN_UI_PREFIXES = [
   "/admin",
   "/users",
   "/servers",
   "/plans",
   "/audit",
+  "/infrastructure",
   "/dashboard/users",
   "/dashboard/servers",
   "/dashboard/plans",
   "/dashboard/audit",
+  "/dashboard/infrastructure",
 ];
 
 const DASHBOARD_UI_PREFIXES = [
@@ -106,7 +126,18 @@ const ADMIN_API_PREFIXES = [
   "/api/servers/reconcile",
   "/api/security/lockout",
   "/api/security/audit-export",
+  "/api/orchestrator",
+  "/api/agents/enrollment-tokens",
+  "/api/infrastructure",
 ];
+
+/**
+ * Method-specific admin guards. `/api/agents` is shared: GET serves the AI-agent
+ * catalogue to any signed-in user, while POST dispatches a task to a managed
+ * Linux host and must be admin-only. Listing the prefix in ADMIN_API_PREFIXES
+ * would break the catalogue, so the write is guarded here instead.
+ */
+const ADMIN_API_WRITE_PREFIXES = ["/api/agents"];
 
 const ADMIN_ROLES = new Set(["SUPER_ADMIN", "ADMIN"]);
 
@@ -299,7 +330,8 @@ export async function middleware(request: NextRequest) {
   // --- API Authentication & Admin Guard ---
   if (
     pathname.startsWith("/api/") &&
-    !PUBLIC_API_PATHS.some((p) => pathname.startsWith(p))
+    !PUBLIC_API_PATHS.some((p) => pathname.startsWith(p)) &&
+    !HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname.startsWith(p))
   ) {
     if (!jwtSecret) {
       return applySecurityHeaders(
@@ -343,10 +375,10 @@ export async function middleware(request: NextRequest) {
     }
 
     const userRole = (token.role as string | undefined) || "CLIENT";
-    if (
-      ADMIN_API_PREFIXES.some((p) => pathname.startsWith(p)) &&
-      !ADMIN_ROLES.has(userRole)
-    ) {
+    const needsAdmin =
+      ADMIN_API_PREFIXES.some((p) => pathname.startsWith(p)) ||
+      (request.method !== "GET" && ADMIN_API_WRITE_PREFIXES.some((p) => pathname.startsWith(p)));
+    if (needsAdmin && !ADMIN_ROLES.has(userRole)) {
       return applySecurityHeaders(
         NextResponse.json(
           {
@@ -411,6 +443,7 @@ export const config = {
     "/settings/:path*",
     "/onboarding/:path*",
     "/deployments/:path*",
+    "/infrastructure/:path*",
     "/api/:path*",
   ],
 };

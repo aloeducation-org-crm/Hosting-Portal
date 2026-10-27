@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { db } from '@/lib/db';
 import { requireSession } from '@/lib/auth';
 import { ensureDefaultAgentsSeeded } from '@/lib/seed-agents';
-import { apiError, type ApiResponse } from '@/lib/response';
+import { apiError, apiSuccess, type ApiResponse } from '@/lib/response';
+import { requireAdmin } from '@/lib/auth';
+import { describeAgents } from '@/lib/agents/agent';
+import { allowlistCatalogue } from '@/lib/agents/allowlist';
+import { dispatchTask } from '@/lib/agents/agent';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -15,6 +20,16 @@ function handleErr(e: unknown): NextResponse {
 export async function GET(request: NextRequest) {
   try {
     await requireSession(request);
+
+    // ?kind=server returns the enrolled Linux host agents (control-plane view:
+    // connectivity, last heartbeat, version, capabilities, recent task results).
+    if (request.nextUrl.searchParams.get('kind') === 'server') {
+      await requireAdmin(request);
+      const agents = await describeAgents();
+      return NextResponse.json(
+        apiSuccess({ agents, allowlist: allowlistCatalogue() }),
+      );
+    }
 
     const existingCount = await db.aiAgent.count();
     if (existingCount === 0) {
@@ -57,6 +72,47 @@ export async function GET(request: NextRequest) {
     }));
 
     return NextResponse.json({ success: true, agents: formatted });
+  } catch (e) {
+    return handleErr(e);
+  }
+}
+
+const dispatchSchema = z.object({
+  agentId: z.string().min(1).max(64),
+  command: z.string().min(1).max(64),
+  args: z.record(z.string(), z.union([z.string().max(300), z.number(), z.boolean()])).optional(),
+  correlationId: z.string().max(64).optional(),
+});
+
+/**
+ * Dispatch an allowlisted task to an enrolled agent. Admin only.
+ *
+ * Authorization is enforced twice — here and again inside `dispatchTask`, which
+ * re-checks the allowlist, the agent's granted capabilities and the argument
+ * schema. A refusal is recorded as an audit event, never executed.
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const admin = await requireAdmin(request);
+    const parsed = dispatchSchema.safeParse(await request.json().catch(() => ({})));
+    if (!parsed.success) {
+      return NextResponse.json(apiError('Validation failed', 'VALIDATION_ERROR', parsed.error.flatten(), 400), { status: 400 });
+    }
+    const task = await dispatchTask({
+      agentId: parsed.data.agentId,
+      command: parsed.data.command,
+      args: parsed.data.args ?? {},
+      correlationId: parsed.data.correlationId,
+      actorEmail: admin.email,
+      actorScopes: ['server:read', 'server:execute', 'monitoring:read', 'database:read', 'backup:read', 'backup:write'],
+    });
+    if (task.status === 'REFUSED') {
+      return NextResponse.json(apiError(task.refuseReason ?? 'Task refused', 'TASK_REFUSED', { taskId: task.id }, 403), { status: 403 });
+    }
+    return NextResponse.json(
+      apiSuccess(task, task.requiresApproval ? 'Task queued and waiting for approval' : 'Task queued for the agent', 201),
+      { status: 201 },
+    );
   } catch (e) {
     return handleErr(e);
   }
