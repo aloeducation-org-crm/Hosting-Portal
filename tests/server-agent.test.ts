@@ -529,6 +529,159 @@ describe("agent enrollment and request authentication", () => {
   });
 });
 
+// ── Replay prevention ────────────────────────────────────────────────────────
+
+describe("agent request replay prevention", () => {
+  it("accepts a signed request once and rejects the identical request again inside the window", async () => {
+    const { agent, secret } = await makeAgent({ name: "replay-host" });
+    const body = JSON.stringify({ version: "1.0.0" });
+    const timestamp = String(Date.now());
+    const nonce = "replay-nonce-0001";
+    const signature = agents.signPayload(secret, body, timestamp, nonce);
+
+    const first = await agents.authenticateAgentRequest({ agentKey: agent.agentKey, signature, timestamp, nonce, body });
+    expect(first.ok).toBe(true);
+
+    // Same bytes, still inside the ±5 minute timestamp window: a replay.
+    const second = await agents.authenticateAgentRequest({ agentKey: agent.agentKey, signature, timestamp, nonce, body });
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.reason).toContain("nonce replay");
+
+    const audit = await db.auditLog.findFirst({
+      where: { action: "AGENT_AUTH_FAILURE", resourceId: agent.id, errorCode: "NONCE_REPLAY" },
+      orderBy: { timestamp: "desc" },
+    });
+    expect(audit).not.toBeNull();
+    expect(audit.result).toBe("FAILURE");
+  });
+
+  it("rejects concurrent replays of the same request: exactly one wins", async () => {
+    const { agent, secret } = await makeAgent({ name: "replay-race-host" });
+    const body = "{}";
+    const timestamp = String(Date.now());
+    const nonce = "replay-race-0001";
+    const signature = agents.signPayload(secret, body, timestamp, nonce);
+
+    const attempts = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        agents.authenticateAgentRequest({ agentKey: agent.agentKey, signature, timestamp, nonce, body }),
+      ),
+    );
+    const accepted = attempts.filter((a) => a.ok).length;
+    expect(accepted).toBe(1);
+    expect(await db.agentNonce.count({ where: { agentId: agent.id, nonce } })).toBe(1);
+  });
+
+  it("scopes nonces per agent, so two hosts can use the same nonce value", async () => {
+    const a = await makeAgent({ name: "nonce-scope-a" });
+    const b = await makeAgent({ name: "nonce-scope-b" });
+    const body = "{}";
+    const timestamp = String(Date.now());
+    const nonce = "shared-nonce-value";
+
+    expect(
+      (await agents.authenticateAgentRequest({
+        agentKey: a.agent.agentKey,
+        signature: agents.signPayload(a.secret, body, timestamp, nonce),
+        timestamp,
+        nonce,
+        body,
+      })).ok,
+    ).toBe(true);
+    expect(
+      (await agents.authenticateAgentRequest({
+        agentKey: b.agent.agentKey,
+        signature: agents.signPayload(b.secret, body, timestamp, nonce),
+        timestamp,
+        nonce,
+        body,
+      })).ok,
+    ).toBe(true);
+  });
+
+  it("accepts a legitimate retry that signs a fresh nonce", async () => {
+    const { agent, secret } = await makeAgent({ name: "retry-host" });
+    const body = JSON.stringify({ metrics: { cpuPercent: 4 } });
+    for (const nonce of ["retry-nonce-1", "retry-nonce-2", "retry-nonce-3"]) {
+      const timestamp = String(Date.now());
+      const res = await agents.authenticateAgentRequest({
+        agentKey: agent.agentKey,
+        signature: agents.signPayload(secret, body, timestamp, nonce),
+        timestamp,
+        nonce,
+        body,
+      });
+      expect(res.ok, nonce).toBe(true);
+    }
+  });
+
+  it("does not consume a nonce for a request whose signature is invalid", async () => {
+    const { agent } = await makeAgent({ name: "bad-sig-nonce-host" });
+    const nonce = "never-consumed-1";
+    const res = await agents.authenticateAgentRequest({
+      agentKey: agent.agentKey,
+      signature: "deadbeef".repeat(8),
+      timestamp: String(Date.now()),
+      nonce,
+      body: "{}",
+    });
+    expect(res.ok).toBe(false);
+    // An attacker who cannot sign must not be able to burn a victim's nonces.
+    expect(await db.agentNonce.count({ where: { agentId: agent.id, nonce } })).toBe(0);
+  });
+
+  it("cannot be used to forge a task result by replaying a captured report", async () => {
+    const { agent, secret } = await makeAgent({ name: "result-replay-host" });
+    const task = await agents.dispatchTask({ agentId: agent.id, command: "metrics.collect" });
+    const claimed = await agents.claimTask(agent.id);
+    expect(claimed?.id).toBe(task.id);
+
+    const body = JSON.stringify({ taskId: task.id, status: "SUCCEEDED", exitCode: 0, result: { fabricated: true } });
+    const timestamp = String(Date.now());
+    const nonce = "result-nonce-0001";
+    const signature = agents.signPayload(secret, body, timestamp, nonce);
+
+    const first = await agents.authenticateAgentRequest({ agentKey: agent.agentKey, signature, timestamp, nonce, body });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await agents.recordTaskResult(task.id, { status: "FAILED", exitCode: 1, error: "the honest result" });
+
+    // The replay authenticates to nothing: the request is rejected before any
+    // handler can act on it, so the recorded failure stands.
+    const replay = await agents.authenticateAgentRequest({ agentKey: agent.agentKey, signature, timestamp, nonce, body });
+    expect(replay.ok).toBe(false);
+    const stored = await db.agentTask.findUnique({ where: { id: task.id } });
+    expect(stored.status).toBe("FAILED");
+    expect(stored.error).toContain("honest result");
+  });
+
+  it("prunes nonces whose signature window has passed, so the table stays bounded", async () => {
+    const { agent } = await makeAgent({ name: "prune-host" });
+    await db.agentNonce.createMany({
+      data: [
+        { agentId: agent.id, nonce: "ancient-1", expiresAt: new Date(Date.now() - 10 * 60_000) },
+        { agentId: agent.id, nonce: "ancient-2", expiresAt: new Date(Date.now() - 9 * 60_000) },
+      ],
+    });
+    expect(await db.agentNonce.count({ where: { agentId: agent.id } })).toBe(2);
+
+    expect(await agents.consumeRequestNonce(agent.id, "fresh-nonce")).toBe(true);
+    expect(await db.agentNonce.count({ where: { agentId: agent.id, nonce: { startsWith: "ancient" } } })).toBe(0);
+    // An expired nonce is no longer protected by the table, and that is correct:
+    // the timestamp check now rejects the request on its own.
+    const stale = agents.verifySignature({
+      secret: "s",
+      body: "{}",
+      timestamp: String(Date.now() - 10 * 60_000),
+      nonce: "ancient-1",
+      signature: agents.signPayload("s", "{}", String(Date.now() - 10 * 60_000), "ancient-1"),
+    });
+    expect(stale.valid).toBe(false);
+    expect(stale.reason).toContain("replay window");
+  });
+});
+
 // ── Dispatch, approval gating and results ────────────────────────────────────
 
 describe("agent task dispatch and the human approval gate", () => {
@@ -664,6 +817,45 @@ describe("agent task dispatch and the human approval gate", () => {
     const row = await db.agentTask.findUnique({ where: { id: task.id } });
     expect(row.status).toBe("TIMED_OUT");
     expect(row.error).toContain("No agent claimed this task");
+  });
+
+  it("revokes an approval that has aged out, so stale authority cannot execute a task", async () => {
+    const { agent } = await makeAgent({ name: "approval-ttl-host", capabilities: [...DEFAULT_AGENT_CAPABILITIES, "service.restart"] });
+    const task = await agents.dispatchTask({ agentId: agent.id, command: "service.restart", args: { unit: "alo.service" } });
+    expect(task.requiresApproval).toBe(true);
+    expect((await agents.approveAgentTask(task.id, ADMIN)).ok).toBe(true);
+
+    // Fresh approval: claimable.
+    expect(await agents.claimTask(agent.id, Date.now())).not.toBeNull();
+    await agents.recordTaskResult(task.id, { status: "SUCCEEDED", exitCode: 0 });
+
+    const second = await agents.dispatchTask({ agentId: agent.id, command: "service.restart", args: { unit: "alo.service" } });
+    expect((await agents.approveAgentTask(second.id, ADMIN)).ok).toBe(true);
+    const afterTtl = Date.now() + agents.AGENT_APPROVAL_TTL_MS + 60_000;
+    expect(await agents.claimTask(agent.id, afterTtl)).toBeNull();
+
+    // The sweep clears the stale approval so the dashboard shows it as waiting
+    // for a human again, rather than leaving a task that looks approved forever.
+    await db.agentTask.update({ where: { id: second.id }, data: { approvedAt: new Date(Date.now() - agents.AGENT_APPROVAL_TTL_MS - 1000) } });
+    await agents.expireStaleTasks();
+    const cleared = await db.agentTask.findUnique({ where: { id: second.id } });
+    expect(cleared.status).toBe("PENDING");
+    expect(cleared.approvedBy).toBeNull();
+    expect(cleared.approvedAt).toBeNull();
+    expect(await db.auditLog.findFirst({ where: { action: "AGENT_TASK_APPROVAL_EXPIRED" } })).not.toBeNull();
+
+    // Re-approval makes it claimable again.
+    expect((await agents.approveAgentTask(second.id, ADMIN, "re-approved after the window lapsed")).ok).toBe(true);
+    expect(await agents.claimTask(agent.id)).not.toBeNull();
+  });
+
+  it("hands a task to exactly one claimant when several poll at the same moment", async () => {
+    const { agent } = await makeAgent({ name: "claim-race-host" });
+    const task = await agents.dispatchTask({ agentId: agent.id, command: "metrics.collect" });
+    const results = await Promise.all(Array.from({ length: 5 }, () => agents.claimTask(agent.id)));
+    const won = results.filter((r) => r?.id === task.id);
+    expect(won).toHaveLength(1);
+    expect((await db.agentTask.findUnique({ where: { id: task.id } })).status).toBe("ASSIGNED");
   });
 
   it("parses capability and scope lists defensively", () => {
