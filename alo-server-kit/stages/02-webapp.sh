@@ -23,12 +23,12 @@ sudo -u "$KIT_PRIMARY_USER" bash -lc "
 install -d /usr/local/bin
 cat >/usr/local/bin/node <<EOF
 #!/bin/sh
-exec sudo -u $KIT_PRIMARY_USER bash -lc 'source $NVM_DIR/nvm.sh && exec node "\$@"'
+exec sudo -u $KIT_PRIMARY_USER bash -lc 'source "$NVM_DIR/nvm.sh" && exec node "\$@"' -- "\$@"
 EOF
 chmod +x /usr/local/bin/node
 cat >/usr/local/bin/pm2 <<EOF
 #!/bin/sh
-exec sudo -u $KIT_PRIMARY_USER bash -lc 'source $NVM_DIR/nvm.sh && exec pm2 "\$@"'
+exec sudo -u $KIT_PRIMARY_USER bash -lc 'source "$NVM_DIR/nvm.sh" && exec pm2 "\$@"' -- "\$@"
 EOF
 chmod +x /usr/local/bin/pm2
 
@@ -74,7 +74,6 @@ write_file /etc/nginx/conf.d/alo-upstream.conf root:root 0644 <<EOF
 upstream alo_nextjs {
     least_conn;
     server 127.0.0.1:3000;
-    server 127.0.0.1:3001;
     keepalive 32;
 }
 EOF
@@ -110,16 +109,16 @@ systemctl reload nginx
 log "install certbot"
 ensure_pkg certbot python3-certbot-nginx
 install -d -m 0755 /var/www/letsencrypt
-cat >/usr/local/bin/alo-issue-tls.sh <<'EOF'
+cat >/usr/local/bin/alo-issue-tls.sh <<EOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
-source /home/z/my-project/alo-server-kit/lib/common.sh 2>/dev/null || true
-DOMAIN="${KIT_DOMAIN:-alo.example.com}"
-EMAIL="${KIT_ADMIN_EMAIL:-alamin@example.com}"
-certbot certonly --webroot -w /var/www/letsencrypt -d "$DOMAIN" --email "$EMAIL" --agree-tos --no-eff-email --non-interactive
-certbot --nginx -d "$DOMAIN" --redirect --non-interactive --keep-until-expiring
+source "${KIT_ROOT}/lib/common.sh" 2>/dev/null || true
+DOMAIN="\${KIT_DOMAIN:-alo.example.com}"
+EMAIL="\${KIT_ADMIN_EMAIL:-alamin@example.com}"
+certbot certonly --webroot -w /var/www/letsencrypt -d "\$DOMAIN" --email "\$EMAIL" --agree-tos --no-eff-email --non-interactive
+certbot --nginx -d "\$DOMAIN" --redirect --non-interactive --keep-until-expiring
 systemctl reload nginx
-echo "TLS issued for $DOMAIN"
+echo "TLS issued for \$DOMAIN"
 EOF
 chmod +x /usr/local/bin/alo-issue-tls.sh
 

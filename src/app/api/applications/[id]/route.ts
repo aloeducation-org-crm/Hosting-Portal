@@ -43,9 +43,18 @@ export async function PUT(
     const { name, description, status, envVars } = body
     const updateData: Record<string, unknown> = {}
     if (name !== undefined) updateData.name = name
-    if (description !== undefined) updateData.description = description
     if (status !== undefined) updateData.status = status
-    if (envVars !== undefined) updateData.envVars = typeof envVars === 'string' ? envVars : JSON.stringify(envVars)
+    if (description !== undefined || envVars !== undefined) {
+      const currentConfig =
+        existing.config && typeof existing.config === 'object' && !Array.isArray(existing.config)
+          ? (existing.config as Record<string, unknown>)
+          : {}
+      updateData.config = {
+        ...currentConfig,
+        ...(description !== undefined ? { description } : {}),
+        ...(envVars !== undefined ? { envVars } : {}),
+      }
+    }
 
     const app = await db.application.update({ where: { id }, data: updateData })
     return NextResponse.json(app)

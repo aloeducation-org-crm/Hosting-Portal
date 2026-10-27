@@ -44,17 +44,23 @@ import {
   FileText,
   Sparkles,
   Rocket,
+  Megaphone,
+  Cpu,
 } from "lucide-react";
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },
+  { label: "AI Auto-Deploy", href: "/ai/auto-deploy", icon: Sparkles },
   { label: "Deployments", href: "/deployments", altPrefix: "/dashboard/deployments", icon: Rocket },
   { label: "Domains", href: "/dashboard/domains", icon: Globe },
   { label: "Databases", href: "/databases", icon: Database },
   { label: "Storage", href: "/storage", icon: HardDrive },
   { label: "AI Builder", href: "/ai/builder", altPrefix: "/dashboard/agents", icon: Bot },
   { label: "AI Automations", href: "/ai/automations", icon: Zap },
+  { label: "Self-Hosted AI", href: "/ai/self-hosted", icon: Server },
+  { label: "Digital Marketing", href: "/dashboard/marketing", icon: Megaphone },
   { label: "CRM", href: "/dashboard/crm", icon: Users },
   { label: "Email", href: "/dashboard/email", icon: Mail },
   { label: "Billing", href: "/dashboard/billing", altPrefix: "/billing", icon: CreditCard },

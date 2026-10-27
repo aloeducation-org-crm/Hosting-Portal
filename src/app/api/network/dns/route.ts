@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, ROLES } from '@/lib/auth';
+import { requireSession, canAccessWebsite } from '@/lib/auth';
 import { db } from '@/lib/db';
 
 const VALID_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(apiError('Domain not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
 
-    if (auth.role !== ROLES.SUPER_ADMIN && domain.website?.ownerId !== auth.id) {
+    if (!canAccessWebsite(auth, domain.website)) {
       return NextResponse.json(apiError('Access denied', 'FORBIDDEN', undefined, 403), { status: 403 });
     }
 
@@ -59,6 +59,17 @@ export async function POST(request: NextRequest) {
 
     if (!VALID_TYPES.includes(body.type)) {
       return NextResponse.json(apiError(`type must be one of: ${VALID_TYPES.join(', ')}`, 'VALIDATION_ERROR', undefined, 400), { status: 400 });
+    }
+
+    const domain = await db.domain.findUnique({
+      where: { id: String(body.domainId) },
+      include: { website: true },
+    });
+    if (!domain) {
+      return NextResponse.json(apiError('Domain not found', 'NOT_FOUND', undefined, 404), { status: 404 });
+    }
+    if (!canAccessWebsite(auth, domain.website)) {
+      return NextResponse.json(apiError('Access denied', 'FORBIDDEN', undefined, 403), { status: 403 });
     }
 
     const record = await db.dnsRecord.create({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requirePermission } from '@/lib/auth';
+import { requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
 
@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
     if (!website || website.deletedAt) {
       return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
+    assertWebsiteAccess(user, website);
 
     const result = await callHelper('alo-log-helper', [input.source, website.domain, String(input.lines)]);
     if (!result.success) {

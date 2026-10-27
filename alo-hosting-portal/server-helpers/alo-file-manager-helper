@@ -1,259 +1,462 @@
 #!/usr/bin/env bash
-# ALO Labs - File Manager Helper
-# Safe file operations within site directories
-# Usage: alo-file-manager-helper <command> [args...]
-
+#
+# ALO Labs Hosting Portal — File Manager Helper
+# Securely manages files for hosted sites. All operations are confined to site root.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
 set -euo pipefail
 
 SITE_BASE="/srv/alo-sites"
-MAX_FILE_SIZE=$((5 * 1024 * 1024))  # 5MB read limit
+APP_USER="alo-panel"
+APP_GROUP="alo-panel"
 
-validate_domain() {
-  local d="$1"
-  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-    echo '{"success":false,"error":"Invalid domain name"}'
-    exit 1
-  fi
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-file-manager-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-file-manager-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
 }
 
-# CRITICAL: Validate path is within site directory and no traversal
-validate_path() {
-  local domain="$1"
-  local rel_path="$2"
-  local site_dir="$SITE_BASE/$domain"
+# Validate and resolve a path, ensuring it's under site_root.
+# Sets RESOLVED_PATH variable.
+resolve_and_validate_path() {
+  local site_root="$1"
+  local user_path="$2"
 
   # Reject path traversal
-  if [[ "$rel_path" == *".."* ]]; then
-    echo '{"success":false,"error":"Path traversal detected"}'
-    exit 1
+  if [[ "$user_path" == *".."* ]]; then
+    die "path-validation" "Path traversal detected in: ${user_path}"
   fi
 
-  # Build full path and resolve
-  local full_path
-  if [[ "$rel_path" == "/" || -z "$rel_path" ]]; then
-    full_path="$site_dir"
-  else
-    full_path="$site_dir/$rel_path"
+  # Site root must be under SITE_BASE
+  local resolved_root
+  resolved_root=$(realpath "$site_root" 2>/dev/null || echo "")
+  if [[ -z "$resolved_root" || "$resolved_root" != "${SITE_BASE}/"* ]]; then
+    die "path-validation" "Site root must be under ${SITE_BASE}"
   fi
 
-  # Resolve symlinks
-  local resolved
-  resolved=$(realpath "$full_path" 2>/dev/null || echo "")
-  if [[ -z "$resolved" ]]; then
-    echo '{"success":false,"error":"Path does not exist"}'
-    exit 1
+  if [[ ! -d "$resolved_root" ]]; then
+    die "path-validation" "Site root does not exist: ${site_root}"
   fi
 
-  # Must be under site dir
-  if [[ "$resolved" != "$site_dir"/* && "$resolved" != "$site_dir" ]]; then
-    echo '{"success":false,"error":"Access denied: path outside site directory"}'
-    exit 1
+  # Build full path
+  local full_path="${resolved_root}/${user_path}"
+  local resolved_path
+  resolved_path=$(realpath "$full_path" 2>/dev/null || echo "")
+
+  # Must not be empty and must be under site root
+  if [[ -z "$resolved_path" ]]; then
+    die "path-validation" "Cannot resolve path: ${user_path}"
   fi
 
-  echo "$resolved"
+  if [[ "$resolved_path" != "${resolved_root}/"* && "$resolved_path" != "${resolved_root}" ]]; then
+    die "path-validation" "Path escapes site root: ${user_path}"
+  fi
+
+  RESOLVED_PATH="$resolved_path"
+  RESOLVED_ROOT="$resolved_root"
 }
 
-COMMAND="${1:?Usage: alo-file-manager-helper <command> [args...]}
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-file-manager-helper <action> <site-root> <path> [args...]"
+fi
+
+ACTION="$1"
 shift
 
-case "$COMMAND" in
-  list)
-    DOMAIN="${1:?Usage: list <domain> [relative_path]}"
-    REL_PATH="${2:-/}"
-    validate_domain "$DOMAIN"
+# ── action: list ────────────────────────────────────────────────────────────
+action_list() {
+  if [[ $# -lt 2 ]]; then
+    die "list" "Usage: list <site-root> <path>"
+  fi
 
-    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
-    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
+  local site_root="$1"
+  local user_path="$2"
 
-    if [[ ! -d "$RESOLVED" ]]; then
-      echo '{"success":false,"error":"Path is not a directory"}'
-      exit 1
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  if [[ ! -d "$RESOLVED_PATH" ]]; then
+    die "list" "Directory not found: ${user_path}"
+  fi
+
+  # Build JSON array from ls output
+  local json_entries="["
+  local first=true
+
+  while IFS= read -r -d '' entry; do
+    local name
+    name=$(basename "$entry")
+    local ftype="file"
+    local fsize="0"
+    local fmodified="0"
+
+    if [[ -L "$entry" ]]; then
+      ftype="link"
+    elif [[ -d "$entry" ]]; then
+      ftype="directory"
     fi
 
-    ENTRIES="[]"
-    ITEMS=""
-    while IFS= read -r line; do
-      [[ -z "$line" ]] && continue
-      NAME=$(echo "$line" | awk '{print $NF}')
-      TYPE=$(echo "$line" | awk '{print $1}' | cut -c1)
-      SIZE=$(echo "$line" | awk '{print $5}')
-      MODIFIED=$(echo "$line" | awk '{print $6, $7, $8}')
-      PERMS=$(echo "$line" | awk '{print $1}')
-
-      if [[ "$TYPE" == "d" ]]; then
-        ENTRY_TYPE="directory"
-        SIZE=0
-      else
-        ENTRY_TYPE="file"
-      fi
-
-      # Convert modified to ISO
-      MOD_ISO=$(date -d "$MODIFIED" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
-
-      [[ -n "$ITEMS" ]] && ITEMS="$ITEMS,"
-      ITEMS="$ITEMS{\"name\":\"$NAME\",\"type\":\"$ENTRY_TYPE\",\"size\":$SIZE,\"modified\":\"$MOD_ISO\",\"permissions\":\"$PERMS\"}"
-    done < <(ls -la "$RESOLVED" 2>/dev/null | tail -n +3)
-
-    ENTRIES="[$ITEMS]"
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"entries\":$ENTRIES}"
-    ;;
-
-  read)
-    DOMAIN="${1:?Usage: read <domain> <relative_path>}
-    REL_PATH="${2:?Usage: read <domain> <relative_path>}
-    validate_domain "$DOMAIN"
-
-    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
-    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
-
-    if [[ ! -f "$RESOLVED" ]]; then
-      echo '{"success":false,"error":"File not found"}'
-      exit 1
+    if [[ "$ftype" != "directory" && -e "$entry" ]]; then
+      fsize=$(stat -c%s "$entry" 2>/dev/null || echo "0")
     fi
 
-    FSIZE=$(stat -c%s "$RESOLVED" 2>/dev/null || echo 0)
-    if [[ $FSIZE -gt $MAX_FILE_SIZE ]]; then
-      echo "{\"success\":false,\"error\":\"File too large (max 5MB)\",\"size\":$FSIZE}"
-      exit 1
-    fi
+    fmodified=$(stat -c%Y "$entry" 2>/dev/null || echo "0")
 
-    # Output file content (base64 encoded to handle binary)
-    CONTENT=$(base64 -w0 "$RESOLVED" 2>/dev/null)
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"size\":$FSIZE,\"encoding\":\"base64\",\"content\":\"$CONTENT\"}"
-    ;;
-
-  write)
-    DOMAIN="${1:?Usage: write <domain> <relative_path>}
-    REL_PATH="${2:?Usage: write <domain> <relative_path>}
-    validate_domain "$DOMAIN"
-
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    if [[ "$REL_PATH" == "/" || -z "$REL_PATH" ]]; then
-      echo '{"success":false,"error":"Cannot write to root directory"}'
-      exit 1
-    fi
-
-    FULL_PATH="$SITE_DIR/$REL_PATH"
-    RESOLVED_PARENT=$(realpath "$(dirname "$FULL_PATH")" 2>/dev/null)
-    if [[ "$RESOLVED_PARENT" != "$SITE_DIR"/* ]]; then
-      echo '{"success":false,"error":"Access denied"}'
-      exit 1
-    fi
-
-    mkdir -p "$RESOLVED_PARENT"
-    cat > "$FULL_PATH"
-    FSIZE=$(stat -c%s "$FULL_PATH" 2>/dev/null || echo 0)
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"size\":$FSIZE}"
-    ;;
-
-  delete)
-    DOMAIN="${1:?Usage: delete <domain> <relative_path>}
-    REL_PATH="${2:?Usage: delete <domain> <relative_path>}
-    validate_domain "$DOMAIN"
-
-    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
-    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
-
-    # Prevent deleting the site root
-    if [[ "$RESOLVED" == "$SITE_BASE/$DOMAIN" ]]; then
-      echo '{"success":false,"error":"Cannot delete site root"}'
-      exit 1
-    fi
-
-    if [[ -d "$RESOLVED" ]]; then
-      rmdir "$RESOLVED" 2>/dev/null || rm -rf "$RESOLVED"
-      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"type\":\"directory\"}"
-    elif [[ -f "$RESOLVED" ]]; then
-      rm -f "$RESOLVED"
-      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"type\":\"file\"}"
+    if [[ "$first" == true ]]; then
+      first=false
     else
-      echo '{"success":false,"error":"Path not found"}'
-      exit 1
-    fi
-    ;;
-
-  mkdir)
-    DOMAIN="${1:?Usage: mkdir <domain> <relative_path>}
-    REL_PATH="${2:?Usage: mkdir <domain> <relative_path>}
-    validate_domain "$DOMAIN"
-
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    FULL_PATH="$SITE_DIR/$REL_PATH"
-    RESOLVED_PARENT=$(realpath "$(dirname "$FULL_PATH")" 2>/dev/null)
-    if [[ "$RESOLVED_PARENT" != "$SITE_DIR"/* && "$RESOLVED_PARENT" != "$SITE_DIR" ]]; then
-      echo '{"success":false,"error":"Access denied"}'
-      exit 1
+      json_entries+=","
     fi
 
-    mkdir -p "$FULL_PATH"
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\"}"
-    ;;
+    # Sanitize name for JSON (escape quotes and backslashes)
+    local safe_name
+    safe_name=$(printf '%s' "$name" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-  rename)
-    DOMAIN="${1:?Usage: rename <domain> <relative_path> <new_name>}
-    REL_PATH="${2:?Usage: rename <domain> <relative_path> <new_name>}
-    NEW_NAME="${3:?Usage: rename <domain> <relative_path> <new_name>}
-    validate_domain "$DOMAIN"
+    json_entries+="{\"name\":\"${safe_name}\",\"type\":\"${ftype}\",\"size\":${fsize},\"modified\":${fmodified}}"
+  done < <(find "$RESOLVED_PATH" -maxdepth 1 -print0 | sort -z)
 
-    # Validate new name has no traversal
-    if [[ "$NEW_NAME" == *".."* || "$NEW_NAME" == */* ]]; then
-      echo '{"success":false,"error":"Invalid new name"}'
-      exit 1
+  json_entries+="]"
+
+  json_out "{\"success\":true,\"step\":\"list\",\"path\":\"${user_path}\",\"entries\":${json_entries}}"
+}
+
+# ── action: upload ──────────────────────────────────────────────────────────
+action_upload() {
+  if [[ $# -lt 3 ]]; then
+    die "upload" "Usage: upload <site-root> <path> <temp-source-path>"
+  fi
+
+  local site_root="$1"
+  local user_path="$2"
+  local temp_source="$3"
+
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  # Validate temp source exists and is a regular file
+  if [[ ! -f "$temp_source" ]]; then
+    die "upload" "Temp source file not found: ${temp_source}"
+  fi
+
+  # Ensure parent directory exists
+  local parent_dir
+  parent_dir=$(dirname "$RESOLVED_PATH")
+  if [[ ! -d "$parent_dir" ]]; then
+    die "upload" "Target parent directory does not exist"
+  fi
+
+  # Move file (atomic on same filesystem)
+  mv "$temp_source" "$RESOLVED_PATH" || die "upload" "Failed to move file"
+  chown "${APP_USER}:${APP_GROUP}" "$RESOLVED_PATH"
+
+  local file_size
+  file_size=$(stat -c%s "$RESOLVED_PATH" 2>/dev/null || echo "0")
+
+  json_out "{\"success\":true,\"step\":\"upload\",\"path\":\"${user_path}\",\"size\":${file_size}}"
+}
+
+# ── action: mkdir ──────────────────────────────────────────────────────────
+action_mkdir() {
+  if [[ $# -lt 2 ]]; then
+    die "mkdir" "Usage: mkdir <site-root> <path>"
+  fi
+
+  local site_root="$1"
+  local user_path="$2"
+
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  if [[ -e "$RESOLVED_PATH" ]]; then
+    die "mkdir" "Path already exists: ${user_path}"
+  fi
+
+  mkdir -p "$RESOLVED_PATH" || die "mkdir" "Failed to create directory"
+  chown "${APP_USER}:${APP_GROUP}" "$RESOLVED_PATH"
+
+  json_out "{\"success\":true,\"step\":\"mkdir\",\"path\":\"${user_path}\"}"
+}
+
+# ── action: rename ──────────────────────────────────────────────────────────
+action_rename() {
+  if [[ $# -lt 3 ]]; then
+    die "rename" "Usage: rename <site-root> <old-path> <new-path>"
+  fi
+
+  local site_root="$1"
+  local old_path="$2"
+  local new_path="$3"
+
+  resolve_and_validate_path "$site_root" "$old_path"
+  local resolved_old="$RESOLVED_PATH"
+
+  resolve_and_validate_path "$site_root" "$new_path"
+  local resolved_new="$RESOLVED_PATH"
+
+  if [[ ! -e "$resolved_old" ]]; then
+    die "rename" "Source not found: ${old_path}"
+  fi
+
+  mv "$resolved_old" "$resolved_new" || die "rename" "Failed to rename"
+  chown -R "${APP_USER}:${APP_GROUP}" "$resolved_new" 2>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"rename\",\"from\":\"${old_path}\",\"to\":\"${new_path}\"}"
+}
+
+# ── action: move ────────────────────────────────────────────────────────────
+action_move() {
+  if [[ $# -lt 3 ]]; then
+    die "move" "Usage: move <site-root> <source> <target>"
+  fi
+
+  local site_root="$1"
+  local source_path="$2"
+  local target_path="$3"
+
+  resolve_and_validate_path "$site_root" "$source_path"
+  local resolved_source="$RESOLVED_PATH"
+
+  resolve_and_validate_path "$site_root" "$target_path"
+  local resolved_target="$RESOLVED_PATH"
+
+  if [[ ! -e "$resolved_source" ]]; then
+    die "move" "Source not found: ${source_path}"
+  fi
+
+  mv "$resolved_source" "$resolved_target" || die "move" "Failed to move"
+  chown -R "${APP_USER}:${APP_GROUP}" "$resolved_target" 2>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"move\",\"from\":\"${source_path}\",\"to\":\"${target_path}\"}"
+}
+
+# ── action: copy ───────────────────────────────────────────────────────────
+action_copy() {
+  if [[ $# -lt 3 ]]; then
+    die "copy" "Usage: copy <site-root> <source> <target>"
+  fi
+
+  local site_root="$1"
+  local source_path="$2"
+  local target_path="$3"
+
+  resolve_and_validate_path "$site_root" "$source_path"
+  local resolved_source="$RESOLVED_PATH"
+
+  resolve_and_validate_path "$site_root" "$target_path"
+  local resolved_target="$RESOLVED_PATH"
+
+  if [[ ! -e "$resolved_source" ]]; then
+    die "copy" "Source not found: ${source_path}"
+  fi
+
+  cp -a "$resolved_source" "$resolved_target" || die "copy" "Failed to copy"
+  chown -R "${APP_USER}:${APP_GROUP}" "$resolved_target" 2>/dev/null || true
+
+  json_out "{\"success\":true,\"step\":\"copy\",\"from\":\"${source_path}\",\"to\":\"${target_path}\"}"
+}
+
+# ── action: delete ─────────────────────────────────────────────────────────
+action_delete() {
+  if [[ $# -lt 2 ]]; then
+    die "delete" "Usage: delete <site-root> <path>"
+  fi
+
+  local site_root="$1"
+  local user_path="$2"
+
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  # Extra safety: never allow deleting the site root itself
+  if [[ "$RESOLVED_PATH" == "$RESOLVED_ROOT" ]]; then
+    die "delete" "Cannot delete site root directory"
+  fi
+
+  if [[ ! -e "$RESOLVED_PATH" ]]; then
+    die "delete" "Path not found: ${user_path}"
+  fi
+
+  if [[ -d "$RESOLVED_PATH" ]]; then
+    rm -r "$RESOLVED_PATH" || die "delete" "Failed to delete directory"
+  else
+    rm "$RESOLVED_PATH" || die "delete" "Failed to delete file"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"delete\",\"path\":\"${user_path}\"}"
+}
+
+# ── action: read ───────────────────────────────────────────────────────────
+action_read() {
+  if [[ $# -lt 2 ]]; then
+    die "read" "Usage: read <site-root> <path>"
+  fi
+
+  local site_root="$1"
+  local user_path="$2"
+
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  if [[ ! -f "$RESOLVED_PATH" ]]; then
+    die "read" "File not found: ${user_path}"
+  fi
+
+  # Max 1MB
+  local file_size
+  file_size=$(stat -c%s "$RESOLVED_PATH" 2>/dev/null || echo "0")
+  if [[ "$file_size" -gt 1048576 ]]; then
+    die "read" "File too large: ${file_size} bytes (max 1MB)"
+  fi
+
+  # Check if file is text (no binary)
+  if file "$RESOLVED_PATH" | grep -q "text\|empty\|JSON\|XML"; then
+    local content
+    content=$(cat "$RESOLVED_PATH")
+    # Encode content as base64 for safe JSON transport
+    local encoded
+    encoded=$(printf '%s' "$content" | base64 -w 0)
+    json_out "{\"success\":true,\"step\":\"read\",\"path\":\"${user_path}\",\"size\":${file_size},\"encoding\":\"base64\",\"content\":\"${encoded}\"}"
+  else
+    local encoded
+    encoded=$(base64 -w 0 "$RESOLVED_PATH")
+    json_out "{\"success\":true,\"step\":\"read\",\"path\":\"${user_path}\",\"size\":${file_size},\"encoding\":\"base64\",\"content\":\"${encoded}\"}"
+  fi
+}
+
+# ── action: write ──────────────────────────────────────────────────────────
+action_write() {
+  if [[ $# -lt 2 ]]; then
+    die "write" "Usage: write <site-root> <path> [content-stdin]"
+  fi
+
+  local site_root="$1"
+  local user_path="$2"
+
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  # Read content from stdin
+  local content
+  content=$(cat)
+
+  # Ensure parent directory exists
+  local parent_dir
+  parent_dir=$(dirname "$RESOLVED_PATH")
+  if [[ ! -d "$parent_dir" ]]; then
+    mkdir -p "$parent_dir" || die "write" "Failed to create parent directory"
+    chown "${APP_USER}:${APP_GROUP}" "$parent_dir"
+  fi
+
+  printf '%s' "$content" > "$RESOLVED_PATH" || die "write" "Failed to write file"
+  chown "${APP_USER}:${APP_GROUP}" "$RESOLVED_PATH"
+
+  local file_size
+  file_size=$(stat -c%s "$RESOLVED_PATH" 2>/dev/null || echo "0")
+
+  json_out "{\"success\":true,\"step\":\"write\",\"path\":\"${user_path}\",\"size\":${file_size}}"
+}
+
+# ── action: archive ─────────────────────────────────────────────────────────
+action_archive() {
+  if [[ $# -lt 3 ]]; then
+    die "archive" "Usage: archive <site-root> <path> <output-path>"
+  fi
+
+  local site_root="$1"
+  local user_path="$2"
+  local output_path="$3"
+
+  resolve_and_validate_path "$site_root" "$user_path"
+
+  if [[ ! -e "$RESOLVED_PATH" ]]; then
+    die "archive" "Path not found: ${user_path}"
+  fi
+
+  # Validate output path is also under site root
+  resolve_and_validate_path "$site_root" "$output_path"
+
+  local parent_dir
+  parent_dir=$(dirname "$RESOLVED_PATH")
+  mkdir -p "$parent_dir"
+
+  tar -czf "$RESOLVED_PATH" -C "$(dirname "$RESOLVED_PATH")" "$(basename "$RESOLVED_PATH")" 2>/dev/null || \
+    die "archive" "Failed to create archive"
+  chown "${APP_USER}:${APP_GROUP}" "$RESOLVED_PATH"
+
+  local archive_size
+  archive_size=$(stat -c%s "$RESOLVED_PATH" 2>/dev/null || echo "0")
+
+  json_out "{\"success\":true,\"step\":\"archive\",\"outputPath\":\"${output_path}\",\"size\":${archive_size}}"
+}
+
+# ── action: extract ────────────────────────────────────────────────────────
+action_extract() {
+  if [[ $# -lt 3 ]]; then
+    die "extract" "Usage: extract <site-root> <archive-path> <target-dir>"
+  fi
+
+  local site_root="$1"
+  local archive_path="$2"
+  local target_dir="$3"
+
+  resolve_and_validate_path "$site_root" "$archive_path"
+  local resolved_archive="$RESOLVED_PATH"
+
+  if [[ ! -f "$resolved_archive" ]]; then
+    die "extract" "Archive not found: ${archive_path}"
+  fi
+
+  # Validate target dir
+  resolve_and_validate_path "$site_root" "$target_dir"
+  local resolved_target="$RESOLVED_PATH"
+
+  mkdir -p "$resolved_target" || die "extract" "Failed to create target directory"
+
+  # Detect archive type and extract with path traversal protection
+  local file_type
+  file_type=$(file "$resolved_archive")
+
+  if [[ "$file_type" == *"gzip"* || "$file_type" == *"tar"* ]]; then
+    # List files first to check for path traversal
+    local has_traversal
+    has_traversal=$(tar -tzf "$resolved_archive" 2>/dev/null | grep -c '^\.\.\|^\./\.\.' || echo "0")
+    if [[ "$has_traversal" -gt 0 ]]; then
+      die "extract" "Archive contains path traversal entries – rejected"
     fi
-
-    RESOLVED=$(validate_path "$DOMAIN" "$REL_PATH")
-    if [[ "$RESOLVED" == '{'* ]]; then echo "$RESOLVED"; exit 1; fi
-
-    PARENT=$(dirname "$RESOLVED")
-    mv "$RESOLVED" "$PARENT/$NEW_NAME"
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"oldPath\":\"$REL_PATH\",\"newPath\":\"$(dirname "$REL_PATH")/$NEW_NAME\"}"
-    ;;
-
-  upload)
-    DOMAIN="${1:?Usage: upload <domain> <relative_path> <tmp_file_path>}
-    REL_PATH="${2:?Usage: upload <domain> <relative_path> <tmp_file_path>}
-    TMP_FILE="${3:?Usage: upload <domain> <relative_path> <tmp_file_path>}
-    validate_domain "$DOMAIN"
-
-    if [[ ! -f "$TMP_FILE" ]]; then
-      echo '{"success":false,"error":"Temporary file not found"}'
-      exit 1
+    tar -xzf "$resolved_archive" -C "$resolved_target" --no-same-permissions || \
+      die "extract" "Failed to extract tar.gz archive"
+  elif [[ "$file_type" == *"Zip archive"* ]]; then
+    # Check for path traversal in zip
+    local has_zip_traversal
+    has_zip_traversal=$(unzip -l "$resolved_archive" 2>/dev/null | grep -c '\.\./' || echo "0")
+    if [[ "$has_zip_traversal" -gt 0 ]]; then
+      die "extract" "Archive contains path traversal entries – rejected"
     fi
+    unzip -o "$resolved_archive" -d "$resolved_target" >/dev/null || \
+      die "extract" "Failed to extract zip archive"
+  else
+    die "extract" "Unsupported archive format"
+  fi
 
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    FULL_PATH="$SITE_DIR/$REL_PATH"
-    RESOLVED_PARENT=$(realpath "$(dirname "$FULL_PATH")" 2>/dev/null)
-    if [[ "$RESOLVED_PARENT" != "$SITE_DIR"/* && "$RESOLVED_PARENT" != "$SITE_DIR" ]]; then
-      echo '{"success":false,"error":"Access denied"}'
-      exit 1
-    fi
+  chown -R "${APP_USER}:${APP_GROUP}" "$resolved_target"
+  log_info "Archive extracted to ${resolved_target}"
 
-    mkdir -p "$RESOLVED_PARENT"
-    mv "$TMP_FILE" "$FULL_PATH"
-    FSIZE=$(stat -c%s "$FULL_PATH" 2>/dev/null || echo 0)
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"path\":\"$REL_PATH\",\"size\":$FSIZE}"
-    ;;
+  json_out "{\"success\":true,\"step\":\"extract\",\"target\":\"${target_dir}\"}"
+}
 
-  disk-usage)
-    DOMAIN="${1:?Usage: disk-usage <domain>}
-    validate_domain "$DOMAIN"
-
-    SITE_DIR="$SITE_BASE/$DOMAIN"
-    if [[ ! -d "$SITE_DIR" ]]; then
-      echo '{"success":false,"error":"Site directory not found"}'
-      exit 1
-    fi
-
-    USAGE=$(du -sb "$SITE_DIR" 2>/dev/null | awk '{print $1}')
-    USAGE_HUMAN=$(du -sh "$SITE_DIR" 2>/dev/null | awk '{print $1}')
-    FILE_COUNT=$(find "$SITE_DIR" -type f 2>/dev/null | wc -l)
-    DIR_COUNT=$(find "$SITE_DIR" -type d 2>/dev/null | wc -l)
-
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"sizeBytes\":${USAGE:-0},\"sizeHuman\":\"${USAGE_HUMAN:-0B}\",\"fileCount\":$FILE_COUNT,\"directoryCount\":$DIR_COUNT}"
-    ;;
-
-  *)
-    echo "Available commands: list, read, write, delete, mkdir, rename, upload, disk-usage" >&2
-    exit 1
-    ;;
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  list)    action_list "$@" ;;
+  upload)  action_upload "$@" ;;
+  mkdir)   action_mkdir "$@" ;;
+  rename)  action_rename "$@" ;;
+  move)    action_move "$@" ;;
+  copy)    action_copy "$@" ;;
+  delete)  action_delete "$@" ;;
+  read)    action_read "$@" ;;
+  write)   action_write "$@" ;;
+  archive) action_archive "$@" ;;
+  extract) action_extract "$@" ;;
+  *)       die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

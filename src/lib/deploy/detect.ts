@@ -114,6 +114,7 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
   const warnings: string[] = [];
   const envNames = new Set<string>();
   const result: DetectionResult = {
+    workloadCategory: "web",
     language: "unknown",
     framework: "static",
     runtime: "static",
@@ -137,6 +138,16 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
   };
 
   const pkg = json(await fs.read("package.json"));
+  const appJson = json(await fs.read("app.json"));
+  const capacitorJson = json(await fs.read("capacitor.config.json"));
+  const hasCapacitorTs = (await fs.exists("capacitor.config.ts")) || (await fs.exists("capacitor.config.js"));
+  const hasIonicConfig = await fs.exists("ionic.config.json");
+  const pubspec = await fs.read("pubspec.yaml");
+  const goMod = await fs.read("go.mod");
+  const cargoToml = await fs.read("Cargo.toml");
+  const hasAndroidGradle =
+    ((await fs.exists("settings.gradle")) || (await fs.exists("settings.gradle.kts"))) &&
+    ((await fs.exists("app/build.gradle")) || (await fs.exists("app/build.gradle.kts")));
   const composer = json(await fs.read("composer.json"));
   const pyproject = await fs.read("pyproject.toml");
   const requirements = await fs.read("requirements.txt");
@@ -213,7 +224,40 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
     if (scripts.typecheck) result.typecheckCmd = script("typecheck", "");
     if (scripts.test) result.testCmd = script("test", "");
 
-    if (deps.next || hasNextConfig) {
+    if (deps.expo || appJson?.expo) {
+      result.workloadCategory = "mobile";
+      result.framework = "expo";
+      result.buildCmd = scripts.build ? script("build", "") : "npx expo export --platform all";
+      result.outputDir = "dist";
+      result.startCmd = null;
+      result.confidence = "high";
+      result.ambiguous = false;
+      reasons.push("expo dependency / app.json detected (Mobile Web + OTA update bundle)");
+    } else if (deps["@capacitor/core"] || capacitorJson || hasCapacitorTs || hasIonicConfig) {
+      result.workloadCategory = "mobile";
+      result.framework = hasIonicConfig || deps["@ionic/react"] || deps["@ionic/angular"] || deps["@ionic/vue"] ? "ionic-capacitor" : "capacitor";
+      result.buildCmd = script("build", "npm run build");
+      result.outputDir = capacitorJson?.webDir && typeof capacitorJson.webDir === "string" && !capacitorJson.webDir.startsWith("/") && !capacitorJson.webDir.includes("..")
+        ? capacitorJson.webDir
+        : (await fs.exists("ionic.config.json")) && !deps.vite
+          ? "www"
+          : "dist";
+      result.startCmd = null;
+      result.confidence = scripts.build ? "high" : "medium";
+      result.ambiguous = !scripts.build;
+      reasons.push("Capacitor / Ionic hybrid mobile manifest detected");
+    } else if (deps["react-native"]) {
+      result.workloadCategory = "mobile";
+      result.framework = "react-native";
+      result.buildCmd = scripts.build ? script("build", "") : null;
+      result.outputDir = "dist";
+      result.startCmd = null;
+      result.confidence = "medium";
+      result.ambiguous = true;
+      warnings.push("Bare React Native project detected; confirm OTA/web export build script before deploying");
+      reasons.push("react-native dependency detected");
+    } else if (deps.next || hasNextConfig) {
+      result.workloadCategory = "web";
       result.framework = "nextjs";
       result.buildCmd = script("build", "npm run build");
       result.startCmd = scripts.start ? script("start", "") : "node .next/standalone/server.js";
@@ -224,7 +268,46 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
       result.ambiguous = true; // a server process, not a static bundle -> operator must confirm service manager
       warnings.push("Next.js needs a long-running service; confirm serviceManager (pm2/systemd) and static asset copy before deploying");
       reasons.push("next dependency / next.config detected");
+    } else if (deps.nuxt) {
+      result.workloadCategory = "web";
+      result.framework = "nuxt";
+      result.buildCmd = script("build", "npm run build");
+      result.startCmd = "node .output/server/index.mjs";
+      result.outputDir = ".output";
+      result.confidence = "high";
+      result.ambiguous = true;
+      warnings.push("Nuxt SSR server requires pm2/systemd service confirmation");
+      reasons.push("nuxt dependency detected");
+    } else if (deps["@sveltejs/kit"]) {
+      result.workloadCategory = "web";
+      result.framework = "sveltekit";
+      result.buildCmd = script("build", "npm run build");
+      result.outputDir = "build";
+      result.confidence = "high";
+      result.ambiguous = true;
+      warnings.push("Confirm SvelteKit adapter output directory and service manager");
+      reasons.push("@sveltejs/kit dependency detected");
+    } else if (deps["@remix-run/node"] || deps["@react-router/dev"]) {
+      result.workloadCategory = "web";
+      result.framework = "remix";
+      result.buildCmd = script("build", "npm run build");
+      result.startCmd = scripts.start ? script("start", "") : null;
+      result.outputDir = "build";
+      result.confidence = "high";
+      result.ambiguous = true;
+      warnings.push("Confirm Remix server start command and service manager");
+      reasons.push("Remix / React Router framework dependency detected");
+    } else if (deps.astro) {
+      result.workloadCategory = "web";
+      result.framework = "astro";
+      result.buildCmd = script("build", "npm run build");
+      result.outputDir = "dist";
+      result.startCmd = null;
+      result.confidence = scripts.build ? "high" : "medium";
+      result.ambiguous = !scripts.build;
+      reasons.push("astro dependency detected");
     } else if (deps.vite || hasVite) {
+      result.workloadCategory = "web";
       result.framework = "vite";
       result.buildCmd = script("build", "npm run build");
       result.outputDir = "dist";
@@ -233,20 +316,23 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
       result.ambiguous = !scripts.build;
       reasons.push("vite dependency / vite.config detected");
     } else if (deps["react-scripts"]) {
+      result.workloadCategory = "web";
       result.framework = "create-react-app";
       result.buildCmd = script("build", "npm run build");
       result.outputDir = "build";
       result.ambiguous = !scripts.build;
       result.confidence = scripts.build ? "high" : "medium";
     } else if (deps["@nestjs/core"] || hasNestCli) {
+      result.workloadCategory = "server";
       result.framework = "nestjs";
       result.buildCmd = script("build", "npm run build");
       result.startCmd = scripts.start ? script("start", "") : "node dist/main.js";
       result.outputDir = "dist";
       result.ambiguous = true;
       warnings.push("NestJS needs a long-running service; confirm serviceManager and start command");
-    } else if (deps.express || deps.fastify || deps.koa) {
-      result.framework = deps.express ? "express" : deps.fastify ? "fastify" : "koa";
+    } else if (deps.express || deps.fastify || deps.koa || deps.hono) {
+      result.workloadCategory = "server";
+      result.framework = deps.express ? "express" : deps.fastify ? "fastify" : deps.koa ? "koa" : "hono";
       result.buildCmd = scripts.build ? script("build", "") : null;
       result.startCmd = scripts.start ? script("start", "") : null;
       result.outputDir = ".";
@@ -254,20 +340,86 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
       if (!scripts.start) warnings.push("No start script; an operator must supply a start command");
       result.confidence = scripts.start ? "high" : "low";
     } else if (hasIndexHtml) {
+      result.workloadCategory = "web";
       result.framework = "static-html";
       result.buildCmd = scripts.build ? script("build", "") : null;
       result.outputDir = scripts.build ? "dist" : ".";
       result.ambiguous = false;
       result.confidence = "high";
     } else {
+      result.workloadCategory = "server";
       result.framework = "node";
       result.buildCmd = scripts.build ? script("build", "") : null;
       result.startCmd = scripts.start ? script("start", "") : null;
       result.ambiguous = true;
       warnings.push("Generic Node project; confirm build and start commands");
     }
+  } else if (pubspec) {
+    // ── Flutter / Dart Mobile & Web ─────────────────────────────────────────
+    const isFlutter = /^\s*flutter\s*:/m.test(pubspec);
+    result.workloadCategory = isFlutter ? "mobile" : "server";
+    result.language = "dart";
+    result.runtime = isFlutter ? "flutter" : "dart";
+    result.framework = isFlutter ? "flutter" : "dart-server";
+    result.packageManager = isFlutter ? "flutter" : "dart";
+    result.lockfile = (await fs.exists("pubspec.lock")) ? "pubspec.lock" : null;
+    result.installCmd = isFlutter ? "flutter pub get" : "dart pub get";
+    result.buildCmd = isFlutter ? "flutter build web --release" : "dart compile exe bin/server.dart -o build/server";
+    result.outputDir = isFlutter ? "build/web" : "build";
+    result.port = 8080;
+    result.confidence = isFlutter ? "high" : "medium";
+    result.ambiguous = !isFlutter;
+    reasons.push(isFlutter ? "pubspec.yaml with flutter SDK -> Flutter Web & Mobile bundle" : "pubspec.yaml -> Dart backend");
+  } else if (hasAndroidGradle) {
+    // ── Native Android (Gradle) ─────────────────────────────────────────────
+    result.workloadCategory = "mobile";
+    result.language = "kotlin";
+    result.runtime = "android";
+    result.framework = "android-gradle";
+    result.packageManager = "gradle";
+    result.installCmd = null;
+    result.buildCmd = "gradle assembleRelease";
+    result.outputDir = "app/build/outputs/apk/release";
+    result.port = 8080;
+    result.confidence = "medium";
+    result.ambiguous = true;
+    warnings.push("Android APK release build requires Android SDK + signing keystore configured on the build host");
+    reasons.push("settings.gradle + app/build.gradle detected");
+  } else if (goMod) {
+    // ── Go Server ───────────────────────────────────────────────────────────
+    result.workloadCategory = "server";
+    result.language = "go";
+    result.runtime = "go";
+    result.framework = "go-http";
+    result.packageManager = "go";
+    result.lockfile = (await fs.exists("go.sum")) ? "go.sum" : "go.mod";
+    result.installCmd = "go mod download";
+    result.buildCmd = "go build -o bin/server .";
+    result.outputDir = ".";
+    result.port = 8080;
+    result.confidence = "medium";
+    result.ambiguous = true;
+    warnings.push("Go service requires operator confirmation of binary entrypoint and systemd/pm2 unit");
+    reasons.push("go.mod detected");
+  } else if (cargoToml) {
+    // ── Rust Server ─────────────────────────────────────────────────────────
+    result.workloadCategory = "server";
+    result.language = "rust";
+    result.runtime = "rust";
+    result.framework = "rust-cargo";
+    result.packageManager = "cargo";
+    result.lockfile = (await fs.exists("Cargo.lock")) ? "Cargo.lock" : "Cargo.toml";
+    result.installCmd = null;
+    result.buildCmd = "cargo build --release";
+    result.outputDir = "target/release";
+    result.port = 8080;
+    result.confidence = "medium";
+    result.ambiguous = true;
+    warnings.push("Rust release binary requires operator confirmation of binary name and systemd unit");
+    reasons.push("Cargo.toml detected");
   } else if (composer || hasArtisan) {
     // ── PHP / Laravel ───────────────────────────────────────────────────────
+    result.workloadCategory = hasArtisan ? "web" : "server";
     result.language = "php";
     result.runtime = "php";
     result.framework = hasArtisan ? "laravel" : "php-composer";
@@ -283,6 +435,7 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
     warnings.push("PHP/Laravel requires a verified PHP-FPM/Caddy vhost; no migrations or artisan commands are run automatically");
   } else if (requirements || pyproject || hasManagePy) {
     // ── Python ──────────────────────────────────────────────────────────────
+    result.workloadCategory = "server";
     result.language = "python";
     result.runtime = "python3";
     result.packageManager = "pip3";
@@ -299,6 +452,7 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
     result.confidence = "medium";
     warnings.push("Python needs an operator-confirmed ASGI/WSGI module and service manager; no framework command is guessed");
   } else if (hasDockerfile || hasCompose) {
+    result.workloadCategory = "server";
     result.language = "docker";
     result.runtime = "docker";
     result.framework = hasCompose ? "docker-compose" : "docker";
@@ -311,6 +465,7 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
     result.confidence = "medium";
     warnings.push("Docker builds are not run from the web panel without an approval gate");
   } else if (hasIndexHtml) {
+    result.workloadCategory = "web";
     result.framework = "static-html";
     result.language = "html";
     result.runtime = "static";

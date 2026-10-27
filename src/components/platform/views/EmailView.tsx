@@ -79,6 +79,7 @@ export default function EmailView() {
 
   // Campaigns
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([])
+  const [selectedCampaign, setSelectedCampaign] = useState<EmailCampaign | null>(null)
   const [campaignDialogOpen, setCampaignDialogOpen] = useState(false)
   const [campaignForm, setCampaignForm] = useState({
     subject: '',
@@ -369,7 +370,14 @@ export default function EmailView() {
                               {campaign.sentAt ? format(new Date(campaign.sentAt), 'MMM d, yyyy') : '-'}
                             </TableCell>
                             <TableCell>
-                              <Button variant="ghost" size="sm">View</Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setSelectedCampaign(campaign)}
+                              >
+                                View
+                              </Button>
                             </TableCell>
                           </TableRow>
                         )
@@ -461,6 +469,34 @@ export default function EmailView() {
             <Button onClick={handleCreateCampaign} className="bg-[#E8501A] hover:bg-[#5B2FC9]">
               Create Campaign
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Campaign Detail Dialog */}
+      <Dialog open={selectedCampaign !== null} onOpenChange={(open) => !open && setSelectedCampaign(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{selectedCampaign?.subject || 'Campaign Overview'}</DialogTitle>
+          </DialogHeader>
+          {selectedCampaign && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant="secondary">{selectedCampaign.status}</Badge>
+              </div>
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-muted-foreground">Recipients</span>
+                <span className="font-semibold">{selectedCampaign.recipientCount}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-muted-foreground">Opens / Clicks</span>
+                <span>{selectedCampaign.openCount} opens · {selectedCampaign.clickCount} clicks</span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSelectedCampaign(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

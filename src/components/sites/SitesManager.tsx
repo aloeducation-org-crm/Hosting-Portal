@@ -193,21 +193,22 @@ export function SitesManager() {
                   )}
                 </div>
                 <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                  <Link href={`/sites/${site.id}`} className="flex-1">
-                    <Button variant="outline" size="sm" className="w-full text-xs">
+                  <Button asChild variant="outline" size="sm" className="flex-1 text-xs">
+                    <Link href={`/sites/${site.id}`}>
                       <Settings className="h-3.5 w-3.5 mr-1.5" />
                       Manage
-                    </Button>
-                  </Link>
-                  <a
-                    href={`https://${site.domain}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Button variant="ghost" size="sm" className="text-xs">
+                    </Link>
+                  </Button>
+                  <Button asChild variant="ghost" size="sm" className="text-xs">
+                    <a
+                      href={`https://${site.domain}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`Open ${site.domain}`}
+                    >
                       <ExternalLink className="h-3.5 w-3.5" />
-                    </Button>
-                  </a>
+                    </a>
+                  </Button>
                 </div>
               </CardContent>
             </Card>

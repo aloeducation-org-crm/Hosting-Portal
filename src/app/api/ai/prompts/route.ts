@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
+import { requireSession } from '@/lib/auth';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -42,8 +43,9 @@ const PROMPT_TEMPLATES = [
   },
 ];
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    await requireSession(request);
     return NextResponse.json(apiSuccess(PROMPT_TEMPLATES));
   } catch (e) {
     return handleErr(e);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission } from '@/lib/auth';
+import { requirePermission, isAdminRole, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { callHelper } from '@/lib/helpers';
 import { logger } from '@/lib/logger';
@@ -124,16 +124,19 @@ function parsePhpFpmLog(lines: string[]): LogEntry[] {
   });
 }
 
+const SAFE_DOMAIN_REGEX =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$/i;
+
 export async function GET(request: NextRequest) {
   try {
-    const user = await requireSession(request);
-    await requirePermission(request, 'LOGS_READ');
+    const user = await requirePermission(request, 'LOGS_READ');
 
     const { searchParams } = new URL(request.url);
     const source = searchParams.get('source') || 'application';
-    const domain = searchParams.get('domain') || undefined;
+    const rawDomain = searchParams.get('domain')?.trim().toLowerCase() || undefined;
     const linesParam = searchParams.get('lines');
-    const lines = Math.min(Math.max(parseInt(linesParam || '100', 10), 1), 10000);
+    const parsedLines = parseInt(linesParam || '100', 10);
+    const lines = Number.isFinite(parsedLines) ? Math.min(Math.max(parsedLines, 1), 10000) : 100;
     const search = searchParams.get('search') || undefined;
 
     if (!isValidSource(source)) {
@@ -144,7 +147,40 @@ export async function GET(request: NextRequest) {
           undefined,
           400,
         ),
+        { status: 400 },
       );
+    }
+
+    if (rawDomain && !SAFE_DOMAIN_REGEX.test(rawDomain)) {
+      return NextResponse.json(
+        apiError('Invalid domain format', 'VALIDATION_ERROR', undefined, 400),
+        { status: 400 },
+      );
+    }
+    const domain = rawDomain;
+
+    // Host-wide log sources (application journal, php-fpm, unscoped systemd/caddy) require ADMIN/SUPER_ADMIN.
+    const adminCaller = isAdminRole(user.role);
+    if (!adminCaller) {
+      if (source === 'application' || source === 'php-fpm') {
+        return NextResponse.json(apiError('Forbidden', 'FORBIDDEN', undefined, 403), { status: 403 });
+      }
+      if ((source === 'caddy-access' || source === 'caddy-error' || source === 'systemd') && !domain) {
+        return NextResponse.json(
+          apiError('domain parameter is required for non-admin log queries', 'FORBIDDEN', undefined, 403),
+          { status: 403 },
+        );
+      }
+      if (domain) {
+        const domainRecord = await db.domain.findUnique({
+          where: { domain },
+          include: { website: true },
+        });
+        if (!domainRecord?.website) {
+          return NextResponse.json(apiError('Domain not found', 'NOT_FOUND', undefined, 404), { status: 404 });
+        }
+        assertWebsiteAccess(user, domainRecord.website);
+      }
     }
 
     let entries: LogEntry[] = [];
@@ -264,28 +300,34 @@ export async function GET(request: NextRequest) {
       // Security logs (from AuditLog table)
       // ----------------------------------------------------------------
       case 'security': {
-        const where: Record<string, unknown> = {
-          OR: [
-            { action: { contains: 'login' } },
-            { action: { contains: 'auth' } },
-            { action: { contains: 'MFA' } },
-            { action: { contains: 'lockout' } },
-            { action: { contains: 'FORBIDDEN' } },
-            { action: { contains: 'UNAUTHORIZED' } },
-            { action: { contains: 'firewall' } },
-            { action: { contains: 'ssh' } },
-          ],
-        };
-
-        if (search) {
-          where.OR = [
-            ...(where.OR as Array<Record<string, unknown>>),
-            { action: { contains: search } },
-            { domain: { contains: search } },
-            { actorEmail: { contains: search } },
-            { ipAddress: { contains: search } },
-          ];
+        const actionFilter = [
+          { action: { contains: 'login' } },
+          { action: { contains: 'auth' } },
+          { action: { contains: 'MFA' } },
+          { action: { contains: 'lockout' } },
+          { action: { contains: 'FORBIDDEN' } },
+          { action: { contains: 'UNAUTHORIZED' } },
+          { action: { contains: 'firewall' } },
+          { action: { contains: 'ssh' } },
+        ];
+        const andClauses: Array<Record<string, unknown>> = [{ OR: actionFilter }];
+        if (!adminCaller) {
+          andClauses.push({ actorUserId: user.id });
         }
+        if (domain) {
+          andClauses.push({ domain });
+        }
+        if (search) {
+          andClauses.push({
+            OR: [
+              { action: { contains: search } },
+              { domain: { contains: search } },
+              { actorEmail: { contains: search } },
+              { ipAddress: { contains: search } },
+            ],
+          });
+        }
+        const where: Record<string, unknown> = { AND: andClauses };
 
         const auditLogs = await db.auditLog.findMany({
           where,
@@ -335,6 +377,9 @@ export async function GET(request: NextRequest) {
       // ----------------------------------------------------------------
       case 'audit': {
         const where: Record<string, unknown> = {};
+        if (!adminCaller) {
+          where.actorUserId = user.id;
+        }
         if (search) {
           where.OR = [
             { action: { contains: search } },

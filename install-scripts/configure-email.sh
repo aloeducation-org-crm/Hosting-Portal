@@ -113,9 +113,8 @@ postconf -e "virtual_uid_maps = static:$APP_USER"
 postconf -e "virtual_gid_maps = static:$APP_GROUP"
 
 # TLS configuration
-cat > /etc/postfix/main.cf.d/tls.conf 2>/dev/null << TLS_EOF || {
-  # If directory doesn't exist, append to main.cf
-  grep -q "^smtpd_tls_cert_file" /etc/postfix/main.cf || cat >> /etc/postfix/main.cf << TLS_EOF
+if [[ -d /etc/postfix/main.cf.d ]]; then
+  cat > /etc/postfix/main.cf.d/tls.conf << 'TLS_EOF'
 # ─── TLS Configuration (ALO Labs) ─────────────────────────────────
 smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem
 smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key
@@ -128,7 +127,21 @@ smtp_tls_security_level = may
 smtp_tls_loglevel = 1
 smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
 TLS_EOF
-}
+elif ! grep -q "^smtpd_tls_cert_file" /etc/postfix/main.cf 2>/dev/null; then
+  cat >> /etc/postfix/main.cf << 'TLS_EOF'
+# ─── TLS Configuration (ALO Labs) ─────────────────────────────────
+smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem
+smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key
+smtpd_tls_security_level = may
+smtpd_tls_loglevel = 1
+smtpd_tls_received_header = yes
+smtpd_tls_session_cache_timeout = 3600s
+smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
+smtp_tls_security_level = may
+smtp_tls_loglevel = 1
+smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
+TLS_EOF
+fi
 
 # Ensure domain is in virtual_mailbox_domains
 if ! grep -q "^$DOMAIN" /etc/postfix/virtual_mailbox_domains 2>/dev/null; then

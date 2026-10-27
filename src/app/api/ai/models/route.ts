@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession } from '@/lib/auth';
+import { requireSession, isAdminRole } from '@/lib/auth';
 import { apiError, apiSuccess, type ApiResponse } from '@/lib/response';
 import { resolveProviders } from '@/lib/ai/providers';
 import { listProviderModels } from '@/lib/ai/client';
@@ -30,16 +30,33 @@ async function load(all: boolean) {
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireSession(request);
+    const user = await requireSession(request);
+    const isOperator = isAdminRole(user.role) || user.role === 'DEVOPS';
     const all = new URL(request.url).searchParams.get('all') === '1';
     const resolution = resolveProviders(process.env);
     const key = `${all ? 'all' : 'first'}:${resolution.providers.map((p) => `${p.id}:${p.baseUrl}`).join('|')}`;
+    let data: Awaited<ReturnType<typeof load>>;
+    let cached = false;
     if (cache && cache.key === key && Date.now() - cache.at < CACHE_TTL_MS) {
-      return NextResponse.json(apiSuccess({ ...cache.value, cached: true }));
+      data = cache.value;
+      cached = true;
+    } else {
+      data = await load(all);
+      cache = { at: Date.now(), key, value: data };
     }
-    const value = await load(all);
-    cache = { at: Date.now(), key, value };
-    return NextResponse.json(apiSuccess({ ...value, cached: false }));
+    return NextResponse.json(
+      apiSuccess({
+        ready: data.ready,
+        providers: data.providers,
+        skipped: data.skipped.map((s) => ({
+          id: s.id,
+          label: s.label,
+          reason: isOperator ? s.reason : 'not configured',
+        })),
+        warnings: isOperator ? data.warnings : [],
+        cached,
+      }),
+    );
   } catch (e) {
     return handleErr(e);
   }

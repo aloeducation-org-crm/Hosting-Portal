@@ -181,6 +181,7 @@ export default function CRMView() {
 
   // Deals
   const [deals, setDeals] = useState<Deal[]>([])
+  const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null)
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [dealDialogOpen, setDealDialogOpen] = useState(false)
   const [dealForm, setDealForm] = useState({
@@ -546,7 +547,14 @@ export default function CRMView() {
                             {deal.expectedCloseDate ? format(new Date(deal.expectedCloseDate), 'MMM d, yyyy') : '-'}
                           </TableCell>
                           <TableCell>
-                            <Button variant="ghost" size="sm">View</Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedDeal(deal)}
+                            >
+                              View
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -832,6 +840,38 @@ export default function CRMView() {
             <Button onClick={handleSaveDeal} className="bg-[#E8501A] hover:bg-[#5B2FC9]">
               Create Deal
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deal Detail Dialog */}
+      <Dialog open={selectedDeal !== null} onOpenChange={(open) => !open && setSelectedDeal(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{selectedDeal?.title || 'Deal Details'}</DialogTitle>
+          </DialogHeader>
+          {selectedDeal && (
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-muted-foreground">Stage</span>
+                <Badge variant="outline">{selectedDeal.stage}</Badge>
+              </div>
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-muted-foreground">Value</span>
+                <span className="font-semibold">${Number(selectedDeal.value || 0).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b">
+                <span className="text-muted-foreground">Probability</span>
+                <span>{selectedDeal.probability}%</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-muted-foreground">Expected Close</span>
+                <span>{selectedDeal.expectedCloseDate ? format(new Date(selectedDeal.expectedCloseDate), 'MMM d, yyyy') : 'Not set'}</span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSelectedDeal(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

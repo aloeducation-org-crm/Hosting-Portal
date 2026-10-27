@@ -17,7 +17,7 @@ const servers = new Map<number, { server: http.Server; root: string }>();
 export function releaseBase(): string {
   const base = process.env.DEPLOY_RELEASE_BASE || path.join(os.tmpdir(), "alo-releases");
   if (!path.isAbsolute(base)) throw new Error("DEPLOY_RELEASE_BASE must be absolute");
-  return path.resolve(base);
+  return path.resolve(/*turbopackIgnore: true*/ base);
 }
 
 export function projectRoot(projectId: string): string {
@@ -120,15 +120,15 @@ export async function startStaticServer(port: number, root: string): Promise<voi
         return;
       }
       const requested = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
-      const filePath = path.resolve(active, requested);
+      const filePath = path.resolve(/*turbopackIgnore: true*/ active, requested);
       if (filePath !== active && !filePath.startsWith(active + path.sep)) {
         res.writeHead(403);
         res.end("forbidden");
         return;
       }
-      const stat = await fs.stat(filePath).catch(() => null);
-      const finalPath = stat?.isDirectory() ? path.join(filePath, "index.html") : filePath;
-      const body = await fs.readFile(finalPath).catch(() => null);
+      const stat = await fs.stat(/*turbopackIgnore: true*/ filePath).catch(() => null);
+      const finalPath = stat?.isDirectory() ? path.join(/*turbopackIgnore: true*/ filePath, "index.html") : filePath;
+      const body = await fs.readFile(/*turbopackIgnore: true*/ finalPath).catch(() => null);
       if (!body) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("not found");

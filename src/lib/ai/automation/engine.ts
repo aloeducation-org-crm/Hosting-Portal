@@ -59,7 +59,17 @@ export type AIInvoker = (messages: Array<{ role: "system" | "user" | "assistant"
   model?: string;
 }) => Promise<AIInvocationResult>;
 
-export type ToolFn = (args: Record<string, unknown>, context: { input: unknown }) => Promise<unknown>;
+export interface WorkflowActor {
+  userId?: string | null;
+  isAdmin?: boolean;
+}
+
+export interface ToolContext {
+  input: unknown;
+  actor?: WorkflowActor;
+}
+
+export type ToolFn = (args: Record<string, unknown>, context: ToolContext) => Promise<unknown>;
 export type ToolRegistry = Record<string, ToolFn>;
 
 export interface RunDependencies {
@@ -76,6 +86,8 @@ export interface RunOptions {
   maxAiCalls?: number;
   continueOnError?: boolean;
   signal?: AbortSignal;
+  /** Acting user/tenant identity passed to read-only hosting tools. */
+  actor?: WorkflowActor;
 }
 
 const DEFAULT_STEP_TIMEOUT_MS = 120_000;
@@ -193,7 +205,7 @@ export async function runWorkflowGraph(
     condition?: boolean;
   }> => {
     const scope = scopeFor();
-    const toolContext = { input };
+    const toolContext: ToolContext = { input, actor: options.actor };
 
     switch (node.type) {
       case "trigger": {
@@ -248,7 +260,11 @@ export async function runWorkflowGraph(
       }
       case "hosting.listSites":
       case "hosting.siteHealth":
-      case "hosting.sslExpiring": {
+      case "hosting.sslExpiring":
+      case "hosting.listDeployments":
+      case "hosting.automationOverview":
+      case "hosting.billingOverview":
+      case "hosting.marketingOverview": {
         const toolName = node.type.replace("hosting.", "");
         const tool = deps.tools[toolName];
         if (!tool) throw new Error(`tool "${toolName}" is not available on this server`);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requirePermission } from '@/lib/auth';
+import { requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
 
@@ -21,6 +21,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!website || website.deletedAt) {
       return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
+    assertWebsiteAccess(user, website);
 
     const result = await callHelper('alo-site-lifecycle', ['suspend', website.domain]);
     if (!result.success) {

@@ -49,7 +49,8 @@ jobs:
           NEXTAUTH_URL: http://127.0.0.1:3101
           NEXTAUTH_SECRET: ci-only-not-a-real-secret-0123456789abcdef
           JWT_SECRET: ci-only-not-a-real-secret-0123456789abcdef
-          APP_ENCRYPTION_KEY: ci-only-not-a-real-key-0123456789abcdef
+          APP_ENCRYPTION_KEY: ci-only-not-a-real-key-0123456789abcdef0123456789abcdef01234567
+          INTERNAL_SECRET: ci-only-not-a-real-internal-0123456789abcdef
           DATABASE_URL: file:/tmp/alo-hosting-ci.db
       - name: Check standalone entrypoint
         run: test -s .next/standalone/server.js
@@ -65,10 +66,11 @@ jobs:
             .next/static
             public
             prisma
+            helpers
             scripts/init-production-db.sh
 
   deploy:
-    name: Deploy to production server
+    name: Deploy canonical root portal to production server
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
@@ -79,22 +81,29 @@ jobs:
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
-      - name: Activate, restart, and verify
+      - name: Activate canonical root release, restart, and verify
         env:
           DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
         run: |
-          set -e
-          export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"
+          set -euo pipefail
+          export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$HOME/.nvm/versions/node/v22.0.0/bin:$PATH"
           APP_DIR="$HOME/projects/Hosting-Portal"
           cd "$APP_DIR"
-          git pull origin main
-          cd alo-hosting-portal 2>/dev/null || true
-          npm install --production=false
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          npm ci --include=dev
           npx prisma generate
-          npx prisma db push --skip-generate || true
+          node scripts/apply-deploy-schema.mjs
           npm run build
-          pm2 restart alo-hosting --update-env || PORT=3051 pm2 start npm --name "alo-hosting" -- start
+          mkdir -p .next/standalone/.next
+          rm -rf .next/standalone/.next/static .next/standalone/public
+          cp -R .next/static .next/standalone/.next/static
+          cp -R public .next/standalone/public
+          pm2 restart alo-hosting-portal --update-env \
+            || pm2 restart alo-hosting --update-env \
+            || PORT=3051 pm2 start npm --name "alo-hosting-portal" -- start
           pm2 save
           sleep 4
-          curl -sf http://127.0.0.1:3051/api/health && echo "✅ Deploy OK" || (echo "❌ Health check failed" && exit 1)
+          curl -sf http://127.0.0.1:3051/api/health && echo "Deploy OK" || (echo "Health check failed" && exit 1)

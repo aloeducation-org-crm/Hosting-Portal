@@ -1,4 +1,5 @@
 # LiteLLM proxy config — rendered via envsubst.
+# Secrets are read at runtime from /etc/litellm/litellm.env (0600) via os.environ/*.
 model_list:
   - model_name: qwen2.5:7b
     litellm_params:
@@ -15,31 +16,25 @@ model_list:
   - model_name: gemini-1.5-flash
     litellm_params:
       model: gemini/gemini-1.5-flash
-      api_key: ${KIT_GEMINI_API_KEY}
+      api_key: os.environ/GEMINI_API_KEY
   - model_name: gemini-1.5-pro
     litellm_params:
       model: gemini/gemini-1.5-pro
-      api_key: ${KIT_GEMINI_API_KEY}
+      api_key: os.environ/GEMINI_API_KEY
   - model_name: groq-llama-3.1-8b-instant
     litellm_params:
       model: groq/llama-3.1-8b-instant
-      api_key: ${KIT_GROQ_API_KEY}
+      api_key: os.environ/GROQ_API_KEY
   - model_name: groq-llama-3.3-70b-versatile
     litellm_params:
       model: groq/llama-3.3-70b-versatile
-      api_key: ${KIT_GROQ_API_KEY}
-  - model_name: cf-llama-3.1-8b-instruct
-    litellm_params:
-      model: cloudflare/llama-3.1-8b-instruct
-      api_base: https://api.cloudflare.com/client/v4/accounts/${KIT_CLOUDFLARE_AI_ACCOUNT_ID}/ai/v1
-      api_key: ${KIT_CLOUDFLARE_AI_API_TOKEN}
+      api_key: os.environ/GROQ_API_KEY
 
 router_settings:
   routing_strategy: simple-shuffle
   fallbacks:
     - gemini-1.5-flash:
         - groq-llama-3.1-8b-instant
-        - cf-llama-3.1-8b-instruct
         - qwen2.5:7b
     - gemini-1.5-pro:
         - groq-llama-3.3-70b-versatile
@@ -59,13 +54,12 @@ router_settings:
 
 litellm_settings:
   drop_params: true
-  max_budget: 0
-  budget_duration: 30d
+  request_timeout: 90
   telemetry: false
 
 general_settings:
-  master_key: ${KIT_LITELLM_MASTER_KEY}
-  database_url: sqlite:///opt/litellm/litellm.db
+  master_key: os.environ/LITELLM_MASTER_KEY
   disable_view_yaml: true
-  store_model_in_db: true
-  enable_budget_rate_limits: true
+  # Note: LiteLLM DB-backed virtual keys require PostgreSQL (not SQLite).
+  # Set DATABASE_URL in /etc/litellm/litellm.env and store_model_in_db: true only after creating a dedicated Postgres DB.
+  store_model_in_db: false

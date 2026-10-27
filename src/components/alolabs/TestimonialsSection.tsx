@@ -162,14 +162,14 @@ export default function TestimonialsSection() {
                   ))}
                 </div>
                 {t.hasVideo && (
-                  <button
-                    type="button"
+                  <a
+                    href="/pricing"
                     className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-[#E8501A] transition-colors hover:text-[#C73D12]"
-                    aria-label={`Watch video testimonial from ${t.name}`}
+                    aria-label={`View customer story from ${t.name}`}
                   >
                     <Play size={12} className="fill-[#E8501A]" />
-                    Watch video
-                  </button>
+                    Customer story
+                  </a>
                 )}
               </div>
             </div>

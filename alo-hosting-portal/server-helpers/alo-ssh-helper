@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — SSH Helper
+# Manages the alo-panel account's SSH authorized_keys file only.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
+set -euo pipefail
+
+APP_USER="alo-panel"
+APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+if [[ "$EUID" -ne 0 || -z "$APP_HOME" || "$APP_HOME" != /* || -L "$APP_HOME" || ! -d "$APP_HOME" ]] || [[ "$(stat -c '%u' -- "$APP_HOME" 2>/dev/null || true)" != 0 ]]; then
+  printf '[alo-ssh-helper] ERROR: Cannot safely resolve the root-owned home directory for %s\n' "$APP_USER" >&2
+  exit 1
+fi
+APP_HOME_MODE="$(stat -c '%a' -- "$APP_HOME")"
+if (( (8#$APP_HOME_MODE & 0022) != 0 )); then
+  printf '[alo-ssh-helper] ERROR: The home directory is writable by group or others\n' >&2
+  exit 1
+fi
+AUTHORIZED_KEYS_DIR="${APP_HOME}/.ssh"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-ssh-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-ssh-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_ssh_key() {
+  # Basic SSH key validation: must start with valid key type
+  local key="$1"
+  local valid_types=("ssh-rsa" "ssh-ed25519" "ecdsa-sha2-nistp256" "ecdsa-sha2-nistp384" "ecdsa-sha2-nistp521" "sk-ssh-ed25519@openssh.com" "sk-ecdsa-sha2-nistp256@openssh.com")
+  local key_type=""
+  key_type=$(echo "$key" | awk '{print $1}')
+
+  local found=false
+  for vt in "${valid_types[@]}"; do
+    if [[ "$key_type" == "$vt" ]]; then
+      found=true
+      break
+    fi
+  done
+
+  if [[ "$found" == "false" ]]; then
+    die "arg-validation" "Invalid or unsupported SSH key type: ${key_type}"
+  fi
+
+  # Basic length check
+  if [[ ${#key} -lt 100 ]]; then
+    die "arg-validation" "SSH key appears too short to be valid"
+  fi
+  if [[ ${#key} -gt 16384 ]]; then
+    die "arg-validation" "SSH key too long (max 16384 chars)"
+  fi
+}
+
+validate_label() {
+  # Key label: alphanumeric, dots, hyphens, underscores, @, spaces; max 128 chars
+  local label_pattern='^[a-zA-Z0-9._ @-]{1,128}$'
+  if [[ ! "$1" =~ $label_pattern ]]; then
+    die "arg-validation" "Invalid key label: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-ssh-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: add-key ─────────────────────────────────────────────────────────
+action_add_key() {
+  if [[ $# -lt 1 ]]; then
+    die "add-key" "Usage: add-key <public-key> [label]"
+  fi
+
+  local public_key="$1"
+  local label="${2:-}"
+
+  validate_ssh_key "$public_key"
+  if [[ -n "$label" ]]; then
+    validate_label "$label"
+  fi
+
+  local auth_keys="${AUTHORIZED_KEYS_DIR}/authorized_keys"
+
+  # Keep both directories root-owned so the app user cannot replace a path
+  # with a symlink between validation and the privileged write.
+  install -d -o root -g root -m 0700 "$AUTHORIZED_KEYS_DIR"
+  [[ ! -L "$auth_keys" ]] || die "add-key" "Refusing to write through a symlinked authorized_keys file"
+  [[ ! -e "$auth_keys" || -f "$auth_keys" ]] || die "add-key" "authorized_keys is not a regular file"
+
+  # Check for duplicate key and reject malformed keys before touching the file.
+  local key_fingerprint
+  key_fingerprint=$(printf '%s\n' "$public_key" | ssh-keygen -l -f - 2>/dev/null | awk '{print $2}')
+  [[ -n "$key_fingerprint" ]] || die "add-key" "Invalid SSH public key data"
+
+  if [[ -f "$auth_keys" ]]; then
+    if ssh-keygen -l -f "$auth_keys" 2>/dev/null | grep -q "$key_fingerprint"; then
+      die "add-key" "This SSH key is already authorized"
+    fi
+  fi
+
+  # Append key with optional comment
+  if [[ -n "$label" ]]; then
+    printf '%s %s\n' "$public_key" "$label" >> "$auth_keys"
+  else
+    printf '%s\n' "$public_key" >> "$auth_keys"
+  fi
+
+  # OpenSSH permits root-owned authorized_keys; the app user must not be able to edit it.
+  touch "$auth_keys"
+  chown root:root "$auth_keys"
+  chmod 600 "$auth_keys"
+
+  log_info "Added SSH key with label: ${label:-none}"
+
+  json_out "{\"success\":true,\"step\":\"add-key\",\"label\":\"${label:-}\",\"message\":\"SSH key added\"}"
+}
+
+# ── action: remove-key ──────────────────────────────────────────────────────
+action_remove_key() {
+  if [[ $# -lt 1 ]]; then
+    die "remove-key" "Usage: remove-key <fingerprint>"
+  fi
+
+  local fingerprint="$1"
+  local auth_keys="${AUTHORIZED_KEYS_DIR}/authorized_keys"
+  [[ "$fingerprint" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]] || die "remove-key" "Invalid SHA256 fingerprint"
+
+  if [[ ! -f "$auth_keys" ]]; then
+    die "remove-key" "No authorized_keys file found"
+  fi
+
+  # Find and remove the key by fingerprint
+  local line_number=""
+  line_number=$(ssh-keygen -l -f "$auth_keys" 2>/dev/null | grep -nF -- "$fingerprint" | head -1 | cut -d: -f1 || echo "")
+
+  if [[ -z "$line_number" ]]; then
+    die "remove-key" "SSH key not found with fingerprint: ${fingerprint}"
+  fi
+
+  sed -i "${line_number}d" "$auth_keys"
+  chown root:root "$auth_keys"
+  chmod 600 "$auth_keys"
+  log_info "Removed SSH key with fingerprint: ${fingerprint}"
+
+  json_out "{\"success\":true,\"step\":\"remove-key\",\"fingerprint\":\"${fingerprint}\",\"message\":\"SSH key removed\"}"
+}
+
+# ── action: list-keys ───────────────────────────────────────────────────────
+action_list_keys() {
+  local auth_keys="${AUTHORIZED_KEYS_DIR}/authorized_keys"
+  local keys_json="["
+  local first=true
+
+  if [[ -f "$auth_keys" ]]; then
+    local line_num=0
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      line_num=$((line_num + 1))
+
+      local key_type key_comment key_fingerprint key_bits
+      key_type=$(echo "$line" | awk '{print $1}')
+      key_comment=$(echo "$line" | awk '{print $NF}')
+      key_bits=$(echo "$line" | awk '{print $2}')
+
+      local temp_key
+      temp_key=$(mktemp)
+      echo "$line" > "$temp_key"
+      key_fingerprint=$(ssh-keygen -l -f "$temp_key" 2>/dev/null | awk '{print $2}' || echo "unknown")
+      key_bits=$(ssh-keygen -l -f "$temp_key" 2>/dev/null | awk '{print $1}' || echo "0")
+      rm -f "$temp_key"
+
+      [[ "$key_bits" =~ ^[0-9]+$ ]] || key_bits=0
+      local entry
+      entry=$(jq -cn \
+        --argjson lineNumber "$line_num" \
+        --arg type "$key_type" \
+        --argjson bits "$key_bits" \
+        --arg fingerprint "$key_fingerprint" \
+        --arg comment "$key_comment" \
+        '{lineNumber:$lineNumber,type:$type,bits:$bits,fingerprint:$fingerprint,comment:$comment}')
+      if [[ "$first" == true ]]; then first=false; else keys_json+=","; fi
+      keys_json+="$entry"
+    done < "$auth_keys"
+  fi
+
+  keys_json+="]"
+
+  json_out "{\"success\":true,\"step\":\"list-keys\",\"keys\":${keys_json}}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  add-key)       action_add_key "$@" ;;
+  remove-key)    action_remove_key "$@" ;;
+  list-keys)     action_list_keys "$@" ;;
+  *)             die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

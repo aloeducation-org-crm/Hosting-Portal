@@ -38,22 +38,20 @@ export default function SiteDetailPage() {
         {sections.map((s) => {
           const Icon = s.icon;
           return (
-            <Link key={s.href} href={s.href}>
-              <Card className="border-slate-200 hover:border-[#E8501A] transition-colors h-full">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Icon className="h-4 w-4 text-[#E8501A]" />
-                    {s.label}
-                  </CardTitle>
-                  <CardDescription className="text-xs">{s.desc}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Button variant="outline" size="sm" className="text-xs">
-                    Open {s.label}
-                  </Button>
-                </CardContent>
-              </Card>
-            </Link>
+            <Card key={s.href} className="border-slate-200 hover:border-[#E8501A] transition-colors h-full">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Icon className="h-4 w-4 text-[#E8501A]" />
+                  {s.label}
+                </CardTitle>
+                <CardDescription className="text-xs">{s.desc}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button asChild variant="outline" size="sm" className="text-xs">
+                  <Link href={s.href}>Open {s.label}</Link>
+                </Button>
+              </CardContent>
+            </Card>
           );
         })}
       </div>

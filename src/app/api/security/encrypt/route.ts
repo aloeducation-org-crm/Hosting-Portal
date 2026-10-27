@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const input = encryptSchema.parse(body);
 
-    const key = deriveKey(env.JWT_SECRET);
+    const key = deriveKey(env.APP_ENCRYPTION_KEY);
 
     if (input.action === 'encrypt') {
       if (!input.plaintext) {

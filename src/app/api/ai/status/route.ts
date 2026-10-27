@@ -1,39 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession } from '@/lib/auth';
-import { apiSuccess } from '@/lib/response';
+import { requireSession, isAdminRole } from '@/lib/auth';
+import { apiError, apiSuccess, type ApiResponse } from '@/lib/response';
 import { redactProvider, resolveProviders } from '@/lib/ai/providers';
-import { probeChain } from '@/lib/ai/client';
+import { getProviderCircuitStates, probeChain } from '@/lib/ai/client';
 
 /**
- * GET /api/ai/status            → configuration summary (no network calls)
- * GET /api/ai/status?probe=1    → configuration + a live round-trip per provider
+ * GET /api/ai/status            → configuration + circuit summary (no network calls)
+ * GET /api/ai/status?probe=1    → configuration + a live round-trip per provider (60s TTL)
  *
- * `state` is CONFIGURED until a probe actually succeeds, because a resolved
- * provider only proves that environment variables were set.
+ * Notice the distinction: without `probe=1` we report `CONFIGURED` or
+ * `UNCONFIGURED`, never `HEALTHY`. Only an actual completion proves a provider
+ * works. Force-bypassing the 60s probe cache (`?force=1`) is restricted to
+ * Admin/DevOps roles so unprivileged tenants cannot exhaust free-tier quotas.
  */
+function handleErr(e: unknown): NextResponse {
+  if (e && typeof e === 'object' && 'status' in e) {
+    const a = e as ApiResponse;
+    return NextResponse.json(a, { status: a.status });
+  }
+  return NextResponse.json(apiError('Internal server error'), { status: 500 });
+}
+
 export async function GET(request: NextRequest) {
   try {
-    await requireSession(request);
+    const user = await requireSession(request);
+    const isOperator = isAdminRole(user.role) || user.role === 'DEVOPS';
+    const { searchParams } = new URL(request.url);
+    const probe = searchParams.get('probe') === '1' || searchParams.get('probe') === 'true';
+    const force = isOperator && (searchParams.get('force') === '1' || searchParams.get('force') === 'true');
+
     const resolution = resolveProviders(process.env);
-    const configured = resolution.providers.length > 0;
-    const url = new URL(request.url);
-    const wantProbe = url.searchParams.get('probe') === '1';
-
-    const probes = wantProbe && configured ? await probeChain(false) : null;
-    const healthy = probes ? probes.some((probe) => probe.ok) : null;
-
-    return NextResponse.json(apiSuccess({
-      configured,
-      state: !configured ? 'NOT_CONFIGURED' : healthy === null ? 'CONFIGURED_NOT_CHECKED' : healthy ? 'HEALTHY' : 'UNHEALTHY',
-      // Legacy fields kept for existing clients.
-      providerType: configured ? 'openai-compatible-chain' : null,
-      model: resolution.providers[0]?.model ?? null,
-      chain: resolution.providers.map(redactProvider),
-      skipped: resolution.skipped,
-      warnings: resolution.warnings,
-      probes,
+    const active = resolution.providers.map((p) => redactProvider(p, { includeTopology: isOperator }));
+    const circuits = getProviderCircuitStates(resolution.providers);
+    const safeSkipped = resolution.skipped.map((s) => ({
+      id: s.id,
+      label: s.label,
+      reason: isOperator ? s.reason : 'not configured',
     }));
-  } catch {
-    return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+    const safeWarnings = isOperator ? resolution.warnings : [];
+
+    if (!probe) {
+      return NextResponse.json(
+        apiSuccess({
+          state: active.length > 0 ? 'CONFIGURED' : 'UNCONFIGURED',
+          probed: false,
+          active,
+          circuits,
+          skipped: safeSkipped,
+          warnings: safeWarnings,
+        }),
+      );
+    }
+
+    const probes = active.length > 0 ? await probeChain(force) : [];
+    const anyHealthy = probes.some((entry) => entry.ok);
+    return NextResponse.json(
+      apiSuccess({
+        state: active.length === 0 ? 'UNCONFIGURED' : anyHealthy ? 'HEALTHY' : 'UNREACHABLE',
+        probed: true,
+        active,
+        circuits,
+        probes,
+        skipped: safeSkipped,
+        warnings: safeWarnings,
+      }),
+    );
+  } catch (e) {
+    return handleErr(e);
   }
 }

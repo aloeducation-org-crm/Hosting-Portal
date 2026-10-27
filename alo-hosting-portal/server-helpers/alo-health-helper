@@ -1,154 +1,214 @@
 #!/usr/bin/env bash
-# ALO Labs - Health Check Helper
-# Checks website and system health
-# Usage: alo-health-helper <command> [args...]
-
+#
+# ALO Labs Hosting Portal — Health Helper
+# Comprehensive health checks for hosted sites.
+# Called by Node.js via child_process.execFile with validated arguments.
+#
 set -euo pipefail
 
 SITE_BASE="/srv/alo-sites"
+APP_USER="alo-panel"
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log_err() { printf '[alo-health-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-health-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
 
 validate_domain() {
-  local d="$1"
-  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
-    echo '{"success":false,"error":"Invalid domain name"}'
-    exit 1
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
   fi
 }
 
-check_single_site() {
+validate_port() {
+  if [[ ! "$1" =~ ^[0-9]+$ || "$1" -lt 1024 || "$1" -gt 65535 ]]; then
+    die "arg-validation" "Invalid port number: $1"
+  fi
+}
+
+# ── argument validation ─────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "arg-validation" "Usage: alo-health-helper <action> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+# ── action: check (single site) ─────────────────────────────────────────────
+action_check() {
+  if [[ $# -lt 1 ]]; then
+    die "check" "Usage: check <domain> [port] [health-path]"
+  fi
+
   local DOMAIN="$1"
-  local SITE_DIR="$SITE_BASE/$DOMAIN"
+  local PORT="${2:-}"
+  local HEALTH_PATH="${3:-/}"
 
+  validate_domain "$DOMAIN"
+  if [[ -n "$PORT" ]]; then
+    validate_port "$PORT"
+  fi
+
+  local SERVICE_NAME="alo-site-${DOMAIN}"
+  local SITE_DIR="${SITE_BASE}/${DOMAIN}"
+
+  # Count issues for overall status
+  local ISSUE_COUNT=0
+
+  # 1. systemd state
   local SYSTEMD_STATE="unknown"
-  local PORT_LISTENING=false
-  local HTTP_STATUS=0
-  local DISK_USAGE_MB=0
-  local PROCESS_MEMORY_MB=0
-  local OVERALL="UNKNOWN"
-
-  # Check systemd
-  local UNIT_NAME="alo-site-$DOMAIN"
-  if systemctl list-unit-files "$UNIT_NAME.service" &>/dev/null; then
-    SYSTEMD_STATE=$(systemctl is-active "$UNIT_NAME" 2>/dev/null || echo "unknown")
-  else
-    # For static/PHP sites, check if site dir exists and Caddy serves it
-    if [[ -d "$SITE_DIR" ]]; then
-      SYSTEMD_STATE="active"
+  if systemctl list-unit-files "${SERVICE_NAME}.service" &>/dev/null; then
+    SYSTEMD_STATE=$(systemctl is-active "${SERVICE_NAME}.service" 2>/dev/null || echo "inactive")
+    if [[ "$SYSTEMD_STATE" != "active" ]]; then
+      ISSUE_COUNT=$((ISSUE_COUNT + 1))
     fi
+  else
+    SYSTEMD_STATE="not-found"
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
   fi
 
-  # Check port
-  local PORT=""
-  if [[ -f "$SITE_DIR/.alo-port" ]]; then
-    PORT=$(cat "$SITE_DIR/.alo-port")
-  fi
-
+  # 2. Local port check
+  local LOCAL_PORT=false
   if [[ -n "$PORT" ]]; then
     if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
-      PORT_LISTENING=true
+      LOCAL_PORT=true
+    else
+      ISSUE_COUNT=$((ISSUE_COUNT + 1))
     fi
-
-    # HTTP check
-    local HEALTH_PATH="/"
-    if [[ -f "$SITE_DIR/.alo-health" ]]; then
-      HEALTH_PATH=$(cat "$SITE_DIR/.alo-health")
-    fi
-    HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${PORT}${HEALTH_PATH}" 2>/dev/null || echo 0)
-  else
-    # For static/PHP, check via Caddy on port 80/443
-    HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Host: $DOMAIN" http://localhost:80/ 2>/dev/null || echo 0)
-    if [[ "$HTTP_STATUS" == "000" ]]; then
-      HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -k "https://$DOMAIN/" 2>/dev/null || echo 0)
-    fi
-    PORT_LISTENING=true  # Caddy is assumed running
   fi
 
-  # Disk usage
-  if [[ -d "$SITE_DIR" ]]; then
-    DISK_KB=$(du -sk "$SITE_DIR" 2>/dev/null | awk '{print $1}')
-    DISK_USAGE_MB=$((DISK_KB / 1024))
-  fi
-
-  # Process memory
+  # 3. Local HTTP check
+  local LOCAL_HTTP=0
   if [[ -n "$PORT" ]]; then
-    PID=$(ss -tlnp 2>/dev/null | grep ":${PORT} " | grep -oP 'pid=\K[0-9]+' | head -1 || echo "")
-    if [[ -n "$PID" && -f "/proc/$PID/status" ]]; then
-      VMRSS_KB=$(grep VmRSS "/proc/$PID/status" 2>/dev/null | awk '{print $2}')
-      PROCESS_MEMORY_MB=$((VMRSS_KB / 1024))
+    LOCAL_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null || echo "000")
+    if [[ ! "$LOCAL_HTTP" =~ ^[23] ]]; then
+      ISSUE_COUNT=$((ISSUE_COUNT + 1))
     fi
   fi
 
-  # Determine overall status
+  # 4. Public HTTP check
+  local PUBLIC_HTTP=0
+  PUBLIC_HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://${DOMAIN}" 2>/dev/null || echo "000")
+  if [[ ! "$PUBLIC_HTTP" =~ ^[23] ]]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+
+  # 5. SSL check
+  local SSL_STATUS="false"
+  local SSL_EXPIRY=""
+  local SSL_DAYS=0
+  if curl -sk --max-time 10 "https://${DOMAIN}" -o /dev/null 2>&1; then
+    SSL_STATUS="true"
+    local expiry_date
+    expiry_date=$(echo | openssl s_client -servername "$DOMAIN" -connect "${DOMAIN}:443" 2>/dev/null | \
+      openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+    if [[ -n "$expiry_date" ]]; then
+      local expiry_epoch now_epoch
+      expiry_epoch=$(date -d "$expiry_date" +%s 2>/dev/null || echo "0")
+      now_epoch=$(date +%s)
+      SSL_DAYS=$(( (expiry_epoch - now_epoch) / 86400 ))
+      SSL_EXPIRY="$expiry_date"
+    fi
+    if [[ "$SSL_DAYS" -lt 7 ]]; then
+      ISSUE_COUNT=$((ISSUE_COUNT + 1))
+    fi
+  else
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+
+  # 6. DNS check
+  local DNS_IP
+  DNS_IP=$(dig +short "$DOMAIN" A 2>/dev/null | head -1 || echo "not found")
+  if [[ -z "$DNS_IP" || "$DNS_IP" == "not found" ]]; then
+    ISSUE_COUNT=$((ISSUE_COUNT + 1))
+  fi
+
+  # 7. Disk usage
+  local DISK_USAGE="unknown"
+  if [[ -d "$SITE_DIR" ]]; then
+    DISK_USAGE=$(df -h "$SITE_DIR" 2>/dev/null | awk 'NR==2 {print $5}' | tr -d '%' || echo "unknown")
+    local disk_pct="$DISK_USAGE"
+    if [[ "$disk_pct" =~ ^[0-9]+$ ]] && [[ "$disk_pct" -gt 90 ]]; then
+      ISSUE_COUNT=$((ISSUE_COUNT + 1))
+    fi
+  else
+    DISK_USAGE="site-not-found"
+  fi
+
+  # 8. Process memory
+  local PROCESS_MEMORY="0"
+  local PROCESS_RSS=""
   if [[ "$SYSTEMD_STATE" == "active" ]]; then
-    if [[ $HTTP_STATUS -ge 200 && $HTTP_STATUS -lt 400 ]]; then
+    local main_pid
+    main_pid=$(systemctl show "${SERVICE_NAME}.service" --property=MainPID --value 2>/dev/null || echo "0")
+    if [[ -n "$main_pid" && "$main_pid" != "0" ]]; then
+      PROCESS_RSS=$(ps -p "$main_pid" -o rss= 2>/dev/null | tr -d ' ' || echo "0")
+      PROCESS_MEMORY="${PROCESS_RSS:-0}"
+    else
+      PROCESS_RSS=$(ps aux 2>/dev/null | grep "[n]ode.*${DOMAIN}" | awk '{print $6}' | head -1 || echo "0")
+      PROCESS_MEMORY="${PROCESS_RSS:-0}"
+    fi
+  fi
+
+  local PROCESS_MEMORY_MB=0
+  if [[ "$PROCESS_MEMORY" =~ ^[0-9]+$ ]] && [[ "$PROCESS_MEMORY" -gt 0 ]]; then
+    PROCESS_MEMORY_MB=$(( PROCESS_MEMORY / 1024 ))
+  fi
+
+  # ── overall status determination ─────────────────────────────────────────────
+  local OVERALL="UNKNOWN"
+  if [[ "$SYSTEMD_STATE" == "active" && "$LOCAL_PORT" == true && "$LOCAL_HTTP" =~ ^[23] ]]; then
+    if [[ "$ISSUE_COUNT" -eq 0 ]]; then
       OVERALL="HEALTHY"
-    elif [[ $HTTP_STATUS -ge 500 ]]; then
-      OVERALL="DEGRADED"
     else
       OVERALL="DEGRADED"
     fi
-  elif [[ "$SYSTEMD_STATE" == "failed" ]]; then
+  elif [[ "$SYSTEMD_STATE" == "inactive" || "$SYSTEMD_STATE" == "failed" ]]; then
     OVERALL="DOWN"
-  elif [[ "$SYSTEMD_STATE" == "inactive" ]]; then
-    OVERALL="SUSPENDED"
-  else
+  elif [[ "$SYSTEMD_STATE" == "not-found" ]]; then
     OVERALL="UNKNOWN"
+  else
+    if [[ "$ISSUE_COUNT" -gt 3 ]]; then
+      OVERALL="DOWN"
+    else
+      OVERALL="DEGRADED"
+    fi
   fi
 
-  echo "{\"domain\":\"$DOMAIN\",\"systemd\":\"$SYSTEMD_STATE\",\"portListening\":$PORT_LISTENING,\"httpStatus\":$HTTP_STATUS,\"diskUsageMb\":$DISK_USAGE_MB,\"processMemoryMb\":$PROCESS_MEMORY_MB,\"overall\":\"$OVERALL\",\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+  json_out "{\"success\":true,\"domain\":\"${DOMAIN}\",\"systemd\":\"${SYSTEMD_STATE}\",\"localPort\":${LOCAL_PORT},\"localHttp\":${LOCAL_HTTP},\"publicHttp\":${PUBLIC_HTTP},\"ssl\":${SSL_STATUS},\"sslExpiry\":\"${SSL_EXPIRY}\",\"sslDaysRemaining\":${SSL_DAYS},\"dns\":\"${DNS_IP}\",\"diskUsage\":\"${DISK_USAGE}%\",\"processMemoryKb\":${PROCESS_MEMORY:-0},\"processMemoryMb\":${PROCESS_MEMORY_MB},\"overall\":\"${OVERALL}\",\"issueCount\":${ISSUE_COUNT}}"
 }
 
-COMMAND="${1:?Usage: alo-health-helper <command> [args...]}
-shift
+# ── action: system (server-wide) ────────────────────────────────────────────
+action_system() {
+  local CPU_LOAD
+  CPU_LOAD=$(cat /proc/loadavg 2>/dev/null | awk '{print $1,$2,$3}' || echo "0 0 0")
+  local MEM_TOTAL MEM_USED MEM_PCT
+  MEM_TOTAL=$(free -m 2>/dev/null | awk '/Mem:/{print $2}' || echo "0")
+  MEM_USED=$(free -m 2>/dev/null | awk '/Mem:/{print $3}' || echo "0")
+  MEM_PCT=0
+  if [[ "$MEM_TOTAL" -gt 0 ]]; then
+    MEM_PCT=$(( MEM_USED * 100 / MEM_TOTAL ))
+  fi
+  local DISK_TOTAL DISK_USED DISK_PCT
+  DISK_TOTAL=$(df -h / 2>/dev/null | awk 'NR==2{print $2}' || echo "unknown")
+  DISK_USED=$(df -h / 2>/dev/null | awk 'NR==2{print $3}' || echo "unknown")
+  DISK_PCT=$(df -h / 2>/dev/null | awk 'NR==2{print $5}' | tr -d '%' || echo "0")
+  local UPTIME
+  UPTIME=$(uptime -p 2>/dev/null | sed 's/up //' || echo "unknown")
 
-case "$COMMAND" in
-  check)
-    DOMAIN="${1:?Usage: check <domain>}"
-    validate_domain "$DOMAIN"
-    check_single_site "$DOMAIN"
-    ;;
+  json_out "{\"success\":true,\"step\":\"system\",\"cpuLoad\":\"${CPU_LOAD}\",\"memTotalMb\":${MEM_TOTAL},\"memUsedMb\":${MEM_USED},\"memPct\":${MEM_PCT},\"diskTotal\":\"${DISK_TOTAL}\",\"diskUsed\":\"${DISK_USED}\",\"diskPct\":${DISK_PCT},\"uptime\":\"${UPTIME}\"}"
+}
 
-  check-all)
-    SITES_JSON="[]"
-    ITEMS=""
-    for site_dir in "$SITE_BASE"/*/; do
-      [[ -d "$site_dir" ]] || continue
-      DOMAIN=$(basename "$site_dir")
-      [[ "$DOMAIN" == "*" ]] && continue
-
-      RESULT=$(check_single_site "$DOMAIN")
-      [[ -n "$ITEMS" ]] && ITEMS=",$ITEMS"
-      ITEMS="${ITEMS}${RESULT}"
-    done
-    SITES_JSON="[$ITEMS]"
-    echo "{\"success\":true,\"sites\":$SITES_JSON,\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
-
-  system-info)
-    CPU_CORES=$(nproc 2>/dev/null || echo 1)
-    RAM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
-    RAM_USED_KB=$(grep MemAvailable /proc/meminfo 2>/dev/null | awk '{print $2}')
-    RAM_USED_KB=$((RAM_TOTAL_KB - RAM_USED_KB))
-    RAM_TOTAL_MB=$((RAM_TOTAL_KB / 1024))
-    RAM_USED_MB=$((RAM_USED_KB / 1024))
-
-    DISK_INFO=$(df / | tail -1)
-    DISK_TOTAL_KB=$(echo "$DISK_INFO" | awk '{print $2}')
-    DISK_USED_KB=$(echo "$DISK_INFO" | awk '{print $3}')
-    DISK_TOTAL_GB=$((DISK_TOTAL_KB / 1024 / 1024))
-    DISK_USED_GB=$((DISK_USED_KB / 1024 / 1024))
-
-    UPTIME_S=$(cat /proc/uptime 2>/dev/null | awk '{print $1}')
-    UPTIME_S=${UPTIME_S%.*}
-    UPTIME_HOURS=$((UPTIME_S / 3600))
-
-    LOAD_AVG=$(cat /proc/loadavg 2>/dev/null | awk '{print $1, $2, $3}')
-
-    echo "{\"success\":true,\"cpuCores\":$CPU_CORES,\"ramTotalMb\":$RAM_TOTAL_MB,\"ramUsedMb\":$RAM_USED_MB,\"ramUsagePercent\":$((RAM_USED_KB * 100 / RAM_TOTAL_KB)),\"diskTotalGb\":$DISK_TOTAL_GB,\"diskUsedGb\":$DISK_USED_GB,\"diskUsagePercent\":$((DISK_USED_KB * 100 / DISK_TOTAL_KB)),\"uptimeHours\":$UPTIME_HOURS,\"loadAverage\":\"$LOAD_AVG\",\"hostname\":\"$(hostname)\",\"os\":\"$(lsb_release -ds 2>/dev/null || echo 'Unknown')\",\"kernel\":\"$(uname -r)\",\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-    ;;
-
-  *)
-    echo "Available commands: check, check-all, system-info" >&2
-    exit 1
-    ;;
+# ── dispatch ─────────────────────────────────────────────────────────────────
+case "$ACTION" in
+  check)  action_check "$@" ;;
+  system) action_system "$@" ;;
+  *)      die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

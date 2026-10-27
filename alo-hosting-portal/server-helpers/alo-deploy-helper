@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+# ALO Labs - Deploy Helper
+# Manages git-based deployments
+# Usage: alo-deploy-helper <command> [args...]
+
+set -euo pipefail
+
+APP_USER="alo-panel"
+SITE_BASE="/srv/alo-sites"
+
+log_err() { printf '[alo-deploy-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-deploy-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+json_escape() {
+  local s="$1"
+  local bs=$'\\' q=$'"' nl=$'\n' cr=$'\r' tab=$'\t'
+  s="${s//$bs/$bs$bs}"
+  s="${s//$q/\\$q}"
+  s="${s//$nl/\\n}"
+  s="${s//$cr/\\r}"
+  s="${s//$tab/\\t}"
+  printf '%s' "$s"
+}
+
+validate_domain() {
+  local d="$1"
+  if [[ ! "$d" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain name: $d"
+  fi
+}
+
+# Whitelist of allowed build commands to prevent command injection
+validate_build_cmd() {
+  local cmd="$1"
+  if [[ -z "$cmd" ]]; then
+    die "arg-validation" "Build command cannot be empty"
+  fi
+  if [[ ${#cmd} -gt 512 ]]; then
+    die "arg-validation" "Build command too long (max 512 chars)"
+  fi
+  # Block dangerous patterns
+  if [[ "$cmd" =~ [\$\`\;\&\|\>\<\(\)\{\}] ]]; then
+    die "arg-validation" "Build command contains dangerous characters"
+  fi
+  # Must start with a known safe command
+  if [[ ! "$cmd" =~ ^(npm|npx|yarn|pnpm|bun|make|composer|pip) ]]; then
+    die "arg-validation" "Build command must start with: npm, npx, yarn, pnpm, bun, make, composer, or pip"
+  fi
+}
+
+validate_repo_url() {
+  local repo="$1"
+  if [[ -z "$repo" ]]; then
+    die "arg-validation" "Repository URL cannot be empty"
+  fi
+  if [[ ${#repo} -gt 2048 ]]; then
+    die "arg-validation" "Repository URL too long"
+  fi
+  # Only allow known git URL patterns
+  if [[ ! "$repo" =~ ^(https?://|git@|ssh://) ]]; then
+    die "arg-validation" "Repository URL must use http(s), git, or ssh protocol"
+  fi
+  if [[ "$repo" =~ [\$\`\;\&\|\<\>\(\)\{\}] ]]; then
+    die "arg-validation" "Repository URL contains dangerous characters"
+  fi
+}
+
+validate_branch() {
+  local branch="$1"
+  if [[ -z "$branch" ]]; then
+    die "arg-validation" "Branch name cannot be empty"
+  fi
+  if [[ ${#branch} -gt 256 ]]; then
+    die "arg-validation" "Branch name too long"
+  fi
+  if [[ ! "$branch" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/\-]*$ ]]; then
+    die "arg-validation" "Branch name contains invalid characters"
+  fi
+}
+
+COMMAND="${1:?Usage: alo-deploy-helper <command> [args...]}"
+shift
+
+case "$COMMAND" in
+  clone)
+    DOMAIN="${1:?Usage: clone <domain> <repo> <branch>}"
+    REPO="${2:?Usage: clone <domain> <repo> <branch>}"
+    BRANCH="${3:?Usage: clone <domain> <repo> <branch>}"
+    validate_domain "$DOMAIN"
+    validate_repo_url "$REPO"
+    validate_branch "$BRANCH"
+
+    TIMESTAMP=$(date +%Y%m%d%H%M%S)
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    RELEASE_DIR="$SITE_DIR/releases/$TIMESTAMP"
+
+    mkdir -p "$SITE_DIR/releases"
+
+    git clone --branch "$BRANCH" --depth 1 "$REPO" "$RELEASE_DIR" 2>&1
+
+    if [[ ! -d "$RELEASE_DIR" ]]; then
+      echo "{\"success\":false,\"error\":\"Clone failed\"}"
+      exit 1
+    fi
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"repo\":\"$REPO\",\"branch\":\"$BRANCH\",\"releasePath\":\"$RELEASE_DIR\",\"timestamp\":\"$TIMESTAMP\",\"clonedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  pull)
+    DOMAIN="${1:?Usage: pull <domain> <repo> <branch>}"
+    REPO="${2:?Usage: pull <domain> <repo> <branch>}"
+    BRANCH="${3:?Usage: pull <domain> <repo> <branch>}"
+    validate_domain "$DOMAIN"
+    validate_repo_url "$REPO"
+    validate_branch "$BRANCH"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    CURRENT_LINK="$SITE_DIR/current"
+
+    if [[ ! -L "$CURRENT_LINK" ]]; then
+      echo "{\"success\":false,\"error\":\"No current release symlink found\"}"
+      exit 1
+    fi
+
+    RELEASE_DIR=$(readlink -f "$CURRENT_LINK")
+    if [[ ! -d "$RELEASE_DIR/.git" ]]; then
+      echo "{\"success\":false,\"error\":\"Current release is not a git repository\"}"
+      exit 1
+    fi
+
+    cd "$RELEASE_DIR"
+    PULL_OUTPUT=$(git pull origin "$BRANCH" 2>&1)
+    cd - >/dev/null
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RELEASE_DIR\",\"branch\":\"$BRANCH\",\"output\":\"$(echo "$PULL_OUTPUT" | tr '\n' ' ' | sed 's/\"/\\\\"/g' | head -c 2000)\",\"pulledAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  build)
+    DOMAIN="${1:?Usage: build <domain> <build_cmd>}"
+    BUILD_CMD="${2:?Usage: build <domain> <build_cmd>}"
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    CURRENT_LINK="$SITE_DIR/current"
+
+    if [[ ! -L "$CURRENT_LINK" ]]; then
+      echo "{\"success\":false,\"error\":\"No current release symlink found\"}"
+      exit 1
+    fi
+
+    RELEASE_DIR=$(readlink -f "$CURRENT_LINK")
+    cd "$RELEASE_DIR"
+
+    START_TIME=$(date +%s%N)
+    validate_build_cmd "$BUILD_CMD"
+    # Use bash -c with validated command instead of eval (validated against injection)
+    BUILD_OUTPUT=$(bash -c "$BUILD_CMD" 2>&1) || true
+    END_TIME=$(date +%s%N)
+    DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+
+    cd - >/dev/null
+
+    OUTPUT_SAFE=$(echo "$BUILD_OUTPUT" | tr '\n' ' ' | sed 's/\"/\\\\"/g' | head -c 8000)
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RELEASE_DIR\",\"buildCommand\":\"$BUILD_CMD\",\"durationMs\":$DURATION_MS,\"output\":\"$OUTPUT_SAFE\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  switch)
+    DOMAIN="${1:?Usage: switch <domain> <release_path>}"
+    RELEASE_PATH="${2:?Usage: switch <domain> <release_path>}"
+    validate_domain "$DOMAIN"
+
+    if [[ ! -d "$RELEASE_PATH" ]]; then
+      echo "{\"success\":false,\"error\":\"Release path does not exist: $RELEASE_PATH\"}"
+      exit 1
+    fi
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    ln -sfn "$RELEASE_PATH" "$SITE_DIR/current"
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RELEASE_PATH\",\"currentSymlink\":\"$SITE_DIR/current\",\"switchedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  rollback)
+    DOMAIN="${1:?Usage: rollback <domain>}"
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    RELEASES_DIR="$SITE_DIR/releases"
+    CURRENT_LINK="$SITE_DIR/current"
+
+    if [[ ! -d "$RELEASES_DIR" ]]; then
+      echo "{\"success\":false,\"error\":\"No releases directory found\"}"
+      exit 1
+    fi
+
+    # Get current release
+    if [[ -L "$CURRENT_LINK" ]]; then
+      CURRENT_TARGET=$(readlink -f "$CURRENT_LINK")
+    else
+      CURRENT_TARGET=""
+    fi
+
+    # List releases sorted by time (newest last)
+    mapfile -t ALL_RELEASES < <(ls -1d "$RELEASES_DIR"/*/ 2>/dev/null | sort)
+
+    if [[ ${#ALL_RELEASES[@]} -eq 0 ]]; then
+      echo "{\"success\":false,\"error\":\"No releases available for rollback\"}"
+      exit 1
+    fi
+
+    # Find the release before current (or the latest if no current)
+    PREV_RELEASE=""
+    FOUND_CURRENT=false
+    for rel in "${ALL_RELEASES[@]}"; do
+      rel=$(echo "$rel" | sed 's:/$::')
+      if [[ "$FOUND_CURRENT" == "true" && -n "$rel" ]]; then
+        PREV_RELEASE="$rel"
+        break
+      fi
+      if [[ "$rel" == "$CURRENT_TARGET" ]]; then
+        FOUND_CURRENT=true
+      fi
+    done
+
+    # If we're at the latest or no current, use second-to-last
+    if [[ -z "$PREV_RELEASE" && ${#ALL_RELEASES[@]} -ge 2 ]]; then
+      PREV_RELEASE=$(echo "${ALL_RELEASES[-2]}" | sed 's:/$::')
+    fi
+
+    if [[ -z "$PREV_RELEASE" ]]; then
+      echo "{\"success\":false,\"error\":\"No previous release to rollback to\"}"
+      exit 1
+    fi
+
+    ln -sfn "$PREV_RELEASE" "$SITE_DIR/current"
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"previousRelease\":\"$CURRENT_TARGET\",\"rolledBackTo\":\"$PREV_RELEASE\",\"currentSymlink\":\"$SITE_DIR/current\",\"rolledBackAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  list-releases)
+    DOMAIN="${1:?Usage: list-releases <domain>}"
+    validate_domain "$DOMAIN"
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    RELEASES_DIR="$SITE_DIR/releases"
+
+    if [[ ! -d "$RELEASES_DIR" ]]; then
+      echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releases\":[],\"count\":0,\"listedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+      exit 0
+    fi
+
+    ITEMS=""
+    COUNT=0
+    CURRENT_TARGET=""
+    if [[ -L "$SITE_DIR/current" ]]; then
+      CURRENT_TARGET=$(readlink -f "$SITE_DIR/current")
+    fi
+
+    while IFS= read -r dir; do
+      [[ -z "$dir" ]] && continue
+      dir=$(echo "$dir" | sed 's:/$::')
+      REL_NAME=$(basename "$dir")
+      IS_CURRENT=false
+      [[ "$dir" == "$CURRENT_TARGET" ]] && IS_CURRENT=true
+      REL_SIZE=$(du -sb "$dir" 2>/dev/null | awk '{print $1}' || echo 0)
+      REL_TIME=$(stat -c %Y "$dir" 2>/dev/null || echo 0)
+      REL_TIME_FMT=$(date -u -d "@$REL_TIME" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+
+      [[ -n "$ITEMS" ]] && ITEMS=",${ITEMS}"
+      ITEMS="{\"path\":\"$dir\",\"name\":\"$REL_NAME\",\"sizeBytes\":$REL_SIZE,\"createdAt\":\"$REL_TIME_FMT\",\"isCurrent\":$IS_CURRENT}${ITEMS}"
+      COUNT=$((COUNT + 1))
+    done < <(ls -1d "$RELEASES_DIR"/*/ 2>/dev/null | sort -r)
+
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releases\":[${ITEMS}],\"count\":$COUNT,\"currentRelease\":\"$CURRENT_TARGET\",\"listedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  *)
+    echo "Available commands: clone, pull, build, switch, rollback, list-releases" >&2
+    exit 1
+    ;;
+esac

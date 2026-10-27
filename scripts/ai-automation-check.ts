@@ -51,19 +51,24 @@ async function main() {
   const localGraph = {
     nodes: [
       { id: "start", type: "trigger" as const },
+      { id: "overview", type: "hosting.automationOverview" as const },
       { id: "sites", type: "hosting.listSites" as const, config: { limit: 5 } },
+      { id: "deploys", type: "hosting.listDeployments" as const, config: { limit: 5 } },
       { id: "health", type: "hosting.siteHealth" as const, config: { domain: "{{ input.domain }}" } },
       { id: "out", type: "output" as const, config: { value: "{{ steps.sites.output.count }}" } },
     ],
     edges: [
-      { from: "start", to: "sites" },
-      { from: "sites", to: "health" },
+      { from: "start", to: "overview" },
+      { from: "overview", to: "sites" },
+      { from: "sites", to: "deploys" },
+      { from: "deploys", to: "health" },
       { from: "health", to: "out" },
     ],
   };
 
   const local = await runWorkflowGraph(localGraph, { ai: completeWithAI, tools: HOSTING_TOOLS }, {
     input: { domain },
+    actor: { userId: "cli-operator-check", isAdmin: true },
   });
   console.log(`\nLocal workflow (no model): ${local.status} in ${local.durationMs}ms`);
   for (const step of local.steps) {

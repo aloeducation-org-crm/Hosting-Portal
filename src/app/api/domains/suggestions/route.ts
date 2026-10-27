@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
+import { requireSession } from '@/lib/auth';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -11,6 +12,7 @@ function handleErr(e: unknown): NextResponse {
 
 export async function GET(request: NextRequest) {
   try {
+    await requireSession(request);
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q') ?? '';
 
