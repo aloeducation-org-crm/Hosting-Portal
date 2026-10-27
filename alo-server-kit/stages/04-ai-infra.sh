@@ -5,12 +5,13 @@ require_root
 STAGE="04-ai-infra"; log "▶ $STAGE starting"
 LITELLM_DIR="/opt/litellm"; OUI_DIR="/opt/open-webui"
 OPENWEBUI_PORT="${KIT_OPENWEBUI_PORT:-3005}"
-OPENWEBUI_VERSION="${KIT_OPENWEBUI_VERSION:-0.6.5}"
+OPENWEBUI_VERSION="${KIT_OPENWEBUI_VERSION:-0.12.4}"
 INSTALL_OPENWEBUI="${KIT_INSTALL_OPENWEBUI:-yes}"
 EXPOSE_AI_PUBLIC="${KIT_EXPOSE_AI_PUBLIC:-no}"
 
 install -d -m 0700 -o root -g root /root/.alo-secrets
 install -d -m 0750 -o root -g "$KIT_PRIMARY_USER" /etc/litellm
+install -d -m 0750 -o root -g "$KIT_PRIMARY_USER" /etc/alo-server-kit
 
 # Ensure strong non-placeholder master key
 if [[ -z "${KIT_LITELLM_MASTER_KEY:-}" || "$KIT_LITELLM_MASTER_KEY" == *"CHANGE"* ]]; then
@@ -32,6 +33,7 @@ write_file /etc/litellm/litellm.env root:root 0600 <<EOF
 LITELLM_MASTER_KEY=${KIT_LITELLM_MASTER_KEY}
 GEMINI_API_KEY=${KIT_GEMINI_API_KEY:-}
 GROQ_API_KEY=${KIT_GROQ_API_KEY:-}
+GLM_API_KEY=${KIT_GLM_API_KEY:-}
 EOF
 
 log "installing Ollama (localhost-only, MemoryMax=${KIT_OLLAMA_MEM_MAX})"
@@ -65,7 +67,7 @@ if [[ ! -d "$LITELLM_DIR/venv" ]]; then
 fi
 chown -R "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" "$LITELLM_DIR"
 sudo -u "$KIT_PRIMARY_USER" "$LITELLM_DIR/venv/bin/pip" install --quiet --upgrade pip
-sudo -u "$KIT_PRIMARY_USER" "$LITELLM_DIR/venv/bin/pip" install --quiet 'litellm[proxy]==1.52.0' 'uvicorn[standard]' 'fastapi' 'gunicorn'
+sudo -u "$KIT_PRIMARY_USER" "$LITELLM_DIR/venv/bin/pip" install --quiet 'litellm[proxy]==1.106.4' 'uvicorn[standard]' 'fastapi' 'gunicorn'
 
 TEMPLATE="$KIT_ROOT/configs/litellm/config.yaml.tpl"
 if [[ -f "$TEMPLATE" ]] && command -v envsubst >/dev/null; then
@@ -107,10 +109,11 @@ if [[ "$INSTALL_OPENWEBUI" == "yes" ]]; then
   if [[ ! -d "$OUI_DIR/venv" ]]; then python3 -m venv "$OUI_DIR/venv"; fi
   chown -R "$KIT_PRIMARY_USER:$KIT_PRIMARY_USER" "$OUI_DIR"
   sudo -u "$KIT_PRIMARY_USER" "$OUI_DIR/venv/bin/pip" install --quiet --upgrade pip
+  # Default verified pin: open-webui==0.12.4 (requires Python >=3.11,<3.13)
   sudo -u "$KIT_PRIMARY_USER" "$OUI_DIR/venv/bin/pip" install --quiet "open-webui==${OPENWEBUI_VERSION}"
 
   WEBUI_SECRET=$(openssl rand -hex 24)
-  write_file /etc/litellm/open-webui.env root:root 0600 <<EOF
+  write_file /etc/alo-server-kit/open-webui.env root:root 0600 <<EOF
 WEBUI_AUTH=true
 WEBUI_SECRET_KEY=${WEBUI_SECRET}
 OPENAI_API_BASE_URL=http://127.0.0.1:${KIT_LITELLM_PORT}/v1
@@ -128,7 +131,7 @@ Type=simple
 User=$KIT_PRIMARY_USER
 Group=$KIT_PRIMARY_USER
 WorkingDirectory=$OUI_DIR
-EnvironmentFile=/etc/litellm/open-webui.env
+EnvironmentFile=/etc/alo-server-kit/open-webui.env
 ExecStart=$OUI_DIR/venv/bin/open-webui serve --host 127.0.0.1 --port ${OPENWEBUI_PORT}
 Restart=on-failure
 RestartSec=5s

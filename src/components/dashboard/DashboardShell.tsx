@@ -46,6 +46,7 @@ import {
   Rocket,
   Megaphone,
   Cpu,
+  Wand2,
 } from "lucide-react";
 
 const clientNavItems = [
@@ -53,6 +54,7 @@ const clientNavItems = [
   { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },
   { label: "AI Auto-Deploy", href: "/ai/auto-deploy", icon: Sparkles },
+  { label: "Zero-Terminal Presets", href: "/ai/assistant", icon: Wand2 },
   { label: "Deployments", href: "/deployments", altPrefix: "/dashboard/deployments", icon: Rocket },
   { label: "Domains", href: "/dashboard/domains", icon: Globe },
   { label: "Databases", href: "/databases", icon: Database },

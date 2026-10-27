@@ -18,6 +18,11 @@ const ENV_KEYS = [
   'LLM7_BASE_URL',
   'AI_GATEWAY_URL',
   'AI_GATEWAY_KEY',
+  'GLM_API_KEY',
+  'ZHIPU_API_KEY',
+  'GLM_BASE_URL',
+  'AI_MODEL_GLM',
+  'GLM_REASONING_EFFORT',
   'AI_RETRIES_PER_PROVIDER',
   'AI_TIMEOUT_MS',
   'AI_BREAKER_THRESHOLD',
@@ -75,6 +80,27 @@ describe('completeWithAI', () => {
     const body = JSON.parse(String((init as RequestInit).body));
     expect(body).toMatchObject({ model: 'gpt-oss:20b', temperature: 0.1, max_tokens: 42, stream: false });
     expect(body.messages).toEqual([{ role: 'system', content: 's' }, { role: 'user', content: 'u' }]);
+  });
+
+  it('forwards GLM_REASONING_EFFORT when calling the glm provider', async () => {
+    stubEnv({
+      AI_PROVIDER_ORDER: 'glm',
+      GLM_API_KEY: 'glm-test-key',
+      GLM_BASE_URL: 'https://api.z.ai/api/paas/v4',
+      AI_MODEL_GLM: 'glm-5.3-flash',
+      GLM_REASONING_EFFORT: 'low',
+    });
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(okBody));
+    const result = await completeWithAI([{ role: 'user', content: 'solve' }]);
+    expect(result.provider).toBe('glm');
+    const [url, init] = vi.mocked(fetch).mock.calls[0]!;
+    expect(String(url)).toBe('https://api.z.ai/api/paas/v4/chat/completions');
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body).toMatchObject({
+      model: 'glm-5.3-flash',
+      reasoning_effort: 'low',
+      stream: false,
+    });
   });
 
   it('fails over to the next provider and reports every attempt', async () => {

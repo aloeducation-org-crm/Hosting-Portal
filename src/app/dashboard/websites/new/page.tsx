@@ -95,16 +95,19 @@ export default function NewWebsitePage() {
       const res = await fetch('/api/ai/website', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ description: desc, type }),
       })
       const data = await res.json()
-      if (data.success) {
-        setHtmlContent(data.html)
-        setAiTitle(data.title || 'My Website')
-        setWebsiteName(data.title || '')
+      const payload = data?.data ?? data
+      if (res.ok && data.success && payload?.html) {
+        setHtmlContent(payload.html)
+        setAiTitle(payload.title || 'My Website')
+        setWebsiteName(payload.title || '')
         setStep('preview')
       } else {
-        setGenerateError(data.error || 'Failed to generate website')
+        const errMsg = typeof data?.error === 'string' ? data.error : data?.error?.message || data?.message
+        setGenerateError(errMsg || 'Failed to generate website')
       }
     } catch {
       setGenerateError('Network error. Please try again.')
@@ -120,13 +123,15 @@ export default function NewWebsitePage() {
       const res = await fetch('/api/ai/website', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ description, type: websiteType }),
       })
       const data = await res.json()
-      if (data.success) {
-        setHtmlContent(data.html)
-        setAiTitle(data.title || 'My Website')
-        setWebsiteName(data.title || '')
+      const payload = data?.data ?? data
+      if (res.ok && data.success && payload?.html) {
+        setHtmlContent(payload.html)
+        setAiTitle(payload.title || 'My Website')
+        setWebsiteName(payload.title || '')
       }
     } catch {
       // Silently fail on regenerate
@@ -137,12 +142,13 @@ export default function NewWebsitePage() {
 
   // When moving to publish step, fetch domains
   useEffect(() => {
-    if (step !== 'publish' || !token) return
+    if (step !== 'publish') return
     let cancelled = false
     ;(async () => {
       try {
         const res = await fetch('/api/domains/mine', {
-          headers: { Authorization: `Bearer ${token}` },
+          credentials: 'include',
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         })
         if (res.ok && !cancelled) {
           const data = await res.json()
@@ -161,39 +167,63 @@ export default function NewWebsitePage() {
     setPublishing(true)
     setPublishError('')
     try {
-      const payload: Record<string, string> = {
-        name: publishName.trim(),
-        type: 'builder',
-        htmlContent,
-        status: 'active',
-        publishedUrl: selectedDomainId === 'default'
-          ? `https://${publishName.trim().toLowerCase().replace(/\s+/g, '-')}.alolabs.net`
-          : '',
-      }
-      if (selectedDomainId !== 'default') {
-        payload.domainId = selectedDomainId
-      }
+      const slug = publishName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'ai-site'
+      const chosenDomain =
+        selectedDomainId !== 'default'
+          ? domains.find((d) => d.id === selectedDomainId)?.name || `${slug}.apps.alolabs.net`
+          : `${slug}.apps.alolabs.net`
 
-      const res = await fetch('/api/websites', {
+      const res = await fetch('/api/ai/deploy-assistant', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'deploy',
+          blueprint: {
+            projectName: publishName.trim(),
+            workspaceName: 'AI Builder Sites',
+            stackId: 'static-spa',
+            domain: chosenDomain,
+            gitRepo: '',
+            gitBranch: 'main',
+            buildCommand: '',
+            startCommand: '',
+            outputDirectory: 'dist',
+            autoSsl: true,
+            securityProfile: 'strict-waf',
+            database: { enabled: false, engine: 'POSTGRESQL', name: `${slug.replace(/-/g, '_')}_db` },
+            resources: {
+              tier: 'starter',
+              cpuCores: 1,
+              memoryMb: 1024,
+              storageGb: 10,
+              edgeCache: true,
+              compression: true,
+            },
+            backups: { enabled: true, frequency: 'daily' },
+            selfHealing: { enabled: true, healthPath: '/', autoRollback: true },
+            envVars: [],
+          },
+        }),
       })
       const data = await res.json()
-      if (data.success) {
-        router.push('/dashboard/websites')
+      if (res.ok && data.success) {
+        router.push('/sites')
       } else {
-        setPublishError(data.error || 'Failed to publish website')
+        const errMsg = typeof data?.error === 'string' ? data.error : data?.error?.message || data?.message
+        setPublishError(errMsg || 'Failed to publish website')
       }
     } catch {
       setPublishError('Network error. Please try again.')
     } finally {
       setPublishing(false)
     }
-  }, [publishName, htmlContent, selectedDomainId, token, router])
+  }, [publishName, htmlContent, selectedDomainId, domains, router])
 
   const currentStepIndex = STEPS.findIndex((s) => s.key === step)
 

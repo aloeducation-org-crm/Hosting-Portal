@@ -925,3 +925,5 @@ export function ZeroTerminalDeployAssistant() {
     </div>
   );
 }
+
+export default ZeroTerminalDeployAssistant;

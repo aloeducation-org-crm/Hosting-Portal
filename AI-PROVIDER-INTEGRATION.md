@@ -207,3 +207,8 @@ disabled by default until deliberately enabled — no free-tier or quality claim
 | Free-tier rate limits, model availability, response quality | **NOT VERIFIED** |
 | Scheduled (cron) automations | **NOT IMPLEMENTED** — design sketch in `docs/AI-AUTOMATION.md` §7 |
 | Mutating automation tools (restart/backup/delete) | **NOT IMPLEMENTED**, intentionally |
+
+
+## GLM-5 (`zai-org/GLM-5` — Apache-2.0)
+
+Set `GLM_API_KEY` (or `ZHIPU_API_KEY`) and `GLM_BASE_URL=https://api.z.ai/api/paas/v4` (or `http://127.0.0.1:8000/v1` for local vLLM/SGLang).

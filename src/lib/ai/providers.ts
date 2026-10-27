@@ -12,7 +12,8 @@
  *  - A provider that is misconfigured is *skipped with a reason*, never thrown
  *    from, so one bad environment variable cannot take the panel down.
  *  - Optional self-hosted inference servers (LiteLLM/vLLM gateway, Ollama,
- *    LocalAI) are opt-in and never stall startup or requests when unconfigured.
+ *    LocalAI, local GLM-5 vLLM/SGLang) are opt-in and never stall startup or
+ *    requests when unconfigured.
  *  - Cloud metadata and unspecified addresses (169.254.0.0/16, 0.0.0.0, IMDSv6)
  *    are unconditionally rejected even in operator env vars.
  */
@@ -45,6 +46,14 @@ export interface ProviderDefinition {
   baseUrlEnv?: string;
   /** Env var holding the bearer token. */
   apiKeyEnv: string;
+  /** Secondary env var checked if `apiKeyEnv` is unset (e.g. ZHIPU_API_KEY for GLM-5). */
+  altApiKeyEnv?: string;
+  /** Additional fallback env vars checked for the bearer token (e.g. ZAI_API_KEY). */
+  extraApiKeyEnvs?: readonly string[];
+  /** Provider-specific model env alias checked after `AI_MODEL_<ID>` (e.g. GLM_MODEL). */
+  altModelEnv?: string;
+  /** Allow keyless self-hosted operation when `baseUrlEnv` points at localhost/loopback. */
+  allowLocalKeyless?: boolean;
   /** True when the API rejects unauthenticated requests. */
   requiresKey: boolean;
   /** True when the provider documents an anonymous/free tier that works without a key. */
@@ -206,26 +215,31 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
   },
   {
     id: "glm",
-    label: "GLM (Z.ai / Zhipu OpenAI-compatible or self-hosted)",
+    label: "GLM-5 (Z.ai / Zhipu OpenAI-compatible or self-hosted)",
     tier: "paid",
     kind: "openai-compatible",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    baseUrl: "https://api.z.ai/api/paas/v4",
     baseUrlEnv: "GLM_BASE_URL",
     apiKeyEnv: "GLM_API_KEY",
+    altApiKeyEnv: "ZHIPU_API_KEY",
+    extraApiKeyEnvs: ["ZAI_API_KEY"],
+    altModelEnv: "GLM_MODEL",
+    allowLocalKeyless: true,
     requiresKey: true,
     anonymousAccess: false,
-    defaultModel: "glm-4-plus",
+    defaultModel: "glm-5",
     capabilities: {
       contextWindowTokens: 128_000,
-      maxOutputTokens: 4_096,
+      maxOutputTokens: 16_384,
       supportsJsonMode: true,
       supportsStreaming: true,
       supportsToolCalls: true,
     },
-    docs: "https://docs.z.ai",
+    docs: "https://github.com/zai-org/GLM-5",
     notes:
-      "Supports Z.ai / Zhipu BigModel cloud OpenAI-compatible endpoints (set GLM_BASE_URL for international api.z.ai vs open.bigmodel.cn) " +
-      "or a locally hosted vLLM/SGLang server serving GLM-4/GLM-5 weights. Default host is marked unverified until confirmed for your account.",
+      "zai-org/GLM-5 (Apache-2.0): supports Z.ai international (https://api.z.ai/api/paas/v4), Zhipu mainland " +
+      "(https://open.bigmodel.cn/api/paas/v4), or a self-hosted vLLM/SGLang server via GLM_BASE_URL (e.g. http://127.0.0.1:8000/v1). " +
+      "Confirm GLM_BASE_URL for your region/account.",
     baseUrlVerified: false,
   },
   {
@@ -257,6 +271,7 @@ export const AI_PROVIDER_CATALOG: readonly ProviderDefinition[] = [
     baseUrl: "http://127.0.0.1:4000/v1",
     baseUrlEnv: "AI_GATEWAY_URL",
     apiKeyEnv: "AI_GATEWAY_KEY",
+    altApiKeyEnv: "AI_GATEWAY_API_KEY",
     requiresKey: false,
     anonymousAccess: true,
     defaultModel: "qwen2.5:7b",
@@ -352,7 +367,7 @@ export interface ProviderResolution {
   order: string[];
 }
 
-export const DEFAULT_PROVIDER_ORDER = ["unorouter", "llm7", "groq", "gateway", "ollama", "localai"];
+export const DEFAULT_PROVIDER_ORDER = ["unorouter", "llm7", "groq", "glm", "gateway", "ollama", "localai"];
 
 type EnvSource = Record<string, string | undefined>;
 
@@ -372,6 +387,22 @@ function readInt(source: EnvSource, key: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readProviderKey(source: EnvSource, definition: ProviderDefinition): string {
+  const primary = read(source, definition.apiKeyEnv);
+  if (primary) return primary;
+  if (definition.altApiKeyEnv) {
+    const secondary = read(source, definition.altApiKeyEnv);
+    if (secondary) return secondary;
+  }
+  if (definition.extraApiKeyEnvs) {
+    for (const envName of definition.extraApiKeyEnvs) {
+      const candidate = read(source, envName);
+      if (candidate) return candidate;
+    }
+  }
+  return "";
 }
 
 export function parseOrder(raw: string): string[] {
@@ -501,12 +532,12 @@ const DEFAULT_CUSTOM_CAPABILITIES: ProviderCapabilities = {
  *     `custom` provider that is tried first (this keeps existing deployments on
  *     the gateway they already configured).
  *  2. Providers listed in `AI_PROVIDER_ORDER` (default DEFAULT_PROVIDER_ORDER).
- *  3. `AI_FREE_ONLY=true` drops paid providers.
+ *  3. `AI_FREE_ONLY=true` drops paid providers (unless overridden to local self-hosted).
  *  4. `AI_ALLOW_ANONYMOUS=false` (or `AI_ANONYMOUS_ACCESS=false`) drops
  *     providers that would be called without a key.
  *
  * `AI_MODEL` (legacy) overrides the model for every provider in the chain;
- * `AI_MODEL_<ID>` wins over it for one provider only.
+ * `AI_MODEL_<ID>` (or `altModelEnv` such as `GLM_MODEL`) wins over it for one provider only.
  */
 export function resolveProviders(source: EnvSource = process.env): ProviderResolution {
   const warnings: string[] = [];
@@ -561,15 +592,21 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
       warnings.push(`AI_PROVIDER_ORDER contains an unknown provider "${id}"; it was ignored.`);
       continue;
     }
-    if (freeOnly && definition.tier === "paid") {
+
+    const baseRawEnv = definition.baseUrlEnv ? read(source, definition.baseUrlEnv) : "";
+    const isSelfHostedOverride = Boolean(definition.allowLocalKeyless && baseRawEnv && isLocalHost(baseRawEnv));
+    const effectiveTier: ProviderTier = isSelfHostedOverride ? "self-hosted" : definition.tier;
+    const effectiveKind: ProviderKind = isSelfHostedOverride ? "local-openai-compatible" : definition.kind;
+    const effectiveRequiresKey = isSelfHostedOverride ? false : definition.requiresKey;
+
+    if (freeOnly && effectiveTier === "paid") {
       skipped.push({ id, label: definition.label, reason: "AI_FREE_ONLY=true" });
       continue;
     }
 
-    const baseRawEnv = definition.baseUrlEnv ? read(source, definition.baseUrlEnv) : "";
     // Self-hosted endpoints are opt-in: a fresh install must never waste time
     // or stall startup dialling 127.0.0.1:11434 / :4000 / :8080 when unused.
-    const explicitlyListed = rawOrder ? true : false;
+    const explicitlyListed = Boolean(rawOrder);
     if (definition.kind === "local-openai-compatible" && !baseRawEnv && !explicitlyListed) {
       skipped.push({
         id,
@@ -587,16 +624,12 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
       continue;
     }
 
-    if (!definition.baseUrlVerified && !(definition.baseUrlEnv && read(source, definition.baseUrlEnv))) {
-      warnings.push(
-        `${definition.label} is using an unverified default API host (${baseUrl}). ` +
-          `Set ${definition.baseUrlEnv} to the host from your own dashboard before relying on it.`,
-      );
-    }
-
-    const apiKey = read(source, definition.apiKeyEnv);
-    if (!apiKey && definition.requiresKey) {
-      skipped.push({ id, label: definition.label, reason: `${definition.apiKeyEnv} not set` });
+    const apiKey = readProviderKey(source, definition);
+    if (!apiKey && effectiveRequiresKey) {
+      const keyLabel = definition.altApiKeyEnv
+        ? `${definition.apiKeyEnv} (or ${definition.altApiKeyEnv}) not set`
+        : `${definition.apiKeyEnv} not set`;
+      skipped.push({ id, label: definition.label, reason: keyLabel });
       continue;
     }
     if (!apiKey && !allowAnonymous) {
@@ -604,12 +637,23 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
       continue;
     }
 
-    const perProviderModel = read(source, `AI_MODEL_${id.toUpperCase()}`);
+    const effectiveBaseUrlVerified = definition.baseUrlVerified || Boolean(baseRawEnv) || isSelfHostedOverride;
+    if (!effectiveBaseUrlVerified) {
+      warnings.push(
+        `${definition.label} is using an unverified default API host (${baseUrl}). ` +
+          `Set ${definition.baseUrlEnv} to the host from your own dashboard before relying on it.`,
+      );
+    }
+
+    const perProviderModel =
+      read(source, `AI_MODEL_${id.toUpperCase()}`) ||
+      (definition.altModelEnv ? read(source, definition.altModelEnv) : "");
+
     add({
       id,
       label: definition.label,
-      tier: definition.tier,
-      kind: definition.kind,
+      tier: effectiveTier,
+      kind: effectiveKind,
       baseUrl,
       apiKey,
       model: perProviderModel || globalModel || definition.defaultModel,
@@ -617,7 +661,7 @@ export function resolveProviders(source: EnvSource = process.env): ProviderResol
       capabilities: definition.capabilities,
       docs: definition.docs,
       notes: definition.notes,
-      baseUrlVerified: definition.baseUrlVerified,
+      baseUrlVerified: effectiveBaseUrlVerified,
     });
   }
 
@@ -664,6 +708,22 @@ export function redactProvider(provider: ResolvedProvider, options: RedactProvid
     docs: provider.docs,
     notes: provider.notes,
     baseUrlVerified: provider.baseUrlVerified,
+  };
+}
+
+/**
+ * Role-aware provider serializer: always strips API keys, and masks private/local
+ * self-hosted gateway endpoints for non-admin roles while leaving verified public
+ * cloud API base URLs visible.
+ */
+export function redactProviderForRole(provider: ResolvedProvider, isAdmin: boolean) {
+  const hideInternal =
+    !isAdmin &&
+    (provider.kind === "local-openai-compatible" || isPrivateOrInternalUrl(provider.baseUrl));
+
+  return {
+    ...redactProvider(provider, { includeTopology: true }),
+    baseUrl: hideInternal ? "[internal-self-hosted]" : provider.baseUrl,
   };
 }
 

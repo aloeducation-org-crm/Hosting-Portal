@@ -6,6 +6,21 @@ if [[ $EUID -ne 0 ]]; then echo "Run as root:  sudo $0 $*"; exit 1; fi
 source "$KIT_ROOT/lib/common.sh"
 if [[ "${1:-}" == "--reset" ]]; then reset_state; exit 0; fi
 
+install -d -m 0700 /etc/alo-server-kit
+cat >/etc/alo-server-kit/kit.conf <<EOF
+KIT_ROOT="${KIT_ROOT}"
+KIT_HOSTNAME="${KIT_HOSTNAME}"
+KIT_DOMAIN="${KIT_DOMAIN}"
+KIT_ADMIN_EMAIL="${KIT_ADMIN_EMAIL}"
+KIT_PRIMARY_USER="${KIT_PRIMARY_USER}"
+KIT_LAN_CIDR="${KIT_LAN_CIDR}"
+KIT_APP_DIR="${KIT_APP_DIR}"
+KIT_TELEGRAM_BOT_TOKEN="${KIT_TELEGRAM_BOT_TOKEN}"
+KIT_TELEGRAM_CHAT_ID="${KIT_TELEGRAM_CHAT_ID}"
+EOF
+chmod 0600 /etc/alo-server-kit/kit.conf
+chown root:root /etc/alo-server-kit/kit.conf
+
 STAGES=("00-preflight" "01-security" "02-webapp" "03-databases" "04-ai-infra" "05-ai-tools" "06-ops" "07-filesync")
 if [[ -n "${1:-}" ]]; then
   target="$1"; found=""

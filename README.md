@@ -218,3 +218,10 @@ is scoped to the build step only; it is not set during dependency installation.
 ## Licence
 
 MIT.
+
+
+## Additional Architecture & Audit References
+
+- [`docs/ZERO-TERMINAL-AI-DEPLOY.md`](docs/ZERO-TERMINAL-AI-DEPLOY.md) — Zero-Terminal Stack Preset Blueprinting & Managed VPS Panel Parity
+- [`docs/SELF-HOSTED-AI-AGENTS.md`](docs/SELF-HOSTED-AI-AGENTS.md) — Revalidated 26-Platform Self-Hosted AI Agent Catalog, License Triage & VRAM Sizing
+- [`docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md`](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md) — Ecosystem & GLM-5 (`zai-org/GLM-5`) Integration Analysis

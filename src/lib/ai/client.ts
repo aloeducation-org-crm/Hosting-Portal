@@ -9,6 +9,7 @@
  *   - strict timeouts, redirect blocking (`redirect: "error"`), and zero
  *     leakage of provider response bodies or keys,
  *   - request correlation IDs (`requestId`) for structured observability,
+ *   - reasoning model fallback (`reasoning_content` for GLM-5 / DeepSeek R1),
  *   - JSON mode with a defensive parser.
  *
  * Nothing here is safe to import from a client component: it reads API keys.
@@ -224,7 +225,12 @@ function sleep(ms: number, signal?: AbortSignal, requestId?: string): Promise<vo
 
 type ChatResponseBody = {
   model?: unknown;
-  choices?: Array<{ message?: { content?: unknown } }>;
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+      reasoning_content?: unknown;
+    };
+  }>;
   usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown };
 };
 
@@ -292,6 +298,12 @@ async function callProvider(
   if (options.json && provider.capabilities.supportsJsonMode) {
     body.response_format = { type: "json_object" };
   }
+  if (provider.id === "glm") {
+    const effort = (process.env.GLM_REASONING_EFFORT ?? "").trim().toLowerCase();
+    if (effort === "low" || effort === "medium" || effort === "high") {
+      body.reasoning_effort = effort;
+    }
+  }
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -343,8 +355,11 @@ async function callProvider(
     throw new AIProviderError("AI provider returned malformed JSON", 502, "AI_INVALID_RESPONSE", [], requestId);
   }
 
-  const content = parsed.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
+  const rawMessage = parsed.choices?.[0]?.message;
+  const primaryContent = typeof rawMessage?.content === "string" ? rawMessage.content : "";
+  const reasoningContent = typeof rawMessage?.reasoning_content === "string" ? rawMessage.reasoning_content : "";
+  const content = primaryContent.trim() ? primaryContent : reasoningContent;
+  if (!content || !content.trim()) {
     throw new AIProviderError("AI provider returned no text", 502, "AI_INVALID_RESPONSE", [], requestId);
   }
 

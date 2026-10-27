@@ -29,6 +29,16 @@ model_list:
     litellm_params:
       model: groq/llama-3.3-70b-versatile
       api_key: os.environ/GROQ_API_KEY
+  - model_name: glm-5
+    litellm_params:
+      model: openai/glm-5
+      api_base: ${KIT_GLM_BASE_URL}
+      api_key: os.environ/GLM_API_KEY
+  - model_name: glm-5.3-flash
+    litellm_params:
+      model: openai/glm-5.3-flash
+      api_base: ${KIT_GLM_BASE_URL}
+      api_key: os.environ/GLM_API_KEY
 
 router_settings:
   routing_strategy: simple-shuffle

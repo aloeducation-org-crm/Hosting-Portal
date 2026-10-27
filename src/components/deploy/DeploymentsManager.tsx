@@ -175,6 +175,9 @@ export function DeploymentsManager() {
           <Button variant="outline" size="sm" asChild>
             <Link href="/ai/auto-deploy"><Rocket className="mr-2 h-4 w-4 text-[#E8501A]" /> AI Auto-Deploy Studio</Link>
           </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/ai/assistant">Zero-Terminal Presets</Link>
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void refresh()}><RefreshCw className="mr-2 h-4 w-4" /> Refresh</Button>
           <Button size="sm" asChild><a href="/api/github/connect"><Github className="mr-2 h-4 w-4" /> Connect GitHub</a></Button>
         </div>

@@ -45,12 +45,15 @@ systemctl show ollama 2>/dev/null | grep -q 'MemoryMax=' && ok "ollama MemoryMax
 systemctl is-active --quiet litellm && ok "litellm active" || fail "litellm not active"
 curl -fsS http://127.0.0.1:4000/health/liveness >/dev/null 2>&1 && ok "litellm health OK" || warn "litellm health endpoint down"
 systemctl is-active --quiet open-webui && ok "open-webui active" || warn "open-webui not yet active"
+! grep -q 'OPENAI_API_KEY=' /etc/systemd/system/open-webui.service 2>/dev/null && ok "open-webui.service free of inline API keys" || fail "inline API key found in open-webui.service"
+[[ -f /etc/alo-server-kit/open-webui.env ]] && [[ "$(stat -c '%a' /etc/alo-server-kit/open-webui.env 2>/dev/null)" == "600" ]] && ok "open-webui.env mode 0600" || warn "open-webui.env missing or not 0600"
 
 banner "L5 — AI Tools"
 command -v code >/dev/null && ok "VS Code installed" || warn "VS Code not installed"
 command -v aider >/dev/null && ok "aider installed (pipx)" || warn "aider not installed"
 USER_HOME=$(getent passwd "$KIT_PRIMARY_USER" | cut -d: -f6)
 [[ -f "$USER_HOME/.continue/config.json" ]] && ok "Continue.dev config present" || warn "Continue.dev config missing"
+[[ ! -f "$USER_HOME/.continue/config.json" ]] || [[ "$(stat -c '%a' "$USER_HOME/.continue/config.json" 2>/dev/null)" == "600" ]] && ok "Continue.dev config mode 0600" || fail "Continue.dev config is world/group readable"
 
 banner "L6 — Ops / Monitoring"
 systemctl is-active --quiet netdata && ok "netdata active" || warn "netdata not active"

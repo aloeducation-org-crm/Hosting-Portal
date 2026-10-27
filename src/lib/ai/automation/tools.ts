@@ -2,8 +2,8 @@
  * Hosting tools exposed to AI workflows.
  *
  * Security invariants:
- *   1. Read-only: a workflow may inspect sites, SSL expiry and health, never
- *      mutate services, databases or host helpers.
+ *   1. Read-only: a workflow may inspect sites, SSL expiry, deployments, billing
+ *      and marketing overviews, never mutate services, databases or host helpers.
  *   2. Tenant-isolated: non-admin executions are strictly scoped to
  *      `website.ownerId === actor.userId`. Missing actor identity fails closed
  *      rather than querying across all tenants.
@@ -11,6 +11,8 @@
 
 import { db } from "@/lib/db";
 import type { ToolContext, ToolRegistry, WorkflowActor } from "./engine";
+
+export type HostingToolActor = WorkflowActor;
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
@@ -34,7 +36,7 @@ function resolveTenantOwnerFilter(actor?: WorkflowActor): { ownerId?: string } {
   }
   const userId = typeof actor?.userId === "string" ? actor.userId.trim() : "";
   if (!userId) {
-    throw new Error("Tenant context (authenticated userId) is required to query hosting resources");
+    throw new Error("Tenant context required (authenticated userId) to query hosting resources");
   }
   return { ownerId: userId };
 }
@@ -222,6 +224,9 @@ export function createScopedHostingTools(boundActor?: WorkflowActor): ToolRegist
     },
   };
 }
+
+/** Alias preserved for security-audit callers binding a tenant actor directly. */
+export const createHostingToolsForActor = createScopedHostingTools;
 
 /** Default registry: enforces tenant isolation via `context.actor`. */
 export const HOSTING_TOOLS: ToolRegistry = createScopedHostingTools();

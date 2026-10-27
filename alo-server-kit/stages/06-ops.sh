@@ -98,7 +98,7 @@ sudo -u "\$USER" bash -lc "
   source \$NVM_DIR/nvm.sh
   git fetch --all
   git pull --ff-only origin main
-  npm ci --omit=dev
+  npm ci --include=dev
   npm run build
   pm2 reload ecosystem.config.cjs --update-env
   pm2 save

@@ -140,7 +140,7 @@ if sudo -u "$KIT_PRIMARY_USER" [[ ! -d "$APP_DIR/.git" ]] && [[ -d "$KIT_ROOT/de
     cp -r '$KIT_ROOT/demo-app' '$APP_DIR'
     cd '$APP_DIR'
     source $NVM_DIR/nvm.sh
-    npm ci --omit=dev
+    npm ci --include=dev
     npm run build
   "
 fi

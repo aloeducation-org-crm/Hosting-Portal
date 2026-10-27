@@ -39,6 +39,8 @@ load_config() {
   : "${KIT_LITELLM_SALT_KEY:=sk-alolitellm-salt-CHANGE-ME-too}"
   : "${KIT_GEMINI_API_KEY:=}"
   : "${KIT_GROQ_API_KEY:=}"
+  : "${KIT_GLM_API_KEY:=}"
+  : "${KIT_GLM_BASE_URL:=https://api.z.ai/api/paas/v4}"
   : "${KIT_CLOUDFLARE_AI_ACCOUNT_ID:=}"
   : "${KIT_CLOUDFLARE_AI_API_TOKEN:=}"
   : "${KIT_OPENWEBUI_PORT:=3001}"

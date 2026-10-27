@@ -15,14 +15,15 @@ export default function AIToolsSection() {
             Human-led, AI-powered
           </h2>
           <p className="mt-4 text-base leading-relaxed text-gray-600 sm:text-lg">
-            ALO Labs&apos;s AI experience helps you seamlessly grow online, while keeping
-            you firmly in control of your online success.
+            Deploy Node.js, Python, Next.js, PHP, and Static projects visually with
+            1-click environments, zero-code isolated databases, free global Auto-SSL,
+            automated backups, and self-healing health checks — without touching a terminal.
           </p>
           <a
-            href="/dashboard/agents"
+            href="/ai/assistant"
             className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#E8501A] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#C73D12]"
           >
-            Get started
+            Launch AI Deploy Assistant
             <ArrowRight className="size-4" />
           </a>
         </div>
