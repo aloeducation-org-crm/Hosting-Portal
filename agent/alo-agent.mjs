@@ -134,7 +134,16 @@ export const AGENT_ALLOWLIST = {
   },
 };
 
-/** Loopback / RFC1918 / link-local only. Refuses anything publicly routable. */
+/**
+ * Loopback, RFC1918 and CGNAT/Tailscale only — and *never* a cloud metadata
+ * endpoint. Refuses anything publicly routable.
+ *
+ * 169.254.0.0/16 is deliberately excluded even though it is link-local: it is
+ * where AWS/GCP/Azure/Alibaba instance metadata lives (169.254.169.254,
+ * 100.100.100.200, fd00:ec2::254), and an agent that could reach it could read
+ * the host's cloud credentials. This mirrors the panel's own SSRF policy in
+ * src/lib/security/url-guard.ts (`isCloudMetadataOrLinkLocalHost`).
+ */
 export function isPrivateTarget(rawUrl) {
   let url;
   try {
@@ -144,14 +153,38 @@ export function isPrivateTarget(rawUrl) {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!host) return false;
+
+  // Cloud metadata / link-local / unspecified: always refused.
+  if (
+    host === "0.0.0.0" ||
+    host === "::" ||
+    host === "metadata" ||
+    host === "instance-data" ||
+    host === "metadata.google.internal" ||
+    host.endsWith(".metadata.google.internal") ||
+    host === "metadata.azure.com" ||
+    host === "100.100.100.200" ||
+    host.startsWith("fd00:ec2:") ||
+    host.startsWith("fe80:") ||
+    host.startsWith("fe90:") ||
+    host.startsWith("fea0:") ||
+    host.startsWith("feb0:") ||
+    host.includes("169.254.")
+  ) {
+    return false;
+  }
+
   if (host === "localhost" || host === "::1") return true;
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false; // hostnames are refused: they could resolve anywhere
-  const [a, b] = [Number(m[1]), Number(m[2])];
+  const octets = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  if (octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = octets;
+  if (a === 0) return false; // 0.0.0.0/8 is unspecified, not private
   if (a === 10 || a === 127) return true;
   if (a === 192 && b === 168) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 169 && b === 254) return true;
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT / Tailscale range
   return false;
 }

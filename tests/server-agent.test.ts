@@ -233,12 +233,19 @@ describe("agent binary (agent/alo-agent.mjs)", () => {
       "http://192.168.1.20:8080/",
       "http://172.16.0.9/",
       "http://172.31.255.254/",
-      "http://169.254.169.254/latest/meta-data/",
       "http://100.64.0.1/",
     ]) {
       expect(host.isPrivateTarget(allowed), `expected ${allowed} to be allowed`).toBe(true);
     }
     for (const refused of [
+      // Cloud metadata and link-local must never be reachable from an agent,
+      // even though they are not publicly routable (SSRF/IMDS credential theft).
+      "http://169.254.169.254/latest/meta-data/",
+      "http://169.254.1.1/",
+      "http://100.100.100.200/latest/meta-data/",
+      "http://metadata.google.internal/computeMetadata/v1/",
+      "http://[fd00:ec2::254]/latest/meta-data/",
+      "http://0.0.0.0:3000/",
       "http://8.8.8.8/",
       "https://hosting.alolabs.net/",
       "http://172.32.0.1/",
@@ -251,6 +258,8 @@ describe("agent binary (agent/alo-agent.mjs)", () => {
       expect(host.isPrivateTarget(refused), `expected ${refused} to be refused`).toBe(false);
     }
     expect(host.isPrivateTarget("http://172.15.0.1/")).toBe(false);
+    expect(host.isPrivateTarget("http://172.32.0.1/")).toBe(false);
+    expect(host.isPrivateTarget("http://999.1.1.1/")).toBe(false);
   });
 
   it("signs and verifies exactly the way the panel does, and rejects tampering", () => {
@@ -262,7 +271,13 @@ describe("agent binary (agent/alo-agent.mjs)", () => {
     expect(host.verify(secret, body, timestamp, nonce, signature)).toBe(true);
     // The panel's verifier must accept the agent's signature byte-for-byte.
     expect(agents.verifySignature({ secret, body, timestamp, nonce, signature }).valid).toBe(true);
-    expect(host.verify(secret, body, timestamp, nonce, signature.slice(0, -1) + "0")).toBe(false);
+    // Flip the last hex digit deterministically: appending "0" would be a no-op
+    // whenever the signature already ends in "0", which made this assertion
+    // depend on chance (and fail in CI roughly one run in sixteen).
+    const tampered = signature.slice(0, -1) + (signature.endsWith("0") ? "1" : "0");
+    expect(tampered).not.toBe(signature);
+    expect(host.verify(secret, body, timestamp, nonce, tampered)).toBe(false);
+    expect(agents.verifySignature({ secret, body, timestamp, nonce, signature: tampered }).valid).toBe(false);
     expect(host.verify(secret, `{"version":"9.9.9"}`, timestamp, nonce, signature)).toBe(false);
     expect(host.verify("wrong-secret", body, timestamp, nonce, signature)).toBe(false);
   });

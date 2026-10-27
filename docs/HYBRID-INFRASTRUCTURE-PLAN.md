@@ -165,8 +165,11 @@ Nothing in this table fabricates success. Where a worker cannot confirm an outco
   Refusing it (`rejectAgentTask`) marks it `REFUSED` so it can never be claimed.
 - **Egress redaction**: the agent strips GitHub tokens, AWS keys, private key bodies, database URLs with
   passwords and `password=…` values before anything leaves the host; the panel redacts again on write.
-- **SSRF guard**: `health.probe` accepts loopback / RFC1918 / link-local / CGNAT only. Hostnames are
-  refused because they can resolve anywhere.
+- **SSRF guard**: `health.probe` accepts loopback / RFC1918 / CGNAT-Tailscale only. Hostnames are refused
+  because they can resolve anywhere, and **cloud metadata is refused explicitly** — `169.254.0.0/16`
+  (including `169.254.169.254`), `100.100.100.200`, `metadata.google.internal`, `fd00:ec2::254`,
+  `fe80::/10` and `0.0.0.0/8` — so an agent can never read a host's cloud credentials. This mirrors the
+  panel's own policy in `src/lib/security/url-guard.ts`.
 - **Honest refusals**: `db.replication-status` refuses until credentials exist on the host in
   `/etc/alo-agent/db.cnf` — it will not take credentials from the panel or from argv.
 
