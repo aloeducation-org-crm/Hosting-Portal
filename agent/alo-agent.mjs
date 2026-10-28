@@ -34,7 +34,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const AGENT_VERSION = "1.0.0";
+export const AGENT_VERSION = "1.1.0";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -68,6 +68,9 @@ export function readConfig(argv = process.argv.slice(2)) {
 
 const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9@:_.\-]{0,120}$/;
 const ABS_PATH = /^\/[A-Za-z0-9_./\-]{1,300}$/;
+// Log files the agent will read: only .log files under /var/log or /opt/alo/logs,
+// no "..". Mirrors src/lib/agents/allowlist.ts exactly (see the parity test).
+const LOG_PATH = /^\/(var\/log|opt\/alo\/logs)\/[A-Za-z0-9_./-]+\.log$/;
 
 export const AGENT_ALLOWLIST = {
   "metrics.collect": {
@@ -131,6 +134,44 @@ export const AGENT_ALLOWLIST = {
     risk: "READ_ONLY",
     timeoutMs: 30_000,
     validate: () => true,
+  },
+  "system.inventory": {
+    executable: null, // handled internally, no child process
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: () => true,
+  },
+  "mount.list": {
+    executable: null, // handled internally — reads /proc/mounts
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: () => true,
+  },
+  "service.list": {
+    executable: "systemctl",
+    argv: () => ["list-units", "--type=service", "--no-legend", "--plain", "--no-pager"],
+    risk: "READ_ONLY",
+    timeoutMs: 20_000,
+    validate: () => true,
+  },
+  "container.status": {
+    executable: "docker",
+    argv: () => ["ps", "-a"],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: () => true,
+  },
+  "log.tail": {
+    executable: "tail",
+    argv: (a) => ["-n", String(a.lines ?? 200), String(a.path)],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: (a) =>
+      typeof a.path === "string" &&
+      LOG_PATH.test(a.path) &&
+      !a.path.includes("..") &&
+      (a.lines === undefined || a.lines === null ||
+        (typeof a.lines === "number" && Number.isInteger(a.lines) && a.lines >= 1 && a.lines <= 500)),
   },
 };
 
@@ -354,6 +395,25 @@ function round(n) {
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
 }
 
+/**
+ * Static hardware/OS inventory, read from the OS itself — never from a value
+ * the panel supplied. Sent with every heartbeat and returned by the
+ * `system.inventory` task.
+ */
+export function collectInventory() {
+  const cpus = os.cpus();
+  return {
+    hostname: os.hostname(),
+    platform: process.platform,
+    arch: process.arch,
+    kernel: os.release(),
+    cpuCores: cpus.length,
+    cpuModel: cpus[0] ? String(cpus[0].model || "").trim().slice(0, 120) : null,
+    ramGb: Math.round((os.totalmem() / 1073741824) * 10) / 10,
+    uptimeSeconds: Math.round(os.uptime()),
+  };
+}
+
 export function run(executable, args, timeoutMs, useSudo = false) {
   return new Promise((resolve, reject) => {
     const cmd = useSudo ? "sudo" : executable;
@@ -395,6 +455,30 @@ export async function executeTask(task, secrets = []) {
     if (task.command === "metrics.collect") {
       const metrics = await collectMetrics();
       return { status: "SUCCEEDED", exitCode: 0, result: metrics, durationMs: Date.now() - started };
+    }
+    if (task.command === "system.inventory") {
+      return { status: "SUCCEEDED", exitCode: 0, result: collectInventory(), durationMs: Date.now() - started };
+    }
+    if (task.command === "mount.list") {
+      try {
+        const raw = await readFile("/proc/mounts", "utf8");
+        const mounts = raw
+          .split("\n")
+          .filter((line) => line.trim().length > 0)
+          .slice(0, 200)
+          .map((line) => {
+            const parts = line.split(/\s+/);
+            return { device: parts[0] || "", mountpoint: parts[1] || "", fstype: parts[2] || "" };
+          });
+        return { status: "SUCCEEDED", exitCode: 0, result: { count: mounts.length, mounts }, durationMs: Date.now() - started };
+      } catch (e) {
+        return {
+          status: "FAILED",
+          exitCode: null,
+          error: `Could not read /proc/mounts: ${e && e.message ? String(e.message).slice(0, 200) : "unreadable"}`,
+          durationMs: Date.now() - started,
+        };
+      }
     }
     if (task.command === "health.probe") {
       const url = String(args.url);
@@ -485,7 +569,7 @@ export async function heartbeatOnce(cfg, state) {
   const res = await post(
     cfg.panelUrl,
     "/api/agents/heartbeat",
-    { version: AGENT_VERSION, metrics, capabilities: Object.keys(AGENT_ALLOWLIST) },
+    { version: AGENT_VERSION, metrics, inventory: collectInventory(), capabilities: Object.keys(AGENT_ALLOWLIST) },
     { agentKey: state.agentKey, secret: state.secret },
   );
   return { status: res.status, ok: res.ok, message: res.json?.message };

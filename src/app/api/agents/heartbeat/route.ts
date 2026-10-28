@@ -19,10 +19,24 @@ const metricsSchema = z
   })
   .nullish();
 
+const inventorySchema = z
+  .object({
+    hostname: z.string().max(253).optional(),
+    platform: z.string().max(40).optional(),
+    arch: z.string().max(40).optional(),
+    kernel: z.string().max(80).optional(),
+    cpuCores: z.number().int().min(0).max(1024).optional(),
+    cpuModel: z.string().max(120).optional(),
+    ramGb: z.number().min(0).max(4096).optional(),
+    uptimeSeconds: z.number().min(0).optional(),
+  })
+  .nullish();
+
 const payloadSchema = z.object({
   version: z.string().max(40).optional(),
   capabilities: z.array(z.string().max(64)).max(60).optional(),
   metrics: metricsSchema,
+  inventory: inventorySchema,
 });
 
 /**
@@ -51,6 +65,7 @@ export async function POST(request: NextRequest) {
       version: parsed.data.version,
       capabilities: parsed.data.capabilities,
       metrics: parsed.data.metrics ?? null,
+      inventory: parsed.data.inventory ?? null,
     },
     clientIp(request),
   );

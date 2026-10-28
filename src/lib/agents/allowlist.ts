@@ -166,6 +166,78 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     requiresSudo: false,
     scopes: ["database:read"],
   },
+  {
+    command: "system.inventory",
+    label: "Read hardware & OS inventory",
+    description: "Hostname, CPU model and core count, RAM, kernel version and architecture, read directly from the OS. Read-only.",
+    executable: "alo-agent-inventory",
+    argv: () => [],
+    argsSchema: recordOf({}),
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
+    command: "mount.list",
+    label: "List mount points",
+    description: "Reads /proc/mounts and reports device, mountpoint and filesystem type (capped). Read-only.",
+    executable: "alo-agent-mounts",
+    argv: () => [],
+    argsSchema: recordOf({}),
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
+    command: "service.list",
+    label: "List systemd services",
+    description: "`systemctl list-units --type=service` with fixed flags — unit names, load and active states. Read-only.",
+    executable: "systemctl",
+    argv: () => ["list-units", "--type=service", "--no-legend", "--plain", "--no-pager"],
+    argsSchema: recordOf({}),
+    risk: "READ_ONLY",
+    timeoutMs: 20_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
+    command: "container.status",
+    label: "List container status",
+    description: "`docker ps -a` — every container and its state. Read-only; fails honestly with the Docker CLI error when Docker is not installed on the host.",
+    executable: "docker",
+    argv: () => ["ps", "-a"],
+    argsSchema: recordOf({}),
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
+    command: "log.tail",
+    label: "Tail an application log",
+    description:
+      "Reads the last N lines (1–500) of a .log file under /var/log or /opt/alo/logs. Any other path — or a path containing '..' — is refused, so this can never become a general file-read primitive.",
+    executable: "tail",
+    argv: (a) => ["-n", String(a.lines ?? 200), String(a.path)],
+    argsSchema: recordOf({
+      path: z
+        .string()
+        .min(1)
+        .max(300)
+        .regex(
+          /^\/(var\/log|opt\/alo\/logs)\/[A-Za-z0-9_./-]+\.log$/,
+          "must be a .log file under /var/log or /opt/alo/logs"
+        )
+        .refine((p) => !p.includes(".."), "path must not contain '..'"),
+      lines: z.number().int().min(1).max(500).optional(),
+    }),
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["monitoring:read"],
+  },
 ];
 
 export const ALLOWED_AGENT_COMMANDS = new Set(AGENT_ALLOWLIST.map((e) => e.command));
