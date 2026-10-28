@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { requireSession } from '@/lib/auth'
 import { validateExternalWebhookUrl } from '@/lib/security/url-guard'
+import { sealSecretValue } from '@/lib/secret-store'
 import { NextRequest, NextResponse } from 'next/server'
 
 async function getToken(req: NextRequest) {
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         name,
         url: urlCheck.normalizedUrl,
-        secret,
+        secret: secret ? sealSecretValue(secret) : null,
         events: JSON.stringify(events.length ? events : ['*']),
       },
     })
