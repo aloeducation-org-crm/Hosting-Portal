@@ -183,3 +183,45 @@ Legend: **VW** implemented and verified working · **INC** implemented but incom
 3. **No new competing systems**: everything lands behind existing patterns — `requireSession`/`requireSuperAdmin`, `apiSuccess/apiError`, `src/lib/audit.ts` domain tags, orchestrator `contracts.ts` workers, middleware prefix allowlists.
 4. **Existing branding stays** (ALO Labs), existing routes/behavior preserved, PM2 kept for existing apps.
 5. Gate order per change: lint → typecheck → (build first if routes changed) → test → build.
+
+## 8. Phase execution status (Phases 0–9) — §26 report
+
+Recorded 2026-10-29 on branch `arena/26b3f390-hosting-portal`. Every line here was executed and gated in this workspace; nothing is claimed from intent.
+
+### Completed
+
+| Phase | Deliverable | Evidence (commit / gate) |
+|---|---|---|
+| 0 | Full 24-component audit, §25 pre-check, gap→phase map, §7 decisions | `647b09e` (this document) |
+| 1 | `src/lib/secret-store.ts` (env/JSON/file/inline readers, redaction), platform secrets + webhook hardening, `tests/control-plane-secrets` 11/11 | `357cb99` |
+| 2 | Server agent: 14-command allowlist parity (panel+agent), inventory `collect`/`log.tail` with jail, heartbeat inventory mirror (`server_agents`), `tests/server-agent-inventory` 17/17 | `a1b8019` |
+| 2 | Provider adapters: Hostinger + cPanel (real URL/port bugs fixed), tri-state verify with redaction, `tests/provider-adapters` 18/18 | `f6a2964` |
+| 2 | One-time bootstrap installer: dry-run byte-zero writes, exit-code contract, `tests/agent-bootstrap` 6/6 | `4bd113f` |
+| 3 | Storage pools + documents (6 pools, role matrix, path jail, quota/MIME/sha256/versions/audits), `tests/storage-pools` 21/21, 91-table schema applied | `fc0bea4` |
+| 3/19 | `/dashboard/monitoring` (live system metrics, "not measured" honesty) + `/dashboard/backups` (real backup rows) + nav, `tests/dashboard-pages` 4/4 | `7776cf0` |
+| 4 | Database provisioning verified helper-gated: honest 500 with no row/no credentials/no success audit when `alo-database-helper` is absent; authorization + validation tests, 5/5 | `8528f41` |
+| 5 | Provider-independent DNS: mode layer (local/cloudflare/powerdns/registrar) with publish-before-persist gate, blocked-mode refusal naming exact missing dependency, `/api/network/dns/status`, honest banner + DNS-tab repairs in NetworkView, `tests/dns-provider` 10/10 | `ac35e5d` |
+| 5 | cPanel email integration (mailbox listing adapter); no deploy path touches MX records (deploy/rollback code has no email operations — enforced by scope, documented in §3) | `f6a2964` + audit §3 |
+| 6 | BACKUP_RESTORE / MONITORING_RECOVERY / DATABASE_OPS workers with retries/timeouts and honest no-heartbeat refusal, covered by `tests/orchestrator` | pre-existing, cited §3/§4 of this doc |
+| 8 | AI operator endpoint: admin-gated, zod command enum, audit-logged; CSRF + rate limits in middleware; no paid inference configured anywhere | cited + `tests/ai-*` (pre-existing) |
+| 9 | Final gate: **lint 0 · typecheck 0 · 524/524 tests (37 files) · build OK**; live E2E `scripts/e2e-smoke.mjs` **15/15** against the standalone production server (login, dashboard pages, monitoring/alerts/backups/pools/domains APIs, unauth 401 + redirect, CSRF flow, DNS create→panel-only publication→delete with fixture cleanup) | `10d7d68` |
+
+### Partially completed
+
+- **DNS execution**: local panel-only mode works end-to-end and says so; cloudflare/powerdns/registrar modes are implemented as *honest refusal* until credentials/engine are enrolled (by design — no simulation).
+- **High availability (Phase 7)**: orchestration/planning only; no failover possible without second hosts — no drills run.
+- **§19 dashboard sections still missing**: `/dashboard/ssl`, `/dashboard/github`, `/dashboard/projects`, `/dashboard/documents`, `/dashboard/security` (pages do not exist; nav does not link them). Data sources for documents (pools API) and GitHub/deployments exist; UI not built.
+- **GitHub App pipeline**: pipeline worker + deployment surfaces exist with tests; live GitHub status callbacks are unverified (no GitHub App credentials in this workspace).
+
+### Blocked (dependency missing — reported, never simulated)
+
+- **Live host verifications (§25 BLOCKED-NVV)**: no SSH/host access from this workspace — restore drills, HTTPS-on-real-domain verification, container/Traefik state checks, capacity measurements on Server A/B/C/D remain unproven.
+- **PowerDNS authoritative engine**: not installed anywhere in this workspace; `POWERDNS_API_URL`/`POWERDNS_API_KEY` unset → mode refuses mutations.
+- **cPanel/Hostinger live calls**: adapter unit-tested with injected config; real credentials absent → tri-state reports `blocked`, never `connected`.
+- **Production deploy proof**: main merge run `40662370310` was **cancelled** — a prod deploy from `main` is NOT proven. Requires an authorized re-run outside this workspace.
+- **Database helper**: `/usr/local/sbin/alo-database-helper` absent here → creation honestly fails 500 (pinned by test); installing it on a host is a deployment task.
+
+### Untested
+
+- Browser-rendered UI (E2E is fetch-level; nav/structure covered by source tests only).
+- Performance/load behavior; email sending; scheduled job execution on real servers.
