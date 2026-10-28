@@ -51,6 +51,8 @@ import {
   LayoutGrid,
   Boxes,
   Package,
+  Activity,
+  Archive,
 } from "lucide-react";
 
 const clientNavItems = [
@@ -64,6 +66,8 @@ const clientNavItems = [
   { label: "Domains", href: "/dashboard/domains", icon: Globe },
   { label: "Databases", href: "/databases", icon: Database },
   { label: "Storage", href: "/storage", icon: HardDrive },
+  { label: "Backups", href: "/dashboard/backups", icon: Archive },
+  { label: "Monitoring", href: "/dashboard/monitoring", icon: Activity },
   { label: "AI Builder", href: "/ai/builder", altPrefix: "/dashboard/agents", icon: Bot },
   { label: "AI Automations", href: "/ai/automations", icon: Zap },
   { label: "Self-Hosted AI", href: "/ai/self-hosted", icon: Server },
