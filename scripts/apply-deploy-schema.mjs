@@ -101,6 +101,11 @@ const MIGRATIONS = [
   { name: "20261026130000_github_autodeploy", kind: "ADDITIVE" },
   { name: "20261027090000_unified_orchestrator_agents", kind: "ADDITIVE" },
   { name: "20261027120000_agent_request_nonces", kind: "ADDITIVE" },
+  // App Center: app_definitions (one row per app, catalog defined once) +
+  // company_apps (per-company install with own branding/settings). Purely
+  // additive — CREATE TABLE/INDEX IF NOT EXISTS, no rebuild required.
+  { name: "20261028100000_app_center", kind: "ADDITIVE" },
+  { name: "20261028130000_software_factory", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",

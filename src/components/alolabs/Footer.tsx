@@ -146,6 +146,8 @@ const bottomLinks = [
   { label: 'Privacy policy', href: '/privacy' },
   { label: 'Terms of service', href: '/terms' },
   { label: 'Cookie policy', href: '/cookies' },
+  { label: 'Industries', href: '/industries' },
+  { label: 'Services', href: '/services' },
   { label: 'Sitemap', href: '/sitemap' },
 ];
 

@@ -323,6 +323,7 @@ model Organization {
   teams       Team[]
   memberships Membership[]
   websites    Website[]
+  companyApps CompanyApp[]
 
   @@index([ownerId])
   @@index([slug])
@@ -1916,6 +1917,11 @@ model Contact {
   email     String
   subject   String?
   message   String
+  // Software Factory funnel fields (nullable, added additively):
+  source    String? // e.g. website-form, industry-landing, service-page
+  industry  String? // IndustrySystem slug
+  service   String? // ServiceDefinition slug
+  status    String? // new | qualified | converted | closed
   createdAt DateTime @default(now())
 
   @@index([email])
@@ -2115,4 +2121,130 @@ model WebhookDelivery {
   @@index([createdAt])
   @@index([repository])
   @@map("webhook_deliveries")
+}
+
+// ─── App Center ───────────────────────────────────────────────────────────────
+// One AppDefinition per app (created once, reused by every company/tenant).
+// One CompanyApp row per (app, organization): the per-company installation
+// with its own branding + settings overrides (Odoo-style app catalog).
+
+model AppDefinition {
+  id              String   @id @default(uuid())
+  slug            String   @unique
+  name            String
+  summary         String?
+  description     String?
+  category        String   @default("productivity") // finance | sales | people | projects | support | ai | content | website | operations | marketing | productivity | communication
+  icon            String? // lucide-react icon name
+  accentColor     String? // hex, e.g. #E8501A
+  version         String   @default("1.0.0")
+  status          String   @default("active") // active | hidden
+  isSystem        Boolean  @default(false) // built-in catalog entries are never deleted
+  route           String? // optional deep link into the hosting portal
+  configSchema    Json? // settings field descriptors: [{key,label,type,default?,options?}]
+  defaultSettings Json? // catalog-wide default settings values
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  installations CompanyApp[]
+
+  @@index([category])
+  @@index([status])
+  @@map("app_definitions")
+}
+
+model CompanyApp {
+  id             String   @id @default(uuid())
+  appId          String
+  organizationId String
+  enabled        Boolean  @default(true)
+  branding       Json? // per-company overrides: {name?, logoUrl?, accentColor?}
+  settings       Json? // per-company overrides of configSchema fields
+  installedBy    String?
+  installedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  app          AppDefinition @relation(fields: [appId], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([appId, organizationId])
+  @@index([organizationId])
+  @@index([appId])
+  @@map("company_apps")
+}
+
+// ─── Software Factory: Industry System Registry ─────────────────────────────
+// One record per industry-specific software product family (20 total).
+// `modules`, `features`, `challenges`, `workflow`, `faqs` and `reports` are
+// structured JSON consumed by the admin registry and the public landing pages.
+
+model IndustrySystem {
+  id         String  @id @default(uuid())
+  slug       String  @unique
+  name       String
+  tagline    String // hero value proposition
+  summary    String // directory card text
+  icon       String  @default("Building2") // lucide icon name
+  accentFrom String  @default("#4f46e5") // per-industry hero gradient
+  accentTo   String  @default("#9333ea")
+  order      Int     @default(0)
+  status     String  @default("published") // draft | published | hidden
+  modules    Json // [{key, name, description, mandatory}]
+  features   Json // [{group, items: [string]}]
+  challenges Json // [{title, description}]
+  workflow   Json // [string]
+  faqs       Json // [{q, a}]
+  reports    Json // [string]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  services ServiceIndustry[]
+
+  @@index([status])
+  @@map("industry_systems")
+}
+
+// ─── Software Factory: Service Catalog ──────────────────────────────────────
+// A service is a sellable deliverable (may use apps/modules/human work).
+// No price columns: pricing is quotation-based (priceMode) by policy.
+
+model ServiceDefinition {
+  id           String  @id @default(uuid())
+  slug         String  @unique
+  name         String
+  category     String // software | marketing | seo | email | whatsapp | social | analytics
+  summary      String
+  description  String
+  deliverables Json // [{name, description?}]
+  prerequisites Json // [string]
+  exclusions   Json // [string] — honest scope boundaries
+  requiredApps Json // [app slug] references AppDefinition.slug
+  priceMode    String @default("quotation") // quotation — no prices are stored
+  version      String @default("1.0.0")
+  status       String @default("published") // draft | published | retired
+  order        Int    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  industries ServiceIndustry[]
+
+  @@index([status])
+  @@index([category])
+  @@map("service_catalog")
+}
+
+// Industry↔service applicability: core | recommended | optional (§9 mapping).
+model ServiceIndustry {
+  id         String           @id @default(uuid())
+  serviceId  String
+  industryId String
+  relation   String           @default("recommended") // core | recommended | optional
+  service    ServiceDefinition @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  industry   IndustrySystem   @relation(fields: [industryId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, industryId])
+  @@index([industryId])
+  @@map("service_industries")
 }

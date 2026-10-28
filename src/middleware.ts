@@ -111,6 +111,8 @@ const ADMIN_UI_PREFIXES = [
   "/dashboard/plans",
   "/dashboard/audit",
   "/dashboard/infrastructure",
+  "/dashboard/industries",
+  "/dashboard/services",
 ];
 
 const DASHBOARD_UI_PREFIXES = [
@@ -123,6 +125,7 @@ const DASHBOARD_UI_PREFIXES = [
   "/settings",
   "/onboarding",
   "/deployments",
+  "/apps",
 ];
 
 const ADMIN_API_PREFIXES = [
@@ -133,6 +136,8 @@ const ADMIN_API_PREFIXES = [
   "/api/orchestrator",
   "/api/agents/enrollment-tokens",
   "/api/infrastructure",
+  "/api/industries",
+  "/api/services",
 ];
 
 /**
@@ -491,6 +496,7 @@ export const config = {
     "/settings/:path*",
     "/onboarding/:path*",
     "/deployments/:path*",
+    "/apps/:path*",
     "/infrastructure/:path*",
     "/api/:path*",
   ],

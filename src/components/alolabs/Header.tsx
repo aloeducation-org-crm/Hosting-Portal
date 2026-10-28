@@ -130,6 +130,13 @@ const servicesSections: MegaMenuSection[] = [
 
 const exploreSections: MegaMenuSection[] = [
   {
+    title: 'Solutions',
+    items: [
+      { label: 'Industry solutions', href: '/industries', icon: Building2, description: '20 industry software system families, feature by feature' },
+      { label: 'Service catalog', href: '/services', icon: Boxes, description: 'What we build and run — deliverables, prerequisites, honest exclusions' },
+    ],
+  },
+  {
     title: 'About',
     items: [
       { label: 'Our story', href: '/about', icon: BookMarked, description: 'How we got here and where we\'re going' },
@@ -351,6 +358,14 @@ function MobileMenuContent({ onClose }: { onClose: () => void }) {
           Pricing
         </a>
 
+        <a href="/industries" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
+          Industries
+        </a>
+
+        <a href="/services" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
+          Service catalog
+        </a>
+
         <MobileAccordion title="Services" sections={servicesSections} onClose={onClose} />
         <MobileAccordion title="Explore" sections={exploreSections} onClose={onClose} />
 
@@ -432,6 +447,9 @@ export default function Header() {
           <nav className="hidden lg:flex items-center gap-1" aria-label="Main navigation">
             <a href="/pricing" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
               Pricing
+            </a>
+            <a href="/industries" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
+              Industries
             </a>
             <NavDropdown label="Services" sections={servicesSections} columns={3} />
             <NavDropdown label="Explore" sections={exploreSections} columns={3} />
