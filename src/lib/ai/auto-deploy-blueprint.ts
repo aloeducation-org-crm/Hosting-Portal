@@ -478,8 +478,20 @@ export async function architectAutoDeployPlan(
       ? `3. Bind GitHub repository (${normalizedRepo}@${normalizedBranch}) with HMAC-SHA256 push webhook auto-deploy`
       : `3. Register zero-terminal release target (${workloadCategory.toUpperCase()} / ${framework}) ready for Git or one-click deploy`,
     `4. Execute allowlisted argv build pipeline (${[installCmd, buildCmd].filter(Boolean).join(" -> ") || "direct release staging"})`,
-    `5. Configure Nginx reverse proxy (${normalizedDomain} -> 127.0.0.1:${port}) + PM2 supervision & verify HTTP 200 on ${healthPath}`,
   ];
+
+  if (framework === "nextjs") {
+    // A standalone bundle boots without these and then 404s every asset, so the
+    // staging step is part of the contract rather than an optimization.
+    steps.push(
+      `5. Stage .next/static and public into the standalone bundle, then supervise \`${startCmd}\` as argv ` +
+        `(never \`| tee\` or another shell pipeline - the supervisor must own the process it restarts)`,
+    );
+  }
+
+  steps.push(
+    `${steps.length + 1}. Configure Nginx reverse proxy (${normalizedDomain} -> 127.0.0.1:${port}) + PM2 supervision & verify HTTP 200 on ${healthPath}`,
+  );
 
   const shareableBriefYaml = generateShareableProjectBriefYaml({
     projectName: input.appName?.trim() || derivedSlug,

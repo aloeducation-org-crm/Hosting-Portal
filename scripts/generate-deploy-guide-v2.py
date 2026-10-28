@@ -1465,18 +1465,18 @@ td code {
                 <span class="code-file">~/alolabs-platform</span>
             </div>
             <div class="code-body"><span class="cmt"># Run the production build (standalone output mode)</span>
-<span class="fn">bun</span> run build
+<span class="fn">npm</span> run build
 
-<span class="cmt"># The build script performs these steps:</span>
-<span class="cmt"># 1. next build            - Builds Next.js in standalone mode</span>
-<span class="cmt"># 2. cp -r .next/static    - Copies static assets into standalone</span>
-<span class="cmt"># 3. cp -r public          - Copies public files into standalone</span>
+<span class="cmt"># next build does NOT copy the asset trees into the bundle. Do it explicitly,</span>
+<span class="cmt"># or the server boots and every /_next/static/** request 404s.</span>
+<span class="fn">cp</span> <span class="flag">-r</span> .next/static .next/standalone/.next/static
+<span class="fn">cp</span> <span class="flag">-r</span> public .next/standalone/public
 
-<span class="cmt"># Verify the standalone build was created</span>
+<span class="cmt"># Verify the bundle landed at the tracing root (not in a nested directory):</span>
 <span class="fn">ls</span> <span class="flag">-la</span> .next/standalone/server.js
 
-<span class="cmt"># Quick smoke test - verify the production server starts</span>
-<span class="var">NODE_ENV</span>=production <span class="fn">bun</span> .next/standalone/server.js &amp;
+<span class="cmt"># Quick smoke test - the standalone server is a Node script; run it with node</span>
+<span class="var">PORT</span>=3000 <span class="var">NODE_ENV</span>=production <span class="fn">node</span> .next/standalone/server.js &amp;
 <span class="fn">sleep</span> <span class="num">3</span>
 <span class="fn">curl</span> <span class="flag">-s</span> <span class="flag">-o</span> /dev/null <span class="flag">-w</span> <span class="str">"%{http_code}"</span> http://localhost:3000
 <span class="cmt"># Should return: 200</span>
@@ -1712,11 +1712,15 @@ td code {
                 </div>
                 <span class="code-file">ecosystem.config.cjs</span>
             </div>
-            <div class="code-body">module.exports = {
+            <div class="code-body"><span class="cmt">// NOTE: `script` is an argv entry, not a shell string. Never point PM2 at</span>
+<span class="cmt">// `npm start` if that script uses pipes/tee: the supervisor then watches the</span>
+<span class="cmt">// pipe, not the server, and a crash becomes a silent restart loop.</span>
+module.exports = {
   apps: [{
     name: <span class="str">'alolabs-platform'</span>,
     script: <span class="str">'./.next/standalone/server.js'</span>,
     cwd: <span class="str">'/home/alolabs/alolabs-platform'</span>,
+    interpreter: <span class="str">'node'</span>,
     instances: <span class="num">1</span>,
     exec_mode: <span class="str">'fork'</span>,
     env: {
@@ -1753,8 +1757,12 @@ td code {
 <span class="cmt"># Start the application with PM2</span>
 <span class="fn">pm2 start</span> ecosystem.config.cjs
 
-<span class="cmt"># Check application status (should show "online")</span>
+<span class="cmt"># Check application status (should show "online", restarts should stay at 0)</span>
 <span class="fn">pm2 status</span>
+<span class="fn">pm2 logs</span> alolabs-platform <span class="flag">--lines</span> <span class="num">30</span> <span class="flag">--nostream</span>
+
+<span class="cmt"># Health-gate before calling the deploy done: 000 means nothing is listening</span>
+<span class="fn">curl</span> <span class="flag">-s</span> <span class="flag">-o</span> /dev/null <span class="flag">-w</span> <span class="str">"%{http_code}\n"</span> http://127.0.0.1:3000
 
 <span class="cmt"># Save the PM2 process list for resurrection on reboot</span>
 <span class="fn">pm2 save</span>

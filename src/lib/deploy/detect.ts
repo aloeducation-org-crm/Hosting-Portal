@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readFile, stat, readdir } from "node:fs/promises";
 import type { DetectionResult } from "./types";
+import { resolveNodeStartCommand } from "./start-command";
 
 /**
  * Framework/build detection from repository manifests.
@@ -260,10 +261,22 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
       result.workloadCategory = "web";
       result.framework = "nextjs";
       result.buildCmd = script("build", "npm run build");
-      result.startCmd = scripts.start ? script("start", "") : "node .next/standalone/server.js";
       const nextConfig = (await fs.read("next.config.ts")) || (await fs.read("next.config.js")) || (await fs.read("next.config.mjs")) || "";
-      if (/standalone/.test(nextConfig)) result.outputDir = ".next/standalone";
+      const standalone = /standalone/.test(nextConfig);
+      if (standalone) result.outputDir = ".next/standalone";
       else result.outputDir = ".next";
+
+      // `scripts.start` is repository-controlled and is frequently a shell
+      // pipeline (`... | tee server.log`) or bound to a runtime that may not be
+      // installed. Resolve it to argv instead of trusting it verbatim.
+      const resolved = resolveNodeStartCommand({ startScript: scripts.start ?? null, standalone });
+      result.startCmd = resolved.startCmd;
+      warnings.push(...resolved.warnings);
+      if (standalone) {
+        reasons.push(`standalone start resolved to "${resolved.startCmd}"`);
+        warnings.push("Next.js standalone does not include .next/static or public; the deploy step must copy both into the bundle");
+      }
+
       result.confidence = scripts.build ? "high" : "medium";
       result.ambiguous = true; // a server process, not a static bundle -> operator must confirm service manager
       warnings.push("Next.js needs a long-running service; confirm serviceManager (pm2/systemd) and static asset copy before deploying");

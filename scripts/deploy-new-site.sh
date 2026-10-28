@@ -21,11 +21,19 @@ PROJECTS_ROOT="${ALO_PROJECTS_DIR:-$HOME/projects}"
 PUBLIC_IP="${ALO_PUBLIC_IP:-103.231.239.79}"
 RESERVED_PORT_PORTAL=3051
 
+HEALTH_PATH="${ALO_HEALTH_PATH:-${4:-/}}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+RESOLVER="${SCRIPT_DIR}/resolve-start-entry.mjs"
+
+fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
 if [[ -z "$APP" || -z "$DOMAIN" || -z "$PORT_ARG" ]]; then
-  echo "Usage: $0 <app-name> <domain> <port|auto>" >&2
-  echo "Example: $0 blog blog.alolabs.net 3062" >&2
+  echo "Usage: $0 <app-name> <domain> <port|auto> [health-path]" >&2
+  echo "Example: $0 blog blog.alolabs.net 3062 /api/health" >&2
   exit 1
 fi
+
+[[ -f "$RESOLVER" ]] || fail "missing $RESOLVER (part of this repository; re-clone scripts/)"
 
 # 1. Strict input validation (prevents path traversal & Nginx directive injection)
 if [[ ! "$APP" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$ ]]; then
@@ -90,24 +98,81 @@ fi
 
 echo "Deploying $APP -> $DOMAIN on 127.0.0.1:$PORT"
 
-# 3. Install dependencies & build project cleanly
+# 3. Verify the toolchain the project actually asks for, then build.
+#    A bun/pnpm lockfile is a real provisioning requirement: npm ci would ignore
+#    it and silently drift from the committed dependency tree.
 cd "$PROJECT_DIR"
-if [[ -f package-lock.json ]]; then
-  npm ci
+if [[ -f bun.lock || -f bun.lockb ]]; then
+  command -v bun >/dev/null 2>&1 || fail \
+    "$APP is locked with bun ($( [[ -f bun.lock ]] && echo bun.lock || echo bun.lockb )) but 'bun' is not installed.
+       Install it on the host:  curl -fsSL https://bun.sh/install | bash
+       (running 'npm ci' instead would bypass the committed lockfile)"
+  bun install --frozen-lockfile
+  bun run build
+elif [[ -f pnpm-lock.yaml ]]; then
+  command -v pnpm >/dev/null 2>&1 || fail "$APP is locked with pnpm but pnpm is not installed (npm i -g pnpm)"
+  pnpm install --frozen-lockfile
+  pnpm run build
+elif [[ -f yarn.lock ]]; then
+  command -v yarn >/dev/null 2>&1 || fail "$APP is locked with yarn but yarn is not installed"
+  yarn install --frozen-lockfile
+  yarn run build
 else
-  npm install
+  if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
+  npm run build
 fi
-npm run build
 
-# 4. Start or zero-downtime reload with PM2
+# 4. Resolve an argv start command against the build that actually exists.
+#    `scripts.start` is written for a human shell (pipes, `tee`, bun...) and
+#    `pm2 start npm -- start` cannot supervise a pipeline: the process PM2
+#    watches exits with tee's status, and a missing runtime or a nested
+#    standalone bundle turns into a silent crash-loop. Refuse to start instead.
+# PM2 only parses *.config.cjs as an ecosystem config; any other name is treated
+# as the app script itself (which registers an app named after the file).
+ECOSYSTEM="${PROJECT_DIR}/ecosystem.alo.config.cjs"
+if ! RESOLVE_OUT="$(node "$RESOLVER" --dir "$PROJECT_DIR" --port "$PORT" --name "$APP" \
+                      --stage-assets --write-ecosystem "$ECOSYSTEM" 2>&1)"; then
+  printf '%s\n' "$RESOLVE_OUT" | sed 's/^/  /' >&2
+  fail "$APP has no runnable start entry point; refusing to (re)start it with a command that will crash-loop"
+fi
+printf '%s\n' "$RESOLVE_OUT" | sed 's/^/  /'
+
+# 5. Start from the generated ecosystem file. `pm2 restart` would keep the
+#    ORIGINAL script (`npm`), so an app previously started as
+#    `pm2 start npm -- start` must be deleted and re-created to pick up argv.
 if pm2 describe "$APP" >/dev/null 2>&1; then
-  PORT="$PORT" HOSTNAME="127.0.0.1" pm2 restart "$APP" --update-env
-else
-  PORT="$PORT" HOSTNAME="127.0.0.1" pm2 start npm --name "$APP" -- start
+  pm2 delete "$APP" >/dev/null 2>&1 || true
+fi
+pm2 start "$ECOSYSTEM"
+if ! pm2 describe "$APP" >/dev/null 2>&1; then
+  fail "PM2 did not register '${APP}'; the ecosystem file (${ECOSYSTEM}) was not parsed as a config"
 fi
 pm2 save
 
-# 5. Atomic Nginx vhost write + test + rollback-on-failure
+# 6. Health-gate the activation. 000 here used to be printed next to
+#    "Deployed successfully", which is how two dead sites stayed "deployed".
+http_code() {
+  # `curl -w` already prints 000 on failure; appending another "000" produced
+  # the unreadable "HTTP 000000" that made this log useless on 2026-10-27.
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null)" || true
+  printf '%s' "${code:-000}"
+}
+CODE="$(http_code)"
+for _ in $(seq 1 30); do
+  [[ "$CODE" =~ ^[23] ]] && break
+  sleep 1
+  CODE="$(http_code)"
+done
+if [[ ! "$CODE" =~ ^[23] ]]; then
+  echo "Error: $APP did not become healthy at http://127.0.0.1:${PORT}${HEALTH_PATH} (last HTTP $CODE)" >&2
+  pm2 describe "$APP" >&2 || true
+  pm2 logs "$APP" --lines 40 --nostream 2>&1 | tail -n 40 >&2 || true
+  fail "activation failed; Nginx was left untouched so the previous release keeps serving"
+fi
+echo "Local health: HTTP $CODE on http://127.0.0.1:${PORT}${HEALTH_PATH}"
+
+# 7. Atomic Nginx vhost write + test + rollback-on-failure
 NGINX_AVAIL="/etc/nginx/sites-available/${DOMAIN}"
 NGINX_ENABLED="/etc/nginx/sites-enabled/${DOMAIN}"
 NGINX_BACKUP=""
@@ -159,12 +224,17 @@ if ! sudo nginx -t; then
   exit 1
 fi
 
-[[ -n "$NGINX_BACKUP" && -f "$NGINX_BACKUP" ]] && rm -f "$NGINX_BACKUP"
+# `[[ ... ]] && rm` returns 1 when the test is false, which `set -e` treats as a
+# fatal error - keep it as an explicit branch.
+if [[ -n "$NGINX_BACKUP" && -f "$NGINX_BACKUP" ]]; then
+  rm -f "$NGINX_BACKUP"
+fi
 sudo systemctl reload nginx
 
 echo ""
-echo "Deployed successfully! Next steps:"
+echo "Deployed $APP ($(printf '%s' "$RESOLVE_OUT" | awk -F= '/^entry=/{print $2}')) -> $DOMAIN on 127.0.0.1:$PORT (verified HTTP $CODE)"
+echo "Next steps:"
 echo "  1. Add Cloudflare DNS: A record '${DOMAIN}' -> ${PUBLIC_IP} (Proxied)"
-echo "  2. Local health check: curl -I http://127.0.0.1:${PORT}"
+echo "  2. Local health check: curl -I http://127.0.0.1:${PORT}${HEALTH_PATH}"
 echo "  3. Edge HTTPS check:   curl -I https://${DOMAIN}"
 echo "  4. Optional Strict TLS: sudo certbot --nginx -d ${DOMAIN} (then set Cloudflare SSL to Full Strict)"

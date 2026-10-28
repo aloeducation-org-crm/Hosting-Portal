@@ -44,6 +44,28 @@ describe("framework detection from real-shaped manifests", () => {
     assertCommandsSafe(d);
   });
 
+  it("does not propagate a bun+tee start script into the deployment config", async () => {
+    // Verbatim shape of the MarketingOS / ALO-LEARNING manifests that crash-looped
+    // under PM2 on 2026-10-27.
+    const d = await detectFramework(memoryReader({
+      "package.json": pkg({
+        dependencies: { next: "16.0.0", react: "19.0.0" },
+        scripts: {
+          build: "next build",
+          start: "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+        },
+      }),
+      "pnpm-lock.yaml": "",
+      "next.config.ts": "export default { output: 'standalone' }",
+    }));
+    expect(d.framework).toBe("nextjs");
+    expect(d.startCmd).toBe("node .next/standalone/server.js");
+    expect(d.startCmd).not.toMatch(/bun|tee|\|/);
+    expect(d.warnings.join(" ")).toMatch(/shell plumbing/i);
+    expect(d.outputDir).toBe(".next/standalone");
+    assertCommandsSafe(d);
+  });
+
   it("detects Vite + yarn and produces a static dist bundle", async () => {
     const d = await detectFramework(memoryReader({
       "package.json": pkg({ devDependencies: { vite: "^6" }, scripts: { build: "vite build", test: "vitest run" } }),

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { detectFramework, fsReader } from "./detect";
+import { NEXT_STANDALONE_ASSETS } from "./start-command";
 import { validateDeployConfig, parseCommand, filterBuildEnv, resolveConfig } from "./config";
 import {
   releasePath,
@@ -126,13 +127,20 @@ async function packageRelease(
   if (source !== checkoutDir && !source.startsWith(checkoutDir + path.sep)) {
     throw new Error("outputDir escapes checkout");
   }
+  // The checkout's own build cache is never published... unless it *is* the
+  // selected output. The old filter dropped every directory named `.next`,
+  // which silently deleted `.next/static` from inside a standalone bundle and
+  // left deployed sites with working HTML but 404s on every asset.
+  const checkoutBuildCache = path.join(checkoutDir, ".next");
+  const skipRootCache = source !== checkoutBuildCache;
   await fs.mkdir(releaseDir, { recursive: true });
   await fs.cp(source, releaseDir, {
     recursive: true,
     errorOnExist: false,
     filter: (src) => {
       const name = path.basename(src);
-      if (name === ".git" || name === "node_modules" || name === ".next" || name === "vendor") return false;
+      if (name === ".git" || name === "node_modules" || name === "vendor") return false;
+      if (skipRootCache && src === checkoutBuildCache) return false;
       // .env files can contain real values; they must not be published as static assets.
       if (/^\.env(\.[A-Za-z0-9_-]+)?$/.test(name) && name !== ".env.example") return false;
       return true;
@@ -158,6 +166,82 @@ export class DeploymentFailure extends Error {
     super(message);
     this.name = "DeploymentFailure";
   }
+}
+
+async function isFile(file: string): Promise<boolean> {
+  const info = await fs.stat(/*turbopackIgnore: true*/ file).catch(() => null);
+  return !!info?.isFile();
+}
+
+/**
+ * Find where `next build` actually put the standalone server.
+ *
+ * Next.js emits `.next/standalone/server.js` only when the output file tracing
+ * root is the project directory. When it infers a workspace root instead (more
+ * than one lockfile above the app), the bundle lands at
+ * `.next/standalone/<subdir>/server.js` and every `node .next/standalone/server.js`
+ * start command dies with MODULE_NOT_FOUND while the build itself exits 0.
+ */
+async function findStandaloneBundle(checkoutDir: string): Promise<string | null> {
+  const direct = path.join(checkoutDir, ".next", "standalone");
+  if (await isFile(path.join(direct, "server.js"))) return ".next/standalone";
+
+  // Walk up to three levels below the bundle for a nested tracing root.
+  async function search(dir: string, rel: string, depth: number): Promise<string | null> {
+    if (depth > 3) return null;
+    const entries = await fs.readdir(/*turbopackIgnore: true*/ dir, { withFileTypes: true }).catch(() => null);
+    if (!entries) return null;
+    if (entries.some((entry) => entry.isFile() && entry.name === "server.js")) return rel;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "node_modules" || entry.name === ".next") continue;
+      const found = await search(path.join(dir, entry.name), `${rel}/${entry.name}`, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  return search(direct, ".next/standalone", 0);
+}
+
+/**
+ * Resolve the standalone output directory and stage the two trees that
+ * `next build` does not copy into it. Returns the output dir relative to the
+ * checkout, which may differ from the configured value for nested bundles.
+ */
+async function prepareNextStandalone(
+  checkoutDir: string,
+  configuredOutputDir: string,
+  log: (level: "INFO" | "WARN" | "ERROR", text: string) => Promise<void>,
+): Promise<string> {
+  const resolved = await findStandaloneBundle(checkoutDir);
+  if (!resolved) {
+    throw new DeploymentFailure(
+      "package",
+      "next build produced no .next/standalone/server.js. " +
+        "Set outputFileTracingRoot to the app directory in next.config so the bundle is emitted at the tracing root.",
+    );
+  }
+  if (resolved.replace(/\/+$/, "") !== configuredOutputDir.replace(/\/+$/, "")) {
+    await log(
+      "WARN",
+      `standalone bundle emitted at ${resolved}/server.js instead of ${configuredOutputDir}/server.js ` +
+        `(output file tracing root was inferred); deploying the resolved bundle - pin outputFileTracingRoot to make this deterministic`,
+    );
+  }
+
+  const bundleDir = path.join(checkoutDir, resolved);
+  for (const asset of NEXT_STANDALONE_ASSETS) {
+    const from = path.join(checkoutDir, asset);
+    const to = path.join(bundleDir, asset);
+    if (await fs.stat(/*turbopackIgnore: true*/ to).catch(() => null)) continue;
+    if (!(await fs.stat(/*turbopackIgnore: true*/ from).catch(() => null))) {
+      await log("WARN", `${asset} is missing from the checkout; the bundle will be served without it`);
+      continue;
+    }
+    await fs.mkdir(path.dirname(to), { recursive: true });
+    await fs.cp(from, to, { recursive: true, errorOnExist: false });
+    await log("INFO", `staged ${asset} into ${resolved} (not copied by next build)`);
+  }
+  return resolved;
 }
 
 export async function runDeployment(deploymentId: string): Promise<void> {
@@ -263,6 +347,13 @@ export async function runDeployment(deploymentId: string): Promise<void> {
     await run("test", config.testCmd, true);
     await run("build", config.buildCmd, true);
 
+    // A standalone Next.js app is only runnable if the bundle exists and carries
+    // its static assets. Resolve both before anything is activated.
+    let effectiveOutputDir = config.outputDir;
+    if (/\.next\/standalone\/?$/.test(effectiveOutputDir)) {
+      effectiveOutputDir = await prepareNextStandalone(checkoutDir, effectiveOutputDir, log);
+    }
+
     await setStage("package");
     releaseDir = releasePath(project.id, sha, deploymentId);
     const marker: ReleaseMarker = {
@@ -273,7 +364,7 @@ export async function runDeployment(deploymentId: string): Promise<void> {
       branch: deployment.branch ?? project.productionBranch,
       createdAt: new Date().toISOString(),
     };
-    const fileCount = await packageRelease(checkoutDir, config.outputDir, releaseDir, marker);
+    const fileCount = await packageRelease(checkoutDir, effectiveOutputDir, releaseDir, marker);
     await log("INFO", `release packaged at ${releaseDir} (${fileCount} top-level entries)`);
 
     await setStage("activate");
