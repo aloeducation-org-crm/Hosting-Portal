@@ -250,6 +250,7 @@ model User {
   ciPipelines        CiPipeline[]
   firewallRules      FirewallRule[]
   storageBuckets     StorageBucket[]
+  documentFiles      DocumentFile[]
   orders             Order[]
   emailCampaigns     EmailCampaign[]
   alertRules         AlertRule[]
@@ -1572,7 +1573,12 @@ model StorageBucket {
   sizeBytes   BigInt   @default(0)
   objectCount Int      @default(0)
   isActive    Boolean  @default(true)
-  userId      String?
+  // §12 logical storage pools share this table: pool rows use kind "pool"
+  // (name = STUDENT_STORAGE | PARTNER_STORAGE | ...), buckets stay "bucket".
+  kind        String   @default("bucket") // bucket | pool
+  quotaBytes  BigInt?  // pool quota; null = unlimited
+  policy      String?  // JSON access policy / metadata for pool rows
+  userId      String?  // creator (pools: null = platform-managed)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -1580,7 +1586,34 @@ model StorageBucket {
 
   @@index([userId])
   @@index([isActive])
+  @@index([kind])
   @@map("storage_buckets")
+}
+
+/// §13 document management — one row per stored file version. Files live under
+/// a pool's backend path (never a public static directory); every access is
+/// policy-checked and audited. Grouping key for "latest version" listings is
+/// (poolKey, ownerId, category, filename).
+model DocumentFile {
+  id             String    @id @default(uuid())
+  poolKey        String    // STUDENT_STORAGE | PARTNER_STORAGE | ...
+  ownerId        String?    // uploading user (tenant ownership)
+  organizationId String?    // owning organization when tenant-scoped
+  category       String    // validated against the pool's category list
+  filename       String    // sanitized display name (no path components)
+  storagePath    String    // path relative to the pool backend (never public)
+  sizeBytes      BigInt
+  sha256         String    // integrity hash computed on upload
+  version        Int       @default(1)
+  contentType    String
+  createdAt      DateTime  @default(now())
+
+  owner User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([poolKey, ownerId])
+  @@index([organizationId])
+  @@index([category])
+  @@map("document_files")
 }
 
 // ─── Orders ────────────────────────────────────────────────────────────────────

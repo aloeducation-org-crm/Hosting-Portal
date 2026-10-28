@@ -4,6 +4,7 @@ import { createPrismaClient } from "../src/lib/db";
 import { BUILTIN_APPS } from "../src/lib/app-center";
 import { INDUSTRY_DEFINITIONS } from "../src/lib/factory/industry-definitions";
 import { SERVICE_DEFINITIONS, SERVICE_INDUSTRY_MAPPINGS } from "../src/lib/factory/service-definitions";
+import { POOL_DEFINITIONS } from "../src/lib/storage-pools";
 
 const prisma = createPrismaClient();
 
@@ -669,6 +670,41 @@ async function seedAppCenter(): Promise<void> {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
+async function seedStoragePools(): Promise<void> {
+  console.log("\n🗄️  Seeding storage pools (section 12)...");
+
+  const table = await prisma.$queryRaw<Array<{ name: string }>>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'storage_buckets'
+  `;
+  if (!Array.isArray(table) || table.length === 0) {
+    console.log("   ⚠️  storage_buckets table missing — run the deploy applier first; skipping pool seed");
+    return;
+  }
+
+  for (const def of POOL_DEFINITIONS) {
+    const policy = JSON.stringify({
+      label: def.label,
+      description: def.description,
+      categories: def.categories,
+      managedBy: "platform",
+    });
+    const existing = await prisma.storageBucket.findUnique({ where: { name: def.key } });
+    if (existing) {
+      if (existing.kind !== "pool") {
+        console.log(`   ⚠️  ${def.key} exists as a non-pool row — leaving it untouched`);
+        continue;
+      }
+      await prisma.storageBucket.update({ where: { id: existing.id }, data: { policy } });
+    } else {
+      await prisma.storageBucket.create({
+        data: { name: def.key, kind: "pool", provider: "local", isActive: true, policy },
+      });
+    }
+  }
+  const pools = await prisma.storageBucket.count({ where: { kind: "pool" } });
+  console.log(`   ✅ ${pools} storage pool(s) ready`);
+}
+
 async function seedSoftwareFactory(): Promise<void> {
   console.log("\n🏭 Seeding Software Factory registries...");
 
@@ -779,6 +815,7 @@ async function main() {
   await seedServer();
   await seedAppCenter();
   await seedSoftwareFactory();
+  await seedStoragePools();
 
   const [permCount, roleCount, userCount, planCount, pipelineCount, alertCount, appCount, installCount, industryCount, serviceCount, mappingCount] =
     await Promise.all([

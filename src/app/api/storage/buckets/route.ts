@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await requireSession(request);
 
-    const where: any = {};
+    const where: any = { kind: "bucket" };
     if (auth.role !== ROLES.SUPER_ADMIN) {
       where.userId = auth.id;
     }
