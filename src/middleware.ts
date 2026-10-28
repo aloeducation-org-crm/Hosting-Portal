@@ -138,6 +138,7 @@ const ADMIN_API_PREFIXES = [
   "/api/infrastructure",
   "/api/industries",
   "/api/services",
+  "/api/providers",
 ];
 
 /**
