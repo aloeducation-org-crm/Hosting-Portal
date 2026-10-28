@@ -11,11 +11,15 @@ function handleErr(e: unknown): NextResponse {
   return NextResponse.json(apiError("Internal server error"), { status: 500 });
 }
 
-/** Revoke an agent. Its key stops authenticating on the next request. */
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+/**
+ * Revoke an agent. Its key stops authenticating on the next request.
+ * The `:slug` segment carries the server agent's id here (AI-agent routes
+ * carry a slug); one param name per level is a Next.js constraint.
+ */
+export async function POST(request: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   try {
     const admin = await requireAdmin(request);
-    const { id } = await params;
+    const { slug: id } = await params;
     const result = await revokeAgent(id, { id: admin.id, email: admin.email, role: admin.role });
     if (!result.ok) return NextResponse.json(apiError(result.reason, "CONFLICT", undefined, 409), { status: 409 });
     return NextResponse.json(apiSuccess({ agentId: id, status: "revoked" }, "Agent revoked"));

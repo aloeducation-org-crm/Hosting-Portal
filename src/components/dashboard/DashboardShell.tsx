@@ -48,10 +48,16 @@ import {
   Cpu,
   Wand2,
   Network,
+  LayoutGrid,
+  Boxes,
+  Package,
+  Activity,
+  Archive,
 } from "lucide-react";
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { label: "App Center", href: "/apps", icon: LayoutGrid },
   { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },
   { label: "AI Auto-Deploy", href: "/ai/auto-deploy", icon: Sparkles },
@@ -60,6 +66,8 @@ const clientNavItems = [
   { label: "Domains", href: "/dashboard/domains", icon: Globe },
   { label: "Databases", href: "/databases", icon: Database },
   { label: "Storage", href: "/storage", icon: HardDrive },
+  { label: "Backups", href: "/dashboard/backups", icon: Archive },
+  { label: "Monitoring", href: "/dashboard/monitoring", icon: Activity },
   { label: "AI Builder", href: "/ai/builder", altPrefix: "/dashboard/agents", icon: Bot },
   { label: "AI Automations", href: "/ai/automations", icon: Zap },
   { label: "Self-Hosted AI", href: "/ai/self-hosted", icon: Server },
@@ -76,6 +84,8 @@ const adminNavItems = [
   { label: "Unified Infrastructure", href: "/infrastructure", altPrefix: "/dashboard/infrastructure", icon: Network },
   { label: "Servers & Nodes", href: "/servers", altPrefix: "/dashboard/servers", icon: Server },
   { label: "Hosting Plans", href: "/plans", altPrefix: "/dashboard/plans", icon: Layers },
+  { label: "Industry Registry", href: "/dashboard/industries", altPrefix: "/dashboard/industries", icon: Boxes },
+  { label: "Service Catalog", href: "/dashboard/services", altPrefix: "/dashboard/services", icon: Package },
   { label: "Audit Logs", href: "/audit", altPrefix: "/dashboard/audit", icon: FileText },
 ];
 

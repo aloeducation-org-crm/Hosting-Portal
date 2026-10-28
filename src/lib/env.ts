@@ -59,6 +59,14 @@ const envSchema = z.object({
   CLOUDFLARE_API_TOKEN: z.string().optional().default(""),
   CLOUDFLARE_ZONE_ID: z.string().optional().default(""),
 
+  // Hostinger public API (Server C)
+  HOSTINGER_API_TOKEN: z.string().optional().default(""),
+
+  // cPanel UAPI (Server D) — Authorization: cpanel <user>:<token> over :2083
+  CPANEL_HOST: z.string().optional().default(""),
+  CPANEL_USER: z.string().optional().default(""),
+  CPANEL_TOKEN: z.string().optional().default(""),
+
   // Encryption
   APP_ENCRYPTION_KEY: z.string().default("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
 

@@ -346,6 +346,16 @@ export async function authenticateAgentRequest(opts: {
 export interface HeartbeatPayload {
   version?: string;
   capabilities?: string[];
+  inventory?: {
+    hostname?: string;
+    platform?: string;
+    arch?: string;
+    kernel?: string;
+    cpuCores?: number;
+    cpuModel?: string;
+    ramGb?: number;
+    uptimeSeconds?: number;
+  } | null;
   metrics?: {
     cpuPercent?: number | null;
     memoryUsedMb?: number | null;
@@ -397,6 +407,8 @@ export async function recordHeartbeat(agentId: string, payload: HeartbeatPayload
   if (agent.serverId) {
     const memPct = m.memoryTotalMb && m.memoryUsedMb ? (m.memoryUsedMb / m.memoryTotalMb) * 100 : null;
     const diskPct = m.diskTotalGb && m.diskUsedGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+    const inv = payload.inventory ?? null;
+    const osLabel = inv ? [inv.platform, inv.arch, inv.kernel].filter(Boolean).join(" ") : "";
     await db.server
       .update({
         where: { id: agent.serverId },
@@ -406,6 +418,11 @@ export async function recordHeartbeat(agentId: string, payload: HeartbeatPayload
           ...(memPct !== null ? { memoryUsage: memPct } : {}),
           ...(diskPct !== null ? { diskUsage: diskPct } : {}),
           ...(num(m.uptimeSeconds) !== null ? { uptime: Math.round(num(m.uptimeSeconds)!) } : {}),
+          ...(num(m.diskTotalGb) !== null ? { diskGb: Math.round(num(m.diskTotalGb)!) } : {}),
+          // Static inventory reported by the agent — only fields it actually sent.
+          ...(osLabel ? { os: osLabel.slice(0, 120) } : {}),
+          ...(inv && typeof inv.cpuCores === "number" ? { cpuCores: inv.cpuCores } : {}),
+          ...(inv && typeof inv.ramGb === "number" ? { ramGb: inv.ramGb } : {}),
         },
       })
       .catch(() => {});

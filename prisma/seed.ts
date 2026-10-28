@@ -1,6 +1,10 @@
 import { UserRole } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
 import { createPrismaClient } from "../src/lib/db";
+import { BUILTIN_APPS } from "../src/lib/app-center";
+import { INDUSTRY_DEFINITIONS } from "../src/lib/factory/industry-definitions";
+import { SERVICE_DEFINITIONS, SERVICE_INDUSTRY_MAPPINGS } from "../src/lib/factory/service-definitions";
+import { POOL_DEFINITIONS } from "../src/lib/storage-pools";
 
 const prisma = createPrismaClient();
 
@@ -516,7 +520,285 @@ async function seedServer() {
   console.log("   ✅ Server registered: hosting.alolabs.net (Ubuntu 22.04, 15GB RAM)");
 }
 
+// ─── App Center ──────────────────────────────────────────────────────────────
+
+/**
+ * Seeds the App Center: the shared catalog (one definition per app) plus two
+ * demo companies that reuse the SAME apps with different branding and settings
+ * — the multi-tenant story in miniature.
+ *
+ * Guarded by a table check so `db:seed` still succeeds on a database that has
+ * not received the App Center migration yet (the deploy applier runs it later,
+ * and GET /api/apps self-seeds the catalog on first read in production).
+ */
+async function seedAppCenter(): Promise<void> {
+  console.log("\n🧩 Seeding App Center catalog...");
+
+  const table = await prisma.$queryRaw<Array<{ name: string }>>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_definitions'
+  `;
+  if (!Array.isArray(table) || table.length === 0) {
+    console.log(
+      "   ⚠️  app_definitions table missing — run `npm run db:sync` (deploy applier) first; skipping App Center seed",
+    );
+    return;
+  }
+
+  // 1. The catalog: each app created once, upserted by slug so re-seeds are safe.
+  for (const app of BUILTIN_APPS) {
+    await prisma.appDefinition.upsert({
+      where: { slug: app.slug },
+      update: {
+        name: app.name,
+        summary: app.summary,
+        description: app.description,
+        category: app.category,
+        icon: app.icon,
+        accentColor: app.accentColor,
+        version: app.version,
+        route: app.route,
+        status: "active",
+        configSchema: app.configSchema,
+        defaultSettings: app.defaultSettings,
+      },
+      create: {
+        slug: app.slug,
+        name: app.name,
+        summary: app.summary,
+        description: app.description,
+        category: app.category,
+        icon: app.icon,
+        accentColor: app.accentColor,
+        version: app.version,
+        route: app.route,
+        status: "active",
+        isSystem: true,
+        configSchema: app.configSchema,
+        defaultSettings: app.defaultSettings,
+        createdBy: "system",
+      },
+    });
+  }
+  console.log(`   ✅ Catalog ready: ${BUILTIN_APPS.length} app definitions`);
+
+  // 2. A second demo company so the reuse story is visible out of the box.
+  const client = await prisma.user.findUnique({ where: { email: "client@alolabs.net" } });
+  if (!client) {
+    console.log("   ⚠️  client@alolabs.net not found — skipping demo company installs");
+    return;
+  }
+
+  const acme = await prisma.organization.upsert({
+    where: { slug: "acme-cloud" },
+    update: { name: "Acme Cloud Apps", ownerId: client.id },
+    create: {
+      name: "Acme Cloud Apps",
+      slug: "acme-cloud",
+      ownerId: client.id,
+      customDomain: "apps.acme.example",
+    },
+  });
+
+  await prisma.membership.upsert({
+    where: { userId_organizationId: { userId: client.id, organizationId: acme.id } },
+    update: { role: "OWNER" },
+    create: {
+      userId: client.id,
+      organizationId: acme.id,
+      role: "OWNER",
+      acceptedAt: new Date(),
+    },
+  });
+
+  const aloLabs = await prisma.organization.findUnique({ where: { slug: "alo-labs" } });
+
+  // 3. Install the SAME definitions into both companies with per-company
+  //    branding and settings — nothing is shared but the catalog row.
+  const installs: Array<{
+    slug: string;
+    organizationId: string;
+    installedBy: string;
+    branding: Record<string, unknown>;
+    settings: Record<string, unknown>;
+  }> = [];
+  const push = (
+    slug: string,
+    organizationId: string,
+    installedBy: string,
+    branding: Record<string, unknown>,
+    settings: Record<string, unknown>,
+  ) => installs.push({ slug, organizationId, installedBy, branding, settings });
+
+  if (aloLabs) {
+    push("accounting", aloLabs.id, aloLabs.ownerId, { name: "ALO Books", accentColor: "#E8501A" }, { currency: "USD", fiscalYearStart: "July", autoInvoice: true });
+    push("crm", aloLabs.id, aloLabs.ownerId, { name: "ALO Sales Pipeline", accentColor: "#2563EB" }, { leadScoring: true, pipelineName: "Hosting Deals", autoInvoice: true });
+    push("website", aloLabs.id, aloLabs.ownerId, {}, { autoSsl: true, staging: true });
+    push("ai", aloLabs.id, aloLabs.ownerId, {}, { provider: "Anthropic", autoApprove: false });
+  }
+  push("accounting", acme.id, client.id, { name: "Acme Ledger", accentColor: "#059669" }, { currency: "EUR", fiscalYearStart: "January", autoInvoice: false });
+  push("crm", acme.id, client.id, { name: "Acme Contacts", accentColor: "#7C3AED" }, { leadScoring: false, pipelineName: "Acme Opportunities", autoInvoice: false });
+  push("helpdesk", acme.id, client.id, { name: "Acme Support", accentColor: "#DC2626" }, { slaHours: 24, cannedReplies: true, autoInvoice: false });
+  push("documents", acme.id, client.id, {}, { maxUploadMb: 250, versioning: true });
+
+  for (const install of installs) {
+    const def = await prisma.appDefinition.findUnique({ where: { slug: install.slug } });
+    if (!def) continue;
+    await prisma.companyApp.upsert({
+      where: {
+        appId_organizationId: { appId: def.id, organizationId: install.organizationId },
+      },
+      update: {
+        branding: install.branding,
+        settings: install.settings,
+        enabled: true,
+        installedBy: install.installedBy,
+      },
+      create: {
+        appId: def.id,
+        organizationId: install.organizationId,
+        installedBy: install.installedBy,
+        enabled: true,
+        branding: install.branding,
+        settings: install.settings,
+      },
+    });
+  }
+  console.log(
+    `   ✅ Demo installs ready: ${installs.length} across ${aloLabs ? 2 : 1} companies (shared catalog, per-company branding)`,
+  );
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
+
+async function seedStoragePools(): Promise<void> {
+  console.log("\n🗄️  Seeding storage pools (section 12)...");
+
+  const table = await prisma.$queryRaw<Array<{ name: string }>>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'storage_buckets'
+  `;
+  if (!Array.isArray(table) || table.length === 0) {
+    console.log("   ⚠️  storage_buckets table missing — run the deploy applier first; skipping pool seed");
+    return;
+  }
+
+  for (const def of POOL_DEFINITIONS) {
+    const policy = JSON.stringify({
+      label: def.label,
+      description: def.description,
+      categories: def.categories,
+      managedBy: "platform",
+    });
+    const existing = await prisma.storageBucket.findUnique({ where: { name: def.key } });
+    if (existing) {
+      if (existing.kind !== "pool") {
+        console.log(`   ⚠️  ${def.key} exists as a non-pool row — leaving it untouched`);
+        continue;
+      }
+      await prisma.storageBucket.update({ where: { id: existing.id }, data: { policy } });
+    } else {
+      await prisma.storageBucket.create({
+        data: { name: def.key, kind: "pool", provider: "local", isActive: true, policy },
+      });
+    }
+  }
+  const pools = await prisma.storageBucket.count({ where: { kind: "pool" } });
+  console.log(`   ✅ ${pools} storage pool(s) ready`);
+}
+
+async function seedSoftwareFactory(): Promise<void> {
+  console.log("\n🏭 Seeding Software Factory registries...");
+
+  const table = await prisma.$queryRaw<Array<{ name: string }>>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'industry_systems'
+  `;
+  if (!Array.isArray(table) || table.length === 0) {
+    console.log(
+      "   ⚠️  industry_systems table missing — run `npm run db:sync` (deploy applier) first; skipping factory seed",
+    );
+    return;
+  }
+
+  // 1. Industry System Registry — the 20 families, upserted by slug.
+  for (const ind of INDUSTRY_DEFINITIONS) {
+    const data = {
+      name: ind.name,
+      tagline: ind.tagline,
+      summary: ind.summary,
+      icon: ind.icon,
+      accentFrom: ind.accentFrom,
+      accentTo: ind.accentTo,
+      order: ind.order,
+      status: "published",
+      modules: ind.modules as object[],
+      features: ind.features as object[],
+      challenges: ind.challenges as object[],
+      workflow: ind.workflow as string[],
+      faqs: ind.faqs as object[],
+      reports: ind.reports as string[],
+    };
+    await prisma.industrySystem.upsert({
+      where: { slug: ind.slug },
+      update: data,
+      create: { slug: ind.slug, ...data },
+    });
+  }
+
+  const industryIdBySlug = new Map(
+    (await prisma.industrySystem.findMany({ select: { id: true, slug: true } })).map((r) => [r.slug, r.id]),
+  );
+
+  // 2. Service Catalog — sellable deliverables, never with prices.
+  for (const svc of SERVICE_DEFINITIONS) {
+    const data = {
+      name: svc.name,
+      category: svc.category,
+      summary: svc.summary,
+      description: svc.description,
+      deliverables: svc.deliverables as object[],
+      prerequisites: svc.prerequisites,
+      exclusions: svc.exclusions,
+      requiredApps: svc.requiredApps,
+      priceMode: "quotation",
+      order: svc.order,
+      status: "published",
+    };
+    await prisma.serviceDefinition.upsert({
+      where: { slug: svc.slug },
+      update: data,
+      create: { slug: svc.slug, ...data },
+    });
+  }
+
+  const serviceIdBySlug = new Map(
+    (await prisma.serviceDefinition.findMany({ select: { id: true, slug: true } })).map((r) => [r.slug, r.id]),
+  );
+
+  // 3. §9 applicability map — upserted on the unique (service, industry) pair.
+  let skipped = 0;
+  for (const map of SERVICE_INDUSTRY_MAPPINGS) {
+    const serviceId = serviceIdBySlug.get(map.service);
+    const industryId = industryIdBySlug.get(map.industry);
+    if (!serviceId || !industryId) {
+      skipped++;
+      console.warn(`   ⚠️  unmappable pair: ${map.service} → ${map.industry}`);
+      continue;
+    }
+    await prisma.serviceIndustry.upsert({
+      where: { serviceId_industryId: { serviceId, industryId } },
+      update: { relation: map.relation },
+      create: { serviceId, industryId, relation: map.relation },
+    });
+  }
+
+  const [indCount, svcCount, mapCount] = await Promise.all([
+    prisma.industrySystem.count(),
+    prisma.serviceDefinition.count(),
+    prisma.serviceIndustry.count(),
+  ]);
+  console.log(
+    `   ✅ Factory ready: ${indCount} industry systems, ${svcCount} services, ${mapCount} mappings${skipped ? ` (${skipped} skipped)` : ""}`,
+  );
+}
 
 async function main() {
   console.log("═══════════════════════════════════════════════════════════");
@@ -531,8 +813,11 @@ async function main() {
   await seedCrmPipeline();
   await seedAlertRules();
   await seedServer();
+  await seedAppCenter();
+  await seedSoftwareFactory();
+  await seedStoragePools();
 
-  const [permCount, roleCount, userCount, planCount, pipelineCount, alertCount] =
+  const [permCount, roleCount, userCount, planCount, pipelineCount, alertCount, appCount, installCount, industryCount, serviceCount, mappingCount] =
     await Promise.all([
       prisma.permission.count(),
       prisma.role.count(),
@@ -540,6 +825,11 @@ async function main() {
       prisma.plan.count(),
       prisma.crmPipeline.count(),
       prisma.alertRule.count(),
+      prisma.appDefinition.count().catch(() => 0),
+      prisma.companyApp.count().catch(() => 0),
+      prisma.industrySystem.count().catch(() => 0),
+      prisma.serviceDefinition.count().catch(() => 0),
+      prisma.serviceIndustry.count().catch(() => 0),
     ]);
 
   console.log("\n═══════════════════════════════════════════════════════════");
@@ -551,6 +841,10 @@ async function main() {
   console.log(`  Plans:         ${planCount}`);
   console.log(`  Pipelines:     ${pipelineCount}`);
   console.log(`  Alert Rules:   ${alertCount}`);
+  console.log(`  App Center:    ${appCount} apps, ${installCount} company installs`);
+  console.log(
+    `  Factory:       ${industryCount} industry systems, ${serviceCount} services, ${mappingCount} mappings`,
+  );
   console.log("═══════════════════════════════════════════════════════════");
   console.log("  ✅ Seed complete!");
   console.log("═══════════════════════════════════════════════════════════\n");
