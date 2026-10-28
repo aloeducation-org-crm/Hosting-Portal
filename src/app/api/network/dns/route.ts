@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession, canAccessWebsite } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { publishDnsRecord } from '@/lib/dns-provider';
 
 const VALID_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
 
@@ -72,6 +73,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(apiError('Access denied', 'FORBIDDEN', undefined, 403), { status: 403 });
     }
 
+    // §8 publication gate: in an executing mode the external publish must
+    // succeed BEFORE the row is written, so a stored record can never imply a
+    // nameserver change that did not happen. In local mode the response says
+    // explicitly that nothing was published.
+    const pub = await publishDnsRecord({
+      type: body.type,
+      name: body.name,
+      value: body.value,
+      ttl: body.ttl,
+      priority: body.priority,
+    });
+    if (!pub.ok) {
+      return NextResponse.json(apiError(pub.note, pub.code ?? "DNS_PUBLISH_FAILED", undefined, 409), {
+        status: 409,
+      });
+    }
+
     const record = await db.dnsRecord.create({
       data: {
         domainId: body.domainId,
@@ -84,7 +102,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(apiSuccess(record));
+    return NextResponse.json(apiSuccess({ ...record, publication: pub }));
   } catch (e) {
     return handleErr(e);
   }

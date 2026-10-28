@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Switch } from '@/components/ui/switch'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog'
@@ -25,11 +24,19 @@ import { toast } from 'sonner'
 
 interface DnsRecord {
   id: string
+  domainId?: string
   type: string
   name: string
   value: string
   ttl: number
-  proxied: boolean
+  priority?: number | null
+  isActive?: boolean
+}
+
+interface MineDomain {
+  id: string
+  domain: string
+  website?: { domain?: string } | null
 }
 
 interface LoadBalancer {
@@ -74,25 +81,39 @@ export default function NetworkView() {
 
   // DNS
   const [dnsRecords, setDnsRecords] = useState<DnsRecord[]>([])
+  const [dnsDomains, setDnsDomains] = useState<MineDomain[]>([])
+  const [selectedDomainId, setSelectedDomainId] = useState('')
   const [dnsOpen, setDnsOpen] = useState(false)
   const [editingDns, setEditingDns] = useState<DnsRecord | null>(null)
-  const [dnsForm, setDnsForm] = useState({ type: 'A', name: '', value: '', ttl: '3600', proxied: true })
+  const [dnsForm, setDnsForm] = useState({ type: 'A', name: '', value: '', ttl: '3600' })
+  const [dnsPub, setDnsPub] = useState<{
+    mode: string
+    state: string
+    blocker: string | null
+    behavior: string
+    lastLivePublishAt?: string | null
+  } | null>(null)
 
   // Load Balancers
   const [loadBalancers, setLoadBalancers] = useState<LoadBalancer[]>([])
   const [lbOpen, setLbOpen] = useState(false)
   const [lbForm, setLbForm] = useState({ name: '', protocol: 'HTTP', port: '443', algorithm: 'round_robin' })
 
-  const fetchDns = async () => {
+  const fetchDns = async (domainId?: string) => {
+    const target = domainId ?? selectedDomainId
+    if (!target) {
+      setDnsRecords([])
+      return
+    }
     const token = getToken()
     if (!token) return
     try {
-      const res = await fetch('/api/network/dns', {
+      const res = await fetch(`/api/network/dns?domainId=${encodeURIComponent(target)}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error('Failed to fetch DNS records')
-      const data = await res.json()
-      setDnsRecords(data)
+      const body = await res.json()
+      setDnsRecords(Array.isArray(body) ? body : body?.data ?? [])
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error')
@@ -121,18 +142,52 @@ export default function NetworkView() {
       const token = getToken()
       if (!token) return
       try {
-        const url = activeTab === 'dns' ? '/api/network/dns' : '/api/network/load-balancers'
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-        if (!res.ok) throw new Error('Failed to fetch')
-        const data = await res.json()
-        if (!cancelled) {
-          if (activeTab === 'dns') {
-            setDnsRecords(data)
+        if (activeTab === 'dns') {
+          // Domains first: the records API is scoped per domain.
+          const dres = await fetch('/api/domains/mine', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (!dres.ok) throw new Error('Failed to fetch domains')
+          const dbody = await dres.json()
+          const mine: MineDomain[] = Array.isArray(dbody) ? dbody : dbody?.data ?? []
+          if (cancelled) return
+          setDnsDomains(mine)
+          const firstId = mine[0]?.id ?? ''
+          setSelectedDomainId(firstId)
+          if (firstId) {
+            const res = await fetch(`/api/network/dns?domainId=${encodeURIComponent(firstId)}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (res.ok) {
+              const body = await res.json()
+              setDnsRecords(Array.isArray(body) ? body : body?.data ?? [])
+            }
           } else {
-            setLoadBalancers(data)
+            setDnsRecords([])
           }
+          setError(null)
+          // Honest publication state (§8) — advisory banner only; a failure
+          // here never blocks the records table.
+          try {
+            const sres = await fetch('/api/network/dns/status', {
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (sres.ok) {
+              const sbody = await sres.json()
+              if (!cancelled) setDnsPub(sbody?.data ?? null)
+            }
+          } catch {
+            /* non-critical */
+          }
+        } else {
+          const res = await fetch('/api/network/load-balancers', {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (!res.ok) throw new Error('Failed to fetch')
+          const data = await res.json()
+          if (!cancelled) setLoadBalancers(data)
+        }
+        if (!cancelled) {
           setError(null)
           setLoading(false)
         }
@@ -148,7 +203,7 @@ export default function NetworkView() {
 
   const openDnsCreate = () => {
     setEditingDns(null)
-    setDnsForm({ type: 'A', name: '', value: '', ttl: '3600', proxied: true })
+    setDnsForm({ type: 'A', name: '', value: '', ttl: '3600' })
     setDnsOpen(true)
   }
 
@@ -159,7 +214,6 @@ export default function NetworkView() {
       name: record.name,
       value: record.value,
       ttl: String(record.ttl),
-      proxied: record.proxied,
     })
     setDnsOpen(true)
   }
@@ -167,6 +221,10 @@ export default function NetworkView() {
   const handleSaveDns = async () => {
     const token = getToken()
     if (!token || !dnsForm.name.trim() || !dnsForm.value.trim()) return
+    if (!editingDns && !selectedDomainId) {
+      toast.error('No domain selected — add a domain before creating DNS records')
+      return
+    }
     try {
       const isEdit = !!editingDns
       const url = isEdit ? `/api/network/dns/${editingDns.id}` : '/api/network/dns'
@@ -174,19 +232,25 @@ export default function NetworkView() {
       const body = {
         ...dnsForm,
         ttl: parseInt(dnsForm.ttl) || 3600,
-        ...(isEdit ? { id: editingDns.id } : {}),
+        ...(isEdit ? {} : { domainId: selectedDomainId }),
       }
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       })
-      if (!res.ok) throw new Error('Failed to save DNS record')
+      if (!res.ok) {
+        // Surface the API's honest refusal reason (e.g. provider blocked).
+        const b = await res.json().catch(() => null)
+        throw new Error(
+          b?.message ?? b?.error?.message ?? 'Failed to save DNS record',
+        )
+      }
       toast.success(isEdit ? 'DNS record updated' : 'DNS record created')
       setDnsOpen(false)
       fetchDns()
-    } catch {
-      toast.error('Failed to save DNS record')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save DNS record')
     }
   }
 
@@ -194,32 +258,18 @@ export default function NetworkView() {
     const token = getToken()
     if (!token) return
     try {
-      const res = await fetch(`/api/network/dns?id=${id}`, {
+      const res = await fetch(`/api/network/dns/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (!res.ok) throw new Error('Failed to delete DNS record')
+      if (!res.ok) {
+        const b = await res.json().catch(() => null)
+        throw new Error(b?.message ?? b?.error ?? 'Failed to delete DNS record')
+      }
       toast.success('DNS record deleted')
       setDnsRecords((prev) => prev.filter((r) => r.id !== id))
-    } catch {
-      toast.error('Failed to delete DNS record')
-    }
-  }
-
-  const toggleProxied = async (id: string, proxied: boolean) => {
-    const token = getToken()
-    if (!token) return
-    setDnsRecords((prev) => prev.map((r) => r.id === id ? { ...r, proxied } : r))
-    try {
-      const res = await fetch('/api/network/dns', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id, proxied }),
-      })
-      if (!res.ok) throw new Error('Failed to update')
-    } catch {
-      setDnsRecords((prev) => prev.map((r) => r.id === id ? { ...r, proxied: !proxied } : r))
-      toast.error('Failed to update proxied status')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to delete DNS record')
     }
   }
 
@@ -266,8 +316,49 @@ export default function NetworkView() {
 
         {/* DNS Records Tab */}
         <TabsContent value="dns">
+          {dnsPub && (
+            <Card
+              className={
+                dnsPub.state === 'active'
+                  ? 'border-emerald-200 bg-emerald-50 mb-6'
+                  : dnsPub.state === 'unverified'
+                    ? 'border-blue-200 bg-blue-50 mb-6'
+                    : 'border-amber-200 bg-amber-50 mb-6'
+              }
+            >
+              <CardContent className="p-4 text-sm text-gray-800">
+                <span className="font-medium">DNS publication — mode “{dnsPub.mode}” ({dnsPub.state}):</span>{' '}
+                {dnsPub.blocker ?? dnsPub.behavior}
+                {dnsPub.state === 'active' && dnsPub.lastLivePublishAt && (
+                  <span className="text-emerald-700"> Last live publish: {dnsPub.lastLivePublishAt}.</span>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          {dnsDomains.length > 1 && (
+            <div className="flex items-center gap-2 mb-4">
+              <Label className="text-sm text-gray-500 shrink-0">Domain</Label>
+              <Select value={selectedDomainId} onValueChange={(v) => {
+                setSelectedDomainId(v)
+                fetchDns(v)
+              }}>
+                <SelectTrigger className="w-[280px]">
+                  <SelectValue placeholder="Select a domain" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dnsDomains.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>{d.domain}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="flex justify-end mb-6">
-            <Button onClick={openDnsCreate} className="bg-[#E8501A] hover:bg-[#5B2FC9] text-white">
+            <Button
+              onClick={openDnsCreate}
+              className="bg-[#E8501A] hover:bg-[#5B2FC9] text-white"
+              disabled={dnsDomains.length === 0}
+            >
               <Plus className="mr-2 h-4 w-4" /> Add Record
             </Button>
           </div>
@@ -280,8 +371,14 @@ export default function NetworkView() {
             <Card className="border-dashed">
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Globe className="h-12 w-12 text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-500">No DNS records</h3>
-                <p className="text-sm text-gray-400 mt-1">Add a record to configure your domain</p>
+                <h3 className="text-lg font-medium text-gray-500">
+                  {dnsDomains.length === 0 ? 'No domains yet' : 'No DNS records'}
+                </h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  {dnsDomains.length === 0
+                    ? 'Add a domain to a website first — DNS records are scoped per domain'
+                    : 'Add a record to configure your domain'}
+                </p>
               </CardContent>
             </Card>
           ) : (
@@ -294,7 +391,7 @@ export default function NetworkView() {
                       <TableHead>Name</TableHead>
                       <TableHead>Value</TableHead>
                       <TableHead>TTL</TableHead>
-                      <TableHead>Proxied</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -310,10 +407,13 @@ export default function NetworkView() {
                         <TableCell className="font-mono text-sm text-gray-500 max-w-[200px] truncate">{record.value}</TableCell>
                         <TableCell className="text-sm text-gray-500">{record.ttl}s</TableCell>
                         <TableCell>
-                          <Switch
-                            checked={record.proxied}
-                            onCheckedChange={(checked) => toggleProxied(record.id, checked)}
-                          />
+                          <Badge variant="outline" className={
+                            record.isActive === false
+                              ? 'bg-gray-100 text-gray-500 border-gray-300'
+                              : 'bg-emerald-500/15 text-emerald-700 border-emerald-300'
+                          }>
+                            {record.isActive === false ? 'Inactive' : 'Active'}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
@@ -435,21 +535,13 @@ export default function NetworkView() {
               <Label htmlFor="dns-value">Value *</Label>
               <Input id="dns-value" value={dnsForm.value} onChange={(e) => setDnsForm({ ...dnsForm, value: e.target.value })} placeholder="192.168.1.1" />
             </div>
-            <div className="flex items-center gap-3">
-              <Switch
-                id="dns-proxied"
-                checked={dnsForm.proxied}
-                onCheckedChange={(checked) => setDnsForm({ ...dnsForm, proxied: checked })}
-              />
-              <Label htmlFor="dns-proxied">Proxied through ALO Labs CDN</Label>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDnsOpen(false)}>Cancel</Button>
             <Button
               onClick={handleSaveDns}
               className="bg-[#E8501A] hover:bg-[#5B2FC9] text-white"
-              disabled={!dnsForm.name.trim() || !dnsForm.value.trim()}
+              disabled={!dnsForm.name.trim() || !dnsForm.value.trim() || (!editingDns && !selectedDomainId)}
             >
               {editingDns ? 'Update' : 'Create'}
             </Button>
