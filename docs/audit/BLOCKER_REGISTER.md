@@ -3,6 +3,9 @@
 Single source of truth for what is open, verified, or blocked. Supersedes the
 blocker tables in earlier documents on this branch.
 
+**Last updated:** 2026-10-29 (session 2) — after independent re-verification of
+all prior claims. See `VERIFICATION-2026-10-29-SESSION2.md`.
+
 **States:** `VERIFIED` (evidence obtained) · `OPEN` (actionable, not done) ·
 `BLOCKED` (cannot progress without access or approval).
 
@@ -18,18 +21,23 @@ blocker tables in earlier documents on this branch.
 | **B-4** | cPanel API token absent (Server D) | **BLOCKED** | `lib/providers/cpanel.ts` exists; no scoped token. Email integration unverified | A least-privilege cPanel API token, issued by the provider |
 | **B-5** | Authoritative DNS provider / registrar unknown | **BLOCKED** | No registrar integration anywhere in the repo; no authoritative DNS engine; no evidence of who holds `alolabs.net` | Registrar + DNS authority confirmation. **No DNS change without approval** |
 | **B-6** | No required reviewer on `production` | **OPEN** | `protection_rules: []`, `can_admins_bypass: true`, branch policy `null`. Repo is public, so reviewers are available | Admin applies `PRODUCTION_APPROVAL_GATE.md` §3, then §4 verification |
-| **B-7** | Production release baseline unverified | **OPEN** (was "contradictory") | Reconciled: the 6 deployment records are re-runs of run #31 (`54e3454`), all failed. Last successful deploy job = `ec7ff40`, 2026-10-27T02:47:01Z, but under a workflow with no `environment:` and a health check that could not identify a commit. Run #54 may have mutated the host afterwards | Run the read-only commands in `DEPLOYMENT_RECONCILIATION_2026-10-29.md` §7 on the host |
+| **B-7** | Production release baseline unverified | **OPEN** — re-verified, unchanged | Reconciled: the 6 deployment records are re-runs of run #31 (`54e3454`), all failed. Last successful deploy job = `ec7ff40`, 2026-10-27T02:47:01Z, but under a workflow with no `environment:` and a health check that could not identify a commit. Run #54 may have mutated the host afterwards | Run the read-only commands in `DEPLOYMENT_RECONCILIATION_2026-10-29.md` §7 on the host |
 | **B-8** | SQLite now vs MySQL 8 target | **OPEN** | `prisma/schema.prisma` declares `provider = "sqlite"`; brief mandates MySQL 8. A provider change is a migration, not a config edit | Approved migration design: backup, compatibility review, migration tests, rollback plan. **Not to be bundled with feature work** |
-| **B-9** | Second production deploy path ungated | **OPEN** | `POST /api/deploy/projects/[id]/deploy`, `/rollback`, `/webhook` → `enqueueDeployment` → host helpers. Authorised by RBAC `WEBSITE_DEPLOY`, not by a human approval. Whether the inline worker is enabled in prod is unknown | Product decision: require an approval record in production, or disable the inline worker, or accept and document |
+| **B-9** | Second production deploy path ungated | **OPEN** — analysed in depth | `WEBSITE_DEPLOY` alone triggers a real deploy (files + `restartExternalService`), executed **synchronously in-request**; inline worker is on by default (`DEPLOY_INLINE_WORKER !== "false"`). `rollback` does the same under `BACKUP_RESTORE`. Full call graph, 7-threat model and 5 remediation options in `B9-APPLICATION-DEPLOY-PATH.md` | Decide R-1 (approval record) and apply R-2 (`DEPLOY_INLINE_WORKER=false`, supervised worker). Do not weaken RBAC |
 | **B-10** | Deploy job does not pin what it deploys | **OPEN** | At `ec7ff40` the job ran `git pull --ff-only origin main`; `github.sha` and the artifact are not used to pin the build. Run #32 deployed after #33 | Already fixed in `deploy-release.sh` at `7fc3d15` (requires 40-hex `DEPLOY_COMMIT_SHA`, verifies commit via health). Needs a successful run to be *demonstrated* |
 | **B-11** | No host-side release identity | **OPEN** | `release-identity.json` is written only by `deploy-release.sh`/`deploy-production.sh`; neither has completed on this host | First successful deploy under `7fc3d15`+ writes it; until then identity is unprovable |
-| **B-12** | Agent-based malware scanning not uniformly enforced (CRM) | **OPEN** | Scanner verified present in `tech360-bd/ALO_WEB_CRM_TECH`; enforced at 2 of 9 private-file write paths; the WhatsApp path (the vault wiring point) is unscanned | Decision + implementation per CRM issue #44 §0. Vault stays disabled |
+| **B-12** | Malware scanning not uniformly enforced (CRM) | **OPEN** — re-derived at `c549448` | 12 write primitives found; **2 of 9 externally-fed ingest paths scanned** (unchanged). WhatsApp webhook + media ingestion — the nominated vault wiring point — are unscanned. `lib/phd/storage.ts` is new at this HEAD with **zero callers**. Matrix and S-1…S-6 remediation in `B12-MALWARE-SCAN-COVERAGE.md` | Push the control into `storePrivateFile` (require a `ScanResult`) rather than adding 7 route-level calls. Vault stays disabled |
 | **B-13** | Test coverage claims for the CRM conformance suite not reproduced | **OPEN** | 47+33=80 test counts come from the contract document; only "CI test job passes" was independently observed | Re-run the suite against the exact commit |
 | **B-14** | Branch protection on `main` unreadable | **BLOCKED** | `GET /branches/main/protection` → `403 Resource not accessible by integration`. Token has read-only `pull` | Admin token to read; **no change without authorisation** |
 
 ---
 
 ## 2. Required access and approvals (deliverable 7)
+
+**Status at session 2: none granted.** No approval has been requested, granted or
+assumed. In particular A-6 was *not* treated as granted, which is why no host was
+contacted despite the instruction to proceed with host verification
+(`VERIFICATION-2026-10-29-SESSION2.md` §3).
 
 Nothing below has been requested, granted, or assumed.
 
