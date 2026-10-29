@@ -8,7 +8,6 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -92,7 +91,16 @@ export default function SettingsView() {
   const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' })
   const [changingPassword, setChangingPassword] = useState(false)
   const [showPasswords, setShowPasswords] = useState({ current: false, newPass: false, confirm: false })
-  const [twoFactor, setTwoFactor] = useState(false)
+
+  // Two-factor authentication. State comes from /api/user/mfa and every change
+  // goes through the API: a control that reports "enabled" without the server
+  // agreeing is worse than no control, because it is trusted.
+  const [mfa, setMfa] = useState<{ enabled: boolean; method: string | null; verified: boolean } | null>(null)
+  const [mfaLoading, setMfaLoading] = useState(false)
+  const [mfaEnroll, setMfaEnroll] = useState<{ secret: string; qrUrl: string; backupCodes: string[] } | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaDisableCode, setMfaDisableCode] = useState('')
+  const [mfaShowDisable, setMfaShowDisable] = useState(false)
 
   // API Keys
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
@@ -101,20 +109,23 @@ export default function SettingsView() {
   const [newKey, setNewKey] = useState<string | null>(null)
   const [newKeyDialogOpen, setNewKeyDialogOpen] = useState(false)
 
-  // Sessions — fetched from /api/auth/session
-  const [sessions, setSessions] = useState<Array<{ id: string; device: string; icon: React.ComponentType<{ className?: string }>; ip: string; location: string; lastActive: string; current: boolean }>>([])
+  // Sessions come from /api/security/sessions, which reads the real session
+  // table. The previous version synthesized a single "Current session" row from
+  // navigator.userAgent and then removed it from local state on "Revoke", so the
+  // list looked managed while no session was ever actually revoked.
+  const [sessions, setSessions] = useState<Array<{
+    id: string
+    ipAddress: string | null
+    userAgent: string | null
+    expiresAt: string
+    createdAt: string
+    isCurrent: boolean
+  }>>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [revokingSession, setRevokingSession] = useState<string | null>(null)
 
-  // Notifications
-  const [notifSettings, setNotifSettings] = useState({
-    email: true,
-    deployments: true,
-    ssl: true,
-    backups: true,
-    billing: true,
-    marketing: false,
-  })
-  const [savedNotifSettings, setSavedNotifSettings] = useState(notifSettings)
-  const [savingNotifs, setSavingNotifs] = useState(false)
+  // Notification preferences have no persistence behind them; the card in the
+  // notifications tab says so rather than pretending to save local state.
 
   useEffect(() => {
     let cancelled = false
@@ -135,42 +146,42 @@ export default function SettingsView() {
             setLoading(false)
           }
 
-          // Also fetch session for security tab
+          // Security tab: real MFA status and real sessions.
           if (activeTab === 'security') {
-            try {
-              const sessRes = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${getToken()}` } })
-              if (sessRes.ok) {
-                const rawData = await sessRes.json()
-                const d = rawData.data ?? rawData
-                if (d && !cancelled) {
-                  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-                  let device = 'Current session'
-                  if (ua.includes('Chrome')) device = 'Chrome on ' + (ua.includes('Mac') ? 'MacOS' : ua.includes('Win') ? 'Windows' : 'Linux')
-                  else if (ua.includes('Firefox')) device = 'Firefox on ' + (ua.includes('Mac') ? 'MacOS' : 'Windows')
-                  else if (ua.includes('Safari')) device = 'Safari on ' + (ua.includes('Mac') ? 'MacOS' : 'iOS')
-                  setSessions([{
-                    id: d.id || 'current',
-                    device,
-                    icon: Monitor,
-                    ip: '•••',
-                    location: 'Current session',
-                    lastActive: 'Now',
-                    current: true,
-                  }])
-                }
+            setMfaLoading(true)
+            setSessionsLoading(true)
+            const authHeaders = { Authorization: `Bearer ${getToken()}` }
+            const [mfaRes, sessRes] = await Promise.allSettled([
+              fetch('/api/user/mfa', { headers: authHeaders }),
+              fetch('/api/security/sessions', { headers: authHeaders }),
+            ])
+
+            if (!cancelled) {
+              if (mfaRes.status === 'fulfilled' && mfaRes.value.ok) {
+                const raw = await mfaRes.value.json()
+                const d = raw?.data ?? raw
+                setMfa({
+                  enabled: Boolean(d?.enabled),
+                  method: d?.method ?? null,
+                  verified: Boolean(d?.verified),
+                })
+              } else {
+                // Unknown is rendered as unknown. Defaulting to "disabled" would
+                // tell a user with 2FA turned on that it is off.
+                setMfa(null)
               }
-            } catch {
-              if (!cancelled) {
-                setSessions([{
-                  id: 'current',
-                  device: 'Current session',
-                  icon: Monitor,
-                  ip: '•••',
-                  location: 'Current session',
-                  lastActive: 'Now',
-                  current: true,
-                }])
+              setMfaLoading(false)
+            }
+
+            if (!cancelled) {
+              if (sessRes.status === 'fulfilled' && sessRes.value.ok) {
+                const raw = await sessRes.value.json()
+                const d = raw?.data ?? raw
+                setSessions(Array.isArray(d) ? d : [])
+              } else {
+                setSessions([])
               }
+              setSessionsLoading(false)
             }
           }
         } else if (activeTab === 'api-keys') {
@@ -305,6 +316,186 @@ export default function SettingsView() {
       await fetchApiKeys()
     } catch {
       toast.error('Failed to delete API key')
+    }
+  }
+
+  // ── Two-factor authentication ──────────────────────────────────────────────
+  // Every one of these reads the outcome back from the server before the UI
+  // claims anything. "Enabled" is only ever shown because /api/user/mfa said so.
+
+  const refreshMfa = async () => {
+    try {
+      const res = await fetch('/api/user/mfa', { headers: { Authorization: `Bearer ${getToken()}` } })
+      if (!res.ok) throw new Error('request failed')
+      const raw = await res.json()
+      const d = raw?.data ?? raw
+      setMfa({ enabled: Boolean(d?.enabled), method: d?.method ?? null, verified: Boolean(d?.verified) })
+    } catch {
+      setMfa(null)
+    }
+  }
+
+  const apiErrorMessage = async (res: Response, fallback: string) => {
+    try {
+      const raw = await res.json()
+      return raw?.error?.message ?? raw?.message ?? raw?.error ?? fallback
+    } catch {
+      return fallback
+    }
+  }
+
+  const handleStartMfa = async () => {
+    setMfaLoading(true)
+    try {
+      const res = await fetch('/api/user/mfa', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: 'totp' }),
+      })
+      if (!res.ok) {
+        toast.error(await apiErrorMessage(res, 'Could not start two-factor setup'))
+        return
+      }
+      const raw = await res.json()
+      const d = raw?.data ?? raw
+      setMfaEnroll({ secret: d.secret, qrUrl: d.qrUrl, backupCodes: d.backupCodes ?? [] })
+      setMfaCode('')
+      // Enrollment created a pending, NOT enabled, record.
+      await refreshMfa()
+    } catch {
+      toast.error('Could not start two-factor setup')
+    } finally {
+      setMfaLoading(false)
+    }
+  }
+
+  const handleVerifyMfa = async () => {
+    if (mfaCode.trim().length !== 6) {
+      toast.error('Enter the 6-digit code from your authenticator app')
+      return
+    }
+    setMfaLoading(true)
+    try {
+      const res = await fetch('/api/user/mfa/verify', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: mfaCode.trim() }),
+      })
+      if (!res.ok) {
+        toast.error(await apiErrorMessage(res, 'That code was not accepted'))
+        return
+      }
+      // Claim success only once the server confirms it, by re-reading the
+      // status rather than trusting the 200 or the local state we just set.
+      const check = await fetch('/api/user/mfa', { headers: { Authorization: `Bearer ${getToken()}` } })
+      const rawCheck = check.ok ? await check.json() : null
+      const confirmed = rawCheck?.data ?? rawCheck
+      setMfa({
+        enabled: Boolean(confirmed?.enabled),
+        method: confirmed?.method ?? null,
+        verified: Boolean(confirmed?.verified),
+      })
+      if (confirmed?.enabled) {
+        toast.success('Two-factor authentication is enabled')
+        setMfaCode('')
+        setMfaEnroll(null)
+      } else {
+        toast.error('The server did not confirm two-factor as enabled; enter the code again')
+      }
+    } catch {
+      toast.error('Could not verify that code')
+    } finally {
+      setMfaLoading(false)
+    }
+  }
+
+  const handleDisableMfa = async () => {
+    if (!mfaDisableCode.trim()) {
+      toast.error('Enter a current code or a backup code to turn off two-factor')
+      return
+    }
+    setMfaLoading(true)
+    try {
+      const res = await fetch('/api/user/mfa/disable', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: mfaDisableCode.trim() }),
+      })
+      if (!res.ok) {
+        toast.error(await apiErrorMessage(res, 'Two-factor was not disabled'))
+        return
+      }
+      await refreshMfa()
+      setMfaDisableCode('')
+      setMfaShowDisable(false)
+      toast.success('Two-factor authentication is disabled')
+    } catch {
+      toast.error('Could not disable two-factor')
+    } finally {
+      setMfaLoading(false)
+    }
+  }
+
+  // ── Sessions ───────────────────────────────────────────────────────────────
+
+  const fetchSessions = async () => {
+    setSessionsLoading(true)
+    try {
+      const res = await fetch('/api/security/sessions', { headers: { Authorization: `Bearer ${getToken()}` } })
+      if (!res.ok) throw new Error('request failed')
+      const raw = await res.json()
+      const d = raw?.data ?? raw
+      setSessions(Array.isArray(d) ? d : [])
+    } catch {
+      setSessions([])
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
+
+  const handleRevokeSession = async (id: string) => {
+    setRevokingSession(id)
+    try {
+      const res = await fetch(`/api/security/sessions?sessionId=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (!res.ok) {
+        toast.error(await apiErrorMessage(res, 'That session was not revoked'))
+        return
+      }
+      const raw = await res.json()
+      const revoked = raw?.data?.revoked ?? 0
+      // Report what the server actually deleted, not what the button intended.
+      if (revoked > 0) toast.success(`Revoked ${revoked} session${revoked === 1 ? '' : 's'}`)
+      else toast.error('The server revoked 0 sessions')
+      await fetchSessions()
+    } catch {
+      toast.error('Could not revoke that session')
+    } finally {
+      setRevokingSession(null)
+    }
+  }
+
+  const handleRevokeOtherSessions = async () => {
+    setRevokingSession('all')
+    try {
+      const res = await fetch('/api/security/sessions?all=true', {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (!res.ok) {
+        toast.error(await apiErrorMessage(res, 'Other sessions were not revoked'))
+        return
+      }
+      const raw = await res.json()
+      const revoked = raw?.data?.revoked ?? 0
+      toast.success(`Revoked ${revoked} other session${revoked === 1 ? '' : 's'}`)
+      await fetchSessions()
+    } catch {
+      toast.error('Could not revoke other sessions')
+    } finally {
+      setRevokingSession(null)
     }
   }
 
@@ -513,74 +704,224 @@ export default function SettingsView() {
               </CardContent>
             </Card>
 
-            {/* Two-Factor Auth */}
+            {/* Two-Factor Auth — wired to /api/user/mfa. The status shown is the
+                status the server reported, and it is only "enabled" after
+                /api/user/mfa/verify has confirmed it. */}
             <Card>
               <CardHeader>
                 <CardTitle>Two-Factor Authentication</CardTitle>
                 <CardDescription>Add an extra layer of security to your account</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Authenticator App</p>
-                    <p className="text-sm text-gray-500">
-                      {twoFactor ? 'Enabled — your account is secured with 2FA' : 'Protect your account with 2-step verification'}
+                {mfaLoading && !mfa ? (
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-40" />
+                    <Skeleton className="h-4 w-64" />
+                  </div>
+                ) : mfa === null ? (
+                  <div className="flex items-start gap-2 text-sm text-amber-700">
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <p>
+                      Two-factor status could not be loaded, so it is shown as unknown rather than
+                      guessed. <button type="button" className="underline" onClick={refreshMfa}>Try again</button>
                     </p>
                   </div>
-                  <Switch
-                    checked={twoFactor}
-                    onCheckedChange={(val) => {
-                      setTwoFactor(val)
-                      toast.success('Two-factor authentication ' + (val ? 'enabled' : 'disabled'))
-                    }}
-                  />
-                </div>
+                ) : mfa.enabled ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">Authenticator App</p>
+                        <p className="text-sm text-gray-500">
+                          Enabled{(mfa.method ? ` — method ${mfa.method.toUpperCase()}` : '')}. Your account is secured with 2FA.
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs">Enabled</Badge>
+                    </div>
+                    {!mfaShowDisable ? (
+                      <div className="flex justify-end">
+                        <Button variant="outline" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => setMfaShowDisable(true)}>
+                          Turn off
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                        <p className="text-xs text-red-700">
+                          Turning off two-factor requires a current 6-digit code or one of your backup
+                          codes. The server verifies it before anything changes.
+                        </p>
+                        <div className="flex gap-2">
+                          <Input
+                            value={mfaDisableCode}
+                            onChange={(e) => setMfaDisableCode(e.target.value)}
+                            placeholder="Code or backup code"
+                            autoComplete="one-time-code"
+                            className="bg-white"
+                          />
+                          <Button variant="outline" size="sm" disabled={mfaLoading} onClick={() => { setMfaShowDisable(false); setMfaDisableCode('') }}>
+                            Cancel
+                          </Button>
+                          <Button variant="destructive" size="sm" disabled={mfaLoading || !mfaDisableCode.trim()} onClick={handleDisableMfa}>
+                            {mfaLoading && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                            Turn off 2FA
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : mfaEnroll ? (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-600">
+                      Add this account to your authenticator app, then enter the 6-digit code it shows.
+                      Two-factor stays <strong>off</strong> until the server verifies that code.
+                    </p>
+                    <div className="space-y-1.5">
+                      <Label>Setup key</Label>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 break-all rounded-md bg-gray-50 px-3 py-2 text-xs">
+                          {mfaEnroll.secret}
+                        </code>
+                        <Button variant="outline" size="sm" onClick={() => copyToClipboard(mfaEnroll.secret)}>
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Or import this URI directly:
+                      </p>
+                      <code className="block break-all rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                        {mfaEnroll.qrUrl}
+                      </code>
+                    </div>
+                    {mfaEnroll.backupCodes.length > 0 && (
+                      <div className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-xs font-medium text-amber-800">
+                          Backup codes — shown once. Store them now; they are the only way in if you
+                          lose your device.
+                        </p>
+                        <div className="grid grid-cols-2 gap-1">
+                          {mfaEnroll.backupCodes.map((code) => (
+                            <code key={code} className="text-xs text-amber-900">{code}</code>
+                          ))}
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => copyToClipboard(mfaEnroll.backupCodes.join('\n'))}>
+                          <Copy className="h-4 w-4 mr-1.5" />
+                          Copy backup codes
+                        </Button>
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <Input
+                        value={mfaCode}
+                        onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        placeholder="6-digit code"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                      />
+                      <Button onClick={handleVerifyMfa} disabled={mfaLoading || mfaCode.trim().length !== 6} className="bg-[#E8501A] hover:bg-[#5B2FC9]">
+                        {mfaLoading && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                        Verify and enable
+                      </Button>
+                      <Button variant="outline" onClick={() => { setMfaEnroll(null); setMfaCode('') }} disabled={mfaLoading}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Authenticator App</p>
+                      <p className="text-sm text-gray-500">
+                        {mfa.verified
+                          ? 'Set up but not enabled yet — finish verification to turn it on.'
+                          : 'Protect your account with 2-step verification.'}
+                      </p>
+                    </div>
+                    <Button onClick={handleStartMfa} disabled={mfaLoading} variant="outline" size="sm">
+                      {mfaLoading && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                      {mfa.verified ? 'Restart setup' : 'Set up 2FA'}
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            {/* Active Sessions */}
+            {/* Active Sessions — read from /api/security/sessions, revoked through
+                the same endpoint. Revocation reports the count the server deleted. */}
             <Card>
               <CardHeader>
-                <CardTitle>Active Sessions</CardTitle>
-                <CardDescription>Manage your active login sessions</CardDescription>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle>Active Sessions</CardTitle>
+                    <CardDescription>Manage your active login sessions</CardDescription>
+                  </div>
+                  {sessions.length > 1 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={revokingSession !== null}
+                      onClick={handleRevokeOtherSessions}
+                    >
+                      {revokingSession === 'all' && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                      Revoke all others
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {sessions.map((session, i) => {
-                    const SessionIcon = session.icon
-                    return (
+                {sessionsLoading ? (
+                  <div className="space-y-3">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                ) : sessions.length === 0 ? (
+                  <p className="text-sm text-gray-500">
+                    No active sessions were found for this account. Sessions created before session
+                    tracking was enabled will not appear here.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    {sessions.map((session, i) => (
                       <div key={session.id}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100">
-                              <SessionIcon className="h-5 w-5 text-gray-500" />
+                              <Monitor className="h-5 w-5 text-gray-500" />
                             </div>
-                            <div>
+                            <div className="min-w-0">
                               <div className="flex items-center gap-2">
-                                <p className="text-sm font-medium">{session.device}</p>
-                                {session.current && (
+                                <p className="truncate text-sm font-medium">
+                                  {session.userAgent?.slice(0, 80) || 'Unknown client'}
+                                </p>
+                                {session.isCurrent && (
                                   <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs">Current</Badge>
                                 )}
                               </div>
                               <p className="text-xs text-gray-400">
-                                {session.ip} · {session.location} · {session.lastActive}
+                                {session.ipAddress || 'IP not recorded'}
+                                {' · '}
+                                started {formatDistanceToNow(new Date(session.createdAt), { addSuffix: true })}
+                                {' · '}
+                                expires {format(new Date(session.expiresAt), 'PPP')}
                               </p>
                             </div>
                           </div>
-                          {!session.current && (
-                            <Button variant="outline" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => {
-                              setSessions((prev) => prev.filter((s) => s.id !== session.id))
-                              toast.success(`Session "${session.device}" revoked`)
-                            }}>
+                          {!session.isCurrent && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                              disabled={revokingSession !== null}
+                              onClick={() => handleRevokeSession(session.id)}
+                            >
+                              {revokingSession === session.id && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
                               Revoke
                             </Button>
                           )}
                         </div>
                         {i < sessions.length - 1 && <Separator className="mt-4" />}
                       </div>
-                    )
-                  })}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -686,93 +1027,35 @@ export default function SettingsView() {
         {/* Notifications Tab */}
         <TabsContent value="notifications">
           <div className="max-w-2xl">
+            {/* Notification preferences have no storage behind them: there is no
+                preference model in prisma/schema.prisma and no endpoint that
+                accepts one. Rendering live toggles plus a "saved" toast told
+                users their choices were stored when nothing was, so the card
+                states the real status instead. */}
             <Card>
               <CardHeader>
                 <CardTitle>Notification Preferences</CardTitle>
                 <CardDescription>Choose what notifications you want to receive</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-0">
-                <div className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-sm font-medium">Email Notifications</p>
-                    <p className="text-sm text-gray-500">Receive email notifications for important events</p>
+              <CardContent>
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0 text-amber-700" />
+                  <div className="text-sm text-amber-900">
+                    <p className="font-medium">Not available yet</p>
+                    <p className="mt-1 text-amber-800">
+                      Per-channel notification preferences are not stored anywhere in this
+                      deployment, so there is nothing to save. Notifications themselves are
+                      delivered through <code className="text-xs">/api/notifications</code> and the
+                      alerting rules under <code className="text-xs">/api/alerts/rules</code>, which
+                      do persist.
+                    </p>
+                    <p className="mt-2 text-amber-800">
+                      To enable these preferences, add a <code className="text-xs">NotificationPreference</code> model
+                      to <code className="text-xs">prisma/schema.prisma</code> (one row per user, one boolean per
+                      channel) with an additive migration, then expose it through
+                      <code className="text-xs"> /api/settings</code> and restore the toggles here.
+                    </p>
                   </div>
-                  <Switch
-                    checked={notifSettings.email}
-                    onCheckedChange={(v) => setNotifSettings(s => ({ ...s, email: v }))}
-                  />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-sm font-medium">Deployment Alerts</p>
-                    <p className="text-sm text-gray-500">Get notified when deployments succeed or fail</p>
-                  </div>
-                  <Switch
-                    checked={notifSettings.deployments}
-                    onCheckedChange={(v) => setNotifSettings(s => ({ ...s, deployments: v }))}
-                  />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-sm font-medium">SSL Expiry Warnings</p>
-                    <p className="text-sm text-gray-500">Alert when SSL certificates are about to expire</p>
-                  </div>
-                  <Switch
-                    checked={notifSettings.ssl}
-                    onCheckedChange={(v) => setNotifSettings(s => ({ ...s, ssl: v }))}
-                  />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-sm font-medium">Backup Notifications</p>
-                    <p className="text-sm text-gray-500">Notify when backups complete or fail</p>
-                  </div>
-                  <Switch
-                    checked={notifSettings.backups}
-                    onCheckedChange={(v) => setNotifSettings(s => ({ ...s, backups: v }))}
-                  />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-sm font-medium">Billing Alerts</p>
-                    <p className="text-sm text-gray-500">Get notified about invoices, payments, and plan changes</p>
-                  </div>
-                  <Switch
-                    checked={notifSettings.billing}
-                    onCheckedChange={(v) => setNotifSettings(s => ({ ...s, billing: v }))}
-                  />
-                </div>
-                <Separator />
-                <div className="flex items-center justify-between py-4">
-                  <div>
-                    <p className="text-sm font-medium">Marketing Emails</p>
-                    <p className="text-sm text-gray-500">Receive updates about new features and promotions</p>
-                  </div>
-                  <Switch
-                    checked={notifSettings.marketing}
-                    onCheckedChange={(v) => setNotifSettings(s => ({ ...s, marketing: v }))}
-                  />
-                </div>
-
-                <div className="flex justify-end pt-4">
-                  <Button
-                    onClick={async () => {
-                      setSavingNotifs(true)
-                      // Persist preferences in component state
-                      setSavedNotifSettings({ ...notifSettings })
-                      toast.success('Notification preferences saved')
-                      setSavingNotifs(false)
-                    }}
-                    disabled={savingNotifs}
-                    className="bg-[#E8501A] hover:bg-[#5B2FC9]"
-                  >
-                    {savingNotifs && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                    Save Preferences
-                  </Button>
                 </div>
               </CardContent>
             </Card>
