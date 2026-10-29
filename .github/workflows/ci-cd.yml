@@ -31,6 +31,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: Validate all shell scripts parse
+        run: |
+          set -Eeuo pipefail
+          find scripts helpers server-helpers install-scripts deploy -type f -name '*.sh' -print0 2>/dev/null \
+            | xargs -0 -r -n1 bash -n
       - run: npm ci --include=dev
       - run: npx prisma generate
       - run: npm run lint
