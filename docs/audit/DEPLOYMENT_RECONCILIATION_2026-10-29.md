@@ -72,7 +72,7 @@ deployments without involving GitHub Actions at all:
 
 **Consequence for the approval gate:** an environment reviewer protects the
 GitHub path only. It does not gate the application's own deploy endpoint. See
-`PRODUCTION_APPROVAL_GATE.md` §5.
+`PRODUCTION-APPROVAL-GATE.md` §5.
 
 ---
 

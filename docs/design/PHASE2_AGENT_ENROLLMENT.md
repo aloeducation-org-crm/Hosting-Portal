@@ -4,7 +4,7 @@
 **Date:** 2026-10-29
 **Precondition satisfied:** deployment baseline uncertainty is documented in
 `docs/audit/DEPLOYMENT_RECONCILIATION_2026-10-29.md` §6 (`UNVERIFIED`), and the
-approval gate is documented in `docs/audit/PRODUCTION_APPROVAL_GATE.md`.
+approval gate is documented in `docs/audit/PRODUCTION-APPROVAL-GATE.md`.
 
 **Scope constraint:** everything below is safe, non-production work — pure
 modules, API contracts and tests. No live server is contacted, no server is
