@@ -391,9 +391,18 @@ describe("deployment scripts", () => {
     expect(canonicalScript).toContain("mv -Tf \"$rollback_link\" \"$CURRENT\"");
   });
 
-  it("refuses to deploy a commit that was not merged to main", () => {
-    expect(releaseScript).toContain("git merge-base --is-ancestor \"$SHA\" origin/main");
+  it("refuses stale queued runs and backwards releases unless rollback is explicitly authorized", () => {
+    expect(releaseScript).toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
+    expect(releaseScript).toContain('[[ "$SHA" == "$LATEST_MAIN_SHA" ]]');
+    expect(releaseScript).toContain('git merge-base --is-ancestor "$PREV_SHA" "$SHA"');
+    expect(releaseScript).toContain("ALLOW_RELEASE_ROLLBACK");
+    expect(releaseScript).toContain("refusing backwards deployment");
+    expect(releaseScript).toContain('git merge-base --is-ancestor "$SHA" origin/main');
     expect(releaseScript).toContain("refusing to deploy something that was not merged");
+  });
+
+  it("ignores the runtime release identity so inline deploys do not dirty the checkout", () => {
+    expect(read(".gitignore")).toMatch(/^release-identity\\.json$/m);
   });
 
   it("proves the running application reports the deployed commit, not merely that it answers", () => {
