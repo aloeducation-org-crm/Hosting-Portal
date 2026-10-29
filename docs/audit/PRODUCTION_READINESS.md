@@ -44,19 +44,25 @@ production claim. Everything below is code, tests, and static verification.
 | Prisma client generation | `postinstall` → `prisma generate` | **pass** |
 | Lint | `npm run lint` (`eslint src/`) | **pass**, 0 problems |
 | Typecheck | `npm run typecheck` (`tsc --noEmit`) | **pass**, 0 errors |
-| Unit + integration tests | `npm test` (`vitest run`) | **596 / 596 pass**, 41 files |
+| Unit + integration tests | `npm test` (`vitest run`) | **676 / 676 pass**, 43 files |
 | Shell syntax | `bash -n` over 70 programs | **pass** |
-| Production build | `npm run build` | **✓ Compiled successfully**, 267 routes |
+| Dependency advisories | `npm ci --include=dev` | **0 vulnerabilities**, 649 packages |
+| Production build | `npm run build` | **✓ Compiled successfully**, 275 routes |
 | Standalone entrypoint | `test -s .next/standalone/server.js` | **present** |
 
-Baseline before this work: 533 tests / 38 files. Delta: **+63 tests, +3 files**.
+Baseline before this work: 533 tests / 38 files. Delta after the deployment,
+settings and SSRF batches: +63 tests, +3 files (596 / 41). Delta after the CRM
+integration batch (`7cf8516`): a further **+80 tests, +2 files** — 47 pure
+authorization/signing/redaction cases and 33 database-backed conformance cases.
+Cumulative **+143 tests, +5 files**.
 No test skipped, weakened, or deleted. Two existing assertions were updated because
 they pinned the implementation form of a guard this work strengthened; both are
 itemised in `REPAIR_TRACKER.md` with the preserved property named.
 
 **Not run, and why:**
 - `prettier --check` — not a script in this repository; no root formatter config.
-- `npm audit` — no reachable advisory API from this environment (**R-12**).
+- ~~`npm audit` — no reachable advisory API.~~ Now covered: `npm ci` ran a full
+  advisory audit and reported **0 vulnerabilities** (R-12 closed).
 - Browser E2E — no headless browser available (**R-08**).
 - Migration against a real database — no production or staging database reachable
   (**R-13**). Existing tests use isolated temporary databases.
@@ -99,7 +105,11 @@ Ordered by what they would cost if ignored.
 | **R-02** | Notification preferences have no persistence. The UI now says so honestly instead of faking a save. | Low | Needs a `NotificationPreference` model plus an additive migration. Deliberately not bundled into a UI commit. |
 | **R-04** | Duplicated API surfaces: `security/ssh` vs `security/ssh-keys` (both write `db.sshKey`), `deploy` vs `deployments`, `ci` vs `ci-cd`, and `apps`/`applications`/`sites`. | Low | Not removed: an authenticated working endpoint may have consumers outside this repository. `apps`/`applications`/`sites` are **not** assumed to be duplicates. |
 | **R-10** | Four Node versions in play across one deployment path: CI builds on 22, the deploy job prepends v24.22.1 then v22.0.0, root `package.json` requires `>=20.9.0`, the nested tree requires `>=22.0.0`. | Low | Not shown to cause a failure, but a build-time/run-time mismatch presents confusingly. Pin deliberately. |
-| **R-12** | No dependency advisory scan performed. | Medium | Run `npm audit` where the advisory API is reachable. |
+| **R-12** | ~~No dependency advisory scan performed.~~ **CLOSED 2026-10-29.** `npm ci --include=dev` reported **0 vulnerabilities** across 649 packages once the registry was reachable. | ~~Medium~~ Closed | Re-run on each dependency bump; a clean result at one point in time is not a standing guarantee. |
+| **R-15** | The CRM ↔ Hosting-Portal document vault integration (`/api/internal/crm/*`, commit `7cf8516`) is **implemented and tested but not deployed, not provisioned and not consumed**. No credential exists, the additive migration has not run against production, the storage pools still have `bucketPath = null` in the development database, and no CRM code calls it. | Medium | Five prerequisites in `CRM_INTEGRATION_CONTRACT.md` §10, in order. Until the migration runs, every endpoint fails closed rather than silently succeeding — which is the intended behaviour, but it means the integration does nothing at all yet. |
+| **R-16** | The CRM's storage pools are unprovisioned: all six pool rows exist with `bucketPath = null`, so every upload is refused `409 POOL_NOT_PROVISIONED`. Pre-existing, not introduced by R-15, but it blocks the integration end to end. | Medium | An administrator must set a real backend path for `STUDENT_STORAGE` before any document can be stored. |
+| **R-17** | Document **malware scanning** (required by the CRM brief §10 step 4) was not located in the CRM and is not provided by the vault. Attachments arriving from WhatsApp would currently be stored unscanned. | **High** | Verify in the CRM repository whether a scanner exists. If not, add one before enabling the vault integration — a passport PDF from a messaging channel is the sharpest risk in the document pipeline. |
+| **R-18** | CRM-side residual risks recorded in `CRM_PHASE0_AUDIT.md`: **five divergent Prisma schemas** in-tree (610 canonical vs 276 / 276 / 217), overlapping model families (14 document models, 5 message, 5 consent, 5 campaign), `AiStudentMemory.studentId` and `InboundMessage.studentId` are plain strings with **no foreign key**, and duplicate application trees. | Medium | All are CRM-repository work. Not actionable from here, and not safe to guess at: reconciling them needs the CRM's own 531-test suite as the safety net. |
 | **R-13** | Tenant isolation verified on a representative sample (`sessions`, `projects`, `tasks`, `support-tickets`), not across all 91 models. Migration ordering not verified against the deployed database. | Medium | Needs a full handler review, ideally with a staging database to make it verifiable rather than inferential. |
 | **R-14** | Superseded `main` runs still **queue** rather than being cancelled, then fail fast. | Low | Deliberate: flipping the workflow-level group to `cancel-in-progress: true` could cancel the `deploy` job mid-flight, which is how a host ends up half-migrated. Ordering is enforced inside the release procedure instead. Residual cost is a run that fails in seconds with an accurate message. |
 
@@ -168,6 +178,22 @@ proven.**
 - **The UI fixes are not browser-verified.** R-08.
 - **Static audit only.** No penetration test, no dynamic analysis, no dependency
   advisory scan, no live database.
+
+### Scope note on the CRM integration
+
+The verdict above covers the deployment pipeline, the settings controls and the
+SSRF fix. The CRM ↔ Hosting-Portal document vault integration added in commit
+`7cf8516` is assessed separately in `CRM_INTEGRATION_CONTRACT.md` §10, and its
+status is **implemented and tested, not deployed, not provisioned, not consumed**.
+It does not change this verdict in either direction: it adds no risk to the
+existing deployment path (the schema change is additive, the browser-session
+endpoints are untouched, and every new route fails closed), and it delivers no
+production value until its five prerequisites are met.
+
+**R-17 is the one that should gate enabling it.** Document malware scanning was
+not located in the CRM and is not provided by the vault, so turning the
+integration on today would mean storing WhatsApp attachments — including
+passports — unscanned. Verify that in the CRM repository first.
 
 ### What would move this to READY
 
