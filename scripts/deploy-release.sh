@@ -212,8 +212,14 @@ trap 'code=$?; trap - EXIT; if (( code != 0 && changed == 1 )); then log "deploy
 
 # ── 3c. Move to the target commit ────────────────────────────────────────────
 git fetch origin main
-git checkout main >/dev/null
+LATEST_MAIN_SHA="$(git rev-parse origin/main)"
+[[ "$SHA" == "$LATEST_MAIN_SHA" ]] || fail "commit ${SHA} is stale; origin/main is now ${LATEST_MAIN_SHA}. Refusing to deploy an obsolete queued run."
 git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on origin/main; refusing to deploy something that was not merged"
+if ! git merge-base --is-ancestor "$PREV_SHA" "$SHA"; then
+  [[ "${ALLOW_RELEASE_ROLLBACK:-0}" == "1" ]] || fail "refusing backwards deployment from ${PREV_SHA} to ${SHA}. For an explicitly approved rollback, set ALLOW_RELEASE_ROLLBACK=1 and follow the recovery runbook."
+  log "WARNING: explicitly authorized backwards deployment from ${PREV_SHA} to ${SHA}"
+fi
+git checkout main >/dev/null
 git reset --hard "$SHA" >/dev/null
 changed=1
 log "checked out ${SHA}"
