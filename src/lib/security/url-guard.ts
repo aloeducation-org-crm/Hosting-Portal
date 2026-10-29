@@ -112,6 +112,44 @@ export interface WebhookUrlValidation {
 }
 
 /**
+ * Asserts that a URL this server is about to fetch does not target a cloud
+ * metadata service or link-local address, and throws if it does.
+ *
+ * This is the floor, not the whole policy. Some callers legitimately probe the
+ * host they run on — `verifyDeployment` defaults to `http://127.0.0.1:<port>` —
+ * so loopback and RFC1918 are *not* rejected here; callers that talk to the
+ * public internet should use `validateExternalWebhookUrl`, which rejects those
+ * too. What is never acceptable from any caller is a request to an instance
+ * metadata endpoint: those hand out cloud credentials, and the response is easy
+ * to reflect back out through a persisted health or probe result.
+ *
+ * Both the base URL and any path that could replace it must be checked: a
+ * `healthPath` of `http://169.254.169.254/latest/meta-data/` passed to
+ * `new URL(path, base)` discards the base entirely, so guarding only the base
+ * would leave the composed request unprotected.
+ */
+export function assertNotCloudMetadataUrl(raw: string, context = "URL"): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${context} is not a valid absolute URL`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${context} must use http:// or https://`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${context} must not embed credentials`);
+  }
+  if (isCloudMetadataOrLinkLocalHost(parsed.hostname)) {
+    throw new Error(
+      `${context} cannot target a cloud metadata or link-local address (SSRF protection)`,
+    );
+  }
+  return parsed;
+}
+
+/**
  * Validates customer-supplied outbound webhook URLs.
  * Enforces HTTPS (unless ALLOW_INSECURE_WEBHOOK_HTTP=true in local tests),
  * rejects embedded credentials, and blocks loopback, RFC1918, and IMDS hosts.

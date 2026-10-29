@@ -6,12 +6,32 @@ import { db } from "@/lib/db";
 import { validateDeployConfig, deployConfigSchema } from "@/lib/deploy/config";
 import { badRequest, canAccessProject, errorResponse, forbidden, notFound } from "@/lib/deploy/http";
 import { createAuditLog } from "@/lib/audit";
+import { assertNotCloudMetadataUrl } from '@/lib/security/url-guard';
 
 const patchSchema = z.object({
   productionBranch: z.string().regex(/^[A-Za-z0-9._\/-]{1,100}$/).optional(),
   previewBranches: z.array(z.string().regex(/^[A-Za-z0-9._\/-]{1,100}$/)).max(20).optional(),
   autoDeploy: z.boolean().optional(),
-  healthUrl: z.string().url().nullable().optional(),
+  // Same reflected-SSRF surface as the import route: this value is probed
+  // server-side by verifyDeployment and the result is persisted.
+  healthUrl: z
+    .string()
+    .url()
+    .max(2048)
+    .nullable()
+    .optional()
+    .refine(
+      (value) => {
+        if (!value) return true;
+        try {
+          assertNotCloudMetadataUrl(value, 'healthUrl');
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'healthUrl cannot target a cloud metadata or link-local address' },
+    ),
   healthPath: z.string().regex(/^\/[A-Za-z0-9/._-]*$/).max(200).optional(),
   port: z.number().int().min(1024).max(65535).optional(),
   config: deployConfigSchema.partial().optional(),
