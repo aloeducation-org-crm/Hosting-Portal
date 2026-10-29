@@ -34,8 +34,21 @@ The repository is public, so GitHub's required-reviewer protection **is availabl
 configuration gap, not a platform limitation. It is a repository-admin action and cannot be set
 from a workflow file.
 
-**Current production state.** Last recorded production deployment: `54e3454`, `2026-10-28T11:09:30Z`.
-Every `main` run since PR #11 has failed before a successful deploy:
+**Current production state — UNCONFIRMED, and internally inconsistent.**
+
+Two facts do not agree, and neither can be reconciled from available evidence:
+
+| Evidence | Value |
+|---|---|
+| Deploy job for the PR #11 merge run `40439634377` (`ec7ff40`) | **success** |
+| Every `production` environment deployment record | `54e3454` — PR **#9**'s merge commit, `2026-10-26` |
+| Most recent deployment record `7383720425`, created `2026-10-28T11:09:30Z` | status **failure** |
+
+A deployment created on `2026-10-28` that records `54e3454` — a `2026-10-26` commit, two merges
+behind — is consistent with the stale/backwards-release hazard PR #19 exists to fix, and not
+consistent with a clean fast-forward to `main`.
+
+Runs since then have not reached a successful deploy:
 
 | Run | Commit | Deploy job |
 |---|---|---|
@@ -44,10 +57,14 @@ Every `main` run since PR #11 has failed before a successful deploy:
 | `40662370310`, `40515206388` | — | cancelled |
 | `40493667038`, `40455213982` | — | failure |
 
-So production is running a release **older than `main`**, and no deployment has succeeded since
-PR #11. Today the dirty-checkout preflight failure (R-05) is the only thing preventing
-unattended deploys. **Clearing R-05 without first configuring a required reviewer converts the
-blocker into an unattended-deploy path.** Reviewer configuration must precede the merge.
+**Conclusion:** the exact commit running in production **cannot be established** from the
+available evidence. This is precisely the review item "confirm the exact production deployment
+target and current release", and it stays **OPEN**. It is not a documentation gap — the records
+disagree with each other.
+
+Today the dirty-checkout preflight failure (R-05) is the only thing preventing unattended
+deploys. **Clearing R-05 without first configuring a required reviewer converts the blocker into
+an unattended-deploy path.** Reviewer configuration must precede the merge.
 
 **Branch protection on `main`: NOT VERIFIED.** `GET /repos/…/branches/main/protection` returns
 `403 Resource not accessible by integration`. The available token has read-only `pull`
@@ -160,10 +177,10 @@ the CRM's identity, consent and document workflows, and the §0 scanning decisio
 | B-6 | Production database migration applied | **OPEN** — not run |
 | B-7 | Storage pools provisioned (`bucketPath`) | **OPEN** — all six `null` |
 | B-8 | Backup restore test | **OPEN** — no restore has been performed; do not claim verified |
-| B-9 | Production deployment verified | **OPEN** — no successful deploy since PR #11 |
-| B-10 | Rollback plan documented | **VERIFIED** — `docs/audit/DEPLOYMENT_RUNBOOK.md`, PR #19 |
-| B-11 | Provider conformance suite (contract §9) | **VERIFIED on provider side** — 80 tests, 676 total at `7cf8516` |
-| B-12 | Student ID single allocation path | **VERIFIED** — confirmed in CRM source |
+| B-9 | Exact commit running in production | **OPEN** — deployment records all say `54e3454` while the PR #11 deploy job reported success at `ec7ff40`; the two cannot both be true |
+| B-10 | Rollback plan documented | **VERIFIED as documented** — `docs/audit/DEPLOYMENT_RUNBOOK.md` on PR #19. Not rehearsed against a live host. |
+| B-11 | Provider conformance suite | **PARTIAL** — contract §9 asserts 47 + 33 = 80 tests; CI on PR #19 head `a4c9b32` shows *Lint, typecheck, and tests* **pass**. The suite was **not** re-run by this pass, and the per-suite counts were not independently reproduced. |
+| B-12 | Student ID single allocation path | **VERIFIED** — confirmed in CRM source at `642f4f9` |
 
 ---
 
