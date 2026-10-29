@@ -402,7 +402,7 @@ describe("deployment scripts", () => {
   });
 
   it("ignores the runtime release identity so inline deploys do not dirty the checkout", () => {
-    expect(read(".gitignore")).toMatch(/^release-identity\\.json$/m);
+    expect(read(".gitignore")).toMatch(/^release-identity\.json$/m);
   });
 
   it("proves the running application reports the deployed commit, not merely that it answers", () => {
