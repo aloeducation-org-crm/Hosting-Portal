@@ -249,10 +249,11 @@ interface WorkflowJob {
   needs?: string | string[];
   if?: string;
   "runs-on"?: string;
+  "timeout-minutes"?: number;
   environment?: string | { name: string };
   concurrency?: { group: string; "cancel-in-progress": boolean };
   outputs?: Record<string, string>;
-  steps: Array<{ name?: string; uses?: string; run?: string; id?: string; env?: Record<string, string> }>;
+  steps: Array<{ name?: string; uses?: string; run?: string; id?: string; env?: Record<string, string>; with?: Record<string, unknown> }>;
 }
 interface Workflow {
   on: { push?: { branches?: string[] }; pull_request?: { branches?: string[] } };
@@ -308,9 +309,17 @@ describe("CI/CD workflow controls", () => {
     expect(allRuns(buildJob)).toContain(".deploy-digest");
     expect(allRuns(preflightJob)).toContain("artifact digest mismatch");
     expect(allRuns(deployJob)).toContain("artifact digest mismatch");
-    const uploaded = buildJob.steps.find((s) => s.uses?.startsWith("actions/upload-artifact"))?.with as unknown as { path: string };
+    const uploaded = buildJob.steps.find((s) => s.uses?.startsWith("actions/upload-artifact"))?.with as unknown as {
+      path: string;
+      "include-hidden-files"?: boolean;
+    };
     expect(uploaded.path).toContain(".deploy-digest");
     expect(uploaded.path).toContain(".next/standalone");
+    // Without include-hidden-files: true, actions/upload-artifact@v4 drops
+    // .deploy-digest and hidden .next/.prisma directories inside standalone.
+    expect(uploaded["include-hidden-files"]).toBe(true);
+    expect(preflightJob["timeout-minutes"]).toBeGreaterThanOrEqual(15);
+    expect(deployJob["timeout-minutes"]).toBeGreaterThanOrEqual(20);
   });
 
   it("delegates every deployment decision to a versioned script instead of inline YAML", () => {

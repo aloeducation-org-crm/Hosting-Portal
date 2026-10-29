@@ -162,13 +162,19 @@ case "$COMMAND" in
     START_TIME=$(date +%s%N)
     validate_build_cmd "$BUILD_CMD"
     # Use bash -c with validated command instead of eval (validated against injection)
-    BUILD_OUTPUT=$(bash -c "$BUILD_CMD" 2>&1) || true
+    BUILD_EXIT=0
+    BUILD_OUTPUT=$(bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
     END_TIME=$(date +%s%N)
     DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
 
     cd - >/dev/null
 
     OUTPUT_SAFE=$(echo "$BUILD_OUTPUT" | tr '\n' ' ' | sed 's/\"/\\\\"/g' | head -c 8000)
+
+    if [[ "$BUILD_EXIT" -ne 0 ]]; then
+      echo "{\"success\":false,\"exitCode\":$BUILD_EXIT,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RELEASE_DIR\",\"buildCommand\":\"$BUILD_CMD\",\"durationMs\":$DURATION_MS,\"output\":\"$OUTPUT_SAFE\",\"error\":\"Build exited with code $BUILD_EXIT\"}"
+      exit "$BUILD_EXIT"
+    fi
 
     echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RELEASE_DIR\",\"buildCommand\":\"$BUILD_CMD\",\"durationMs\":$DURATION_MS,\"output\":\"$OUTPUT_SAFE\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
     ;;
@@ -178,15 +184,25 @@ case "$COMMAND" in
     RELEASE_PATH="${2:?Usage: switch <domain> <release_path>}"
     validate_domain "$DOMAIN"
 
-    if [[ ! -d "$RELEASE_PATH" ]]; then
-      echo "{\"success\":false,\"error\":\"Release path does not exist: $RELEASE_PATH\"}"
+    if [[ "$RELEASE_PATH" == *".."* ]]; then
+      die "arg-validation" "Release path must not contain '..'"
+    fi
+
+    EXPECTED_PREFIX="$(realpath -m "$SITE_BASE/$DOMAIN/releases")/"
+    RESOLVED_PATH="$(realpath -m "$RELEASE_PATH")"
+    if [[ "$RESOLVED_PATH" != "${EXPECTED_PREFIX}"* ]]; then
+      die "arg-validation" "Release path must reside under $EXPECTED_PREFIX"
+    fi
+
+    if [[ ! -d "$RESOLVED_PATH" ]]; then
+      echo "{\"success\":false,\"error\":\"Release path does not exist: $RESOLVED_PATH\"}"
       exit 1
     fi
 
     SITE_DIR="$SITE_BASE/$DOMAIN"
-    ln -sfn "$RELEASE_PATH" "$SITE_DIR/current"
+    ln -sfn "$RESOLVED_PATH" "$SITE_DIR/current"
 
-    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RELEASE_PATH\",\"currentSymlink\":\"$SITE_DIR/current\",\"switchedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RESOLVED_PATH\",\"currentSymlink\":\"$SITE_DIR/current\",\"switchedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
     ;;
 
   rollback)
@@ -209,7 +225,7 @@ case "$COMMAND" in
       CURRENT_TARGET=""
     fi
 
-    # List releases sorted by time (newest last)
+    # List releases sorted chronologically ascending (oldest first, newest last)
     mapfile -t ALL_RELEASES < <(ls -1d "$RELEASES_DIR"/*/ 2>/dev/null | sort)
 
     if [[ ${#ALL_RELEASES[@]} -eq 0 ]]; then
@@ -217,22 +233,22 @@ case "$COMMAND" in
       exit 1
     fi
 
-    # Find the release before current (or the latest if no current)
+    # Find the release immediately BEFORE current (older than current)
     PREV_RELEASE=""
-    FOUND_CURRENT=false
+    LAST_SEEN=""
+    MATCHED_CURRENT=false
     for rel in "${ALL_RELEASES[@]}"; do
       rel=$(echo "$rel" | sed 's:/$::')
-      if [[ "$FOUND_CURRENT" == "true" && -n "$rel" ]]; then
-        PREV_RELEASE="$rel"
+      if [[ "$rel" == "$CURRENT_TARGET" ]]; then
+        MATCHED_CURRENT=true
+        PREV_RELEASE="$LAST_SEEN"
         break
       fi
-      if [[ "$rel" == "$CURRENT_TARGET" ]]; then
-        FOUND_CURRENT=true
-      fi
+      LAST_SEEN="$rel"
     done
 
-    # If we're at the latest or no current, use second-to-last
-    if [[ -z "$PREV_RELEASE" && ${#ALL_RELEASES[@]} -ge 2 ]]; then
+    # If no current symlink or current was not inside releases/, use second-to-last
+    if [[ "$MATCHED_CURRENT" == "false" && ${#ALL_RELEASES[@]} -ge 2 ]]; then
       PREV_RELEASE=$(echo "${ALL_RELEASES[-2]}" | sed 's:/$::')
     fi
 
