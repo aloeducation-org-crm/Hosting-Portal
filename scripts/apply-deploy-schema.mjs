@@ -107,6 +107,9 @@ const MIGRATIONS = [
   { name: "20261028100000_app_center", kind: "ADDITIVE" },
   { name: "20261028130000_software_factory", kind: "ADDITIVE" },
   { name: "20261029090000_storage_pools_documents", kind: "ADDITIVE" },
+  // CRM ↔ Hosting-Portal service credentials. Purely additive: one new table
+  // (service_credentials) created with IF NOT EXISTS, no existing table altered.
+  { name: "20261029120000_service_credentials", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",
