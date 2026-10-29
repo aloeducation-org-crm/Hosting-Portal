@@ -4,6 +4,7 @@ import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { requireAdmin } from "@/lib/auth";
 import { callHelper } from "@/lib/helpers";
 import { db } from "@/lib/db";
+import { buildServerRegistryResponse } from "@/lib/infrastructure/server-registry";
 
 const createServerSchema = z.object({
   name: z.string().min(1).optional(),
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    let servers = await db.server.findMany({
+    const servers = await db.server.findMany({
       include: {
         ports: true,
         metrics: {
@@ -53,31 +54,25 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "asc" },
     });
 
-    if (servers.length === 0) {
-      const created = await db.server.create({
-        data: {
-          name: "Primary Edge & App Node",
-          hostname: (systemData.hostname as string) || "hosting.alolabs.net",
-          ip: "100.85.239.114",
-          os: "Ubuntu 22.04.5 LTS",
-          cpuCores: 4,
-          ramGb: 15,
-          diskGb: 100,
-          status: "ONLINE",
-          role: "WEB",
-          region: "ap-south-1",
-          maxSites: 250,
-        },
-        include: { ports: true, metrics: true },
-      });
-      servers = [created];
-    }
+    // The registry reports observed state only. An earlier version of this
+    // handler inserted a hardcoded "Primary Edge & App Node" (4 cores, 15 GB,
+    // 100 GB, IP 100.85.239.114, region ap-south-1) whenever the table was
+    // empty. Those figures were never measured on any host, and a GET was
+    // writing to the database to produce them. Both are removed: an empty
+    // registry now stays empty and says so (see `enrollmentRequired`).
+    const registry = buildServerRegistryResponse(servers);
 
     return NextResponse.json(
       apiSuccess({
-        ...servers[0],
+        // `...systemData` describes THIS control-plane host, measured by
+        // alo-health-helper. It is real, but it must never be read as a
+        // description of any registered remote server.
         ...systemData,
-        servers,
+        primary: registry.primary,
+        servers: registry.servers,
+        enrollmentRequired: registry.enrollmentRequired,
+        allServersUnavailable: registry.allServersUnavailable,
+        stateDetail: registry.stateDetail,
       })
     );
   } catch (e) {

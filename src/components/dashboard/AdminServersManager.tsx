@@ -7,6 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  describeServerStatus,
+  describeRegistryState,
+  formatAddress,
+  formatCapacity,
+  formatReported,
+} from "@/lib/infrastructure/server-presentation";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -50,6 +57,8 @@ interface ServerRecord {
 
 export function AdminServersManager() {
   const [servers, setServers] = useState<ServerRecord[]>([]);
+  // Reported by the API. Never inferred from the list contents.
+  const [allServersUnavailable, setAllServersUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -68,8 +77,11 @@ export function AdminServersManager() {
       const res = await fetch("/api/servers", { credentials: "include" });
       const body = await res.json();
       if (res.ok && body.success) {
-        const list = body.data?.servers || (body.data?.hostname ? [body.data] : []);
+        const list: ServerRecord[] = body.data?.servers ?? [];
         setServers(list);
+        // Server-reported, not inferred. Absent flag means "not stated", which
+        // must not be rendered as a healthy cluster.
+        setAllServersUnavailable(body.data?.allServersUnavailable === true);
       }
     } catch {
       toast.error("Failed to fetch servers");
@@ -148,6 +160,11 @@ export function AdminServersManager() {
     }
   }
 
+  const registryState = describeRegistryState({
+    servers,
+    allServersUnavailable,
+  });
+
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -177,9 +194,27 @@ export function AdminServersManager() {
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-[#E8501A]" />
         </div>
+      ) : registryState ? (
+        <Card
+          className={
+            registryState.tone === "warning"
+              ? "border-amber-200 bg-amber-50"
+              : "border-slate-200 bg-slate-50"
+          }
+        >
+          <CardContent className="py-10 text-center space-y-2">
+            <Server className="h-8 w-8 mx-auto text-slate-400" />
+            <p className="text-sm font-medium text-slate-800">
+              {registryState.tone === "warning" ? "No operational servers" : "No servers registered"}
+            </p>
+            <p className="text-xs text-slate-600 max-w-xl mx-auto">{registryState.message}</p>
+          </CardContent>
+        </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {servers.map((srv) => (
+          {servers.map((srv) => {
+            const statusDisplay = describeServerStatus(srv.status);
+            return (
             <Card key={srv.id} className="border-slate-200">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between">
@@ -192,18 +227,12 @@ export function AdminServersManager() {
                         {srv.name || srv.hostname}
                       </CardTitle>
                       <CardDescription className="text-xs font-mono">
-                        {srv.hostname} &bull; {srv.ip || "127.0.0.1"}
+                        {srv.hostname} &bull; {formatAddress(srv.ip)}
                       </CardDescription>
                     </div>
                   </div>
-                  <Badge
-                    className={
-                      srv.status === "MAINTENANCE"
-                        ? "bg-amber-100 text-amber-800 border-amber-200"
-                        : "bg-emerald-100 text-emerald-800 border-emerald-200"
-                    }
-                  >
-                    {srv.status || "ONLINE"}
+                  <Badge className={statusDisplay.className}>
+                    {statusDisplay.label}
                   </Badge>
                 </div>
               </CardHeader>
@@ -216,7 +245,7 @@ export function AdminServersManager() {
                       CPU
                     </div>
                     <div className="font-bold text-slate-900 mt-1">
-                      {srv.cpuCores ?? 4} vCPU
+                      {formatCapacity(srv.cpuCores, "vCPU")}
                     </div>
                   </div>
                   <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
@@ -225,7 +254,7 @@ export function AdminServersManager() {
                       Memory
                     </div>
                     <div className="font-bold text-slate-900 mt-1">
-                      {srv.ramGb ?? 15} GB RAM
+                      {formatCapacity(srv.ramGb, "GB RAM")}
                     </div>
                   </div>
                   <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-100">
@@ -234,15 +263,15 @@ export function AdminServersManager() {
                       Storage
                     </div>
                     <div className="font-bold text-slate-900 mt-1">
-                      {srv.diskGb ?? 100} GB SSD
+                      {formatCapacity(srv.diskGb, "GB disk")}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 pt-3">
                   <div>
-                    OS: <span className="font-medium text-slate-700">{srv.os || "Ubuntu 22.04 LTS"}</span> &bull; Role:{" "}
-                    <span className="font-medium text-slate-700">{srv.role || "WEB"}</span>
+                    OS: <span className="font-medium text-slate-700">{formatReported(srv.os)}</span> &bull; Role:{" "}
+                    <span className="font-medium text-slate-700">{formatReported(srv.role)}</span>
                   </div>
                   <Button
                     variant="outline"
@@ -256,7 +285,8 @@ export function AdminServersManager() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
