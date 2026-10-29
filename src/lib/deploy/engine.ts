@@ -228,17 +228,17 @@ async function prepareNextStandalone(
     );
   }
 
-  const bundleDir = path.join(checkoutDir, resolved);
+  const bundleDir = path.join(/*turbopackIgnore: true*/ checkoutDir, resolved);
   for (const asset of NEXT_STANDALONE_ASSETS) {
-    const from = path.join(checkoutDir, asset);
-    const to = path.join(bundleDir, asset);
+    const from = path.join(/*turbopackIgnore: true*/ checkoutDir, asset);
+    const to = path.join(/*turbopackIgnore: true*/ bundleDir, asset);
     if (await fs.stat(/*turbopackIgnore: true*/ to).catch(() => null)) continue;
     if (!(await fs.stat(/*turbopackIgnore: true*/ from).catch(() => null))) {
       await log("WARN", `${asset} is missing from the checkout; the bundle will be served without it`);
       continue;
     }
-    await fs.mkdir(path.dirname(to), { recursive: true });
-    await fs.cp(from, to, { recursive: true, errorOnExist: false });
+    await fs.mkdir(/*turbopackIgnore: true*/ path.dirname(to), { recursive: true });
+    await fs.cp(/*turbopackIgnore: true*/ from, /*turbopackIgnore: true*/ to, { recursive: true, errorOnExist: false });
     await log("INFO", `staged ${asset} into ${resolved} (not copied by next build)`);
   }
   return resolved;

@@ -34,7 +34,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const AGENT_VERSION = "1.1.0";
+export const AGENT_VERSION = "1.2.0";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -71,6 +71,27 @@ const ABS_PATH = /^\/[A-Za-z0-9_./\-]{1,300}$/;
 // Log files the agent will read: only .log files under /var/log or /opt/alo/logs,
 // no "..". Mirrors src/lib/agents/allowlist.ts exactly (see the parity test).
 const LOG_PATH = /^\/(var\/log|opt\/alo\/logs)\/[A-Za-z0-9_./-]+\.log$/;
+const DOMAIN_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+const GIT_REPO_URL =
+  /^(?:https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?\/[A-Za-z0-9._/-]+|git@[A-Za-z0-9.-]+:[A-Za-z0-9._/-]+|ssh:\/\/(?:git@)?[A-Za-z0-9.-]+(?::[0-9]{1,5})?\/[A-Za-z0-9._/-]+)$/;
+const GIT_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
+const BUILD_CMD = /^(?:npm|npx|yarn|pnpm|bun|make|composer|pip)(?:\s+[A-Za-z0-9._:@/=-]+)*$/;
+const SITE_RELEASE_PATH = /^\/srv\/alo-sites\/[A-Za-z0-9.-]+\/releases\/[A-Za-z0-9._-]+$/;
+const EMAIL_ADDR = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/;
+const DNS_TYPES = new Set(["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA"]);
+const DNS_NAME = /^(?:@|[A-Za-z0-9_][A-Za-z0-9._-]{0,119})$/;
+const DNS_VALUE = /^[A-Za-z0-9._:@/=+\- ]{1,255}$/;
+
+const validDomain = (d) =>
+  typeof d === "string" && d.length >= 3 && d.length <= 253 && !d.includes("..") && DOMAIN_NAME.test(d);
+const validRepo = (u) =>
+  typeof u === "string" && u.length >= 8 && u.length <= 300 && !u.includes("..") && GIT_REPO_URL.test(u);
+const validBranch = (b) =>
+  typeof b === "string" && b.length >= 1 && b.length <= 120 && !b.includes("..") && !b.endsWith(".lock") && GIT_BRANCH.test(b);
+const validBuildCmd = (c) =>
+  typeof c === "string" && c.length >= 3 && c.length <= 200 && !c.includes("..") && BUILD_CMD.test(c);
+const validDnsName = (n) => typeof n === "string" && !n.includes("..") && DNS_NAME.test(n);
+const validDnsValue = (v) => typeof v === "string" && DNS_VALUE.test(v);
 
 export const AGENT_ALLOWLIST = {
   "metrics.collect": {
@@ -172,6 +193,151 @@ export const AGENT_ALLOWLIST = {
       !a.path.includes("..") &&
       (a.lines === undefined || a.lines === null ||
         (typeof a.lines === "number" && Number.isInteger(a.lines) && a.lines >= 1 && a.lines <= 500)),
+  },
+  // ── Deploy (alo-deploy-helper) ────────────────────────────────────────────
+  "deploy.clone": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["clone", String(a.domain), String(a.repo), String(a.branch ?? "main")],
+    sudo: true,
+    risk: "REVERSIBLE",
+    timeoutMs: 5 * 60_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      validRepo(a.repo) &&
+      (a.branch === undefined || a.branch === null || validBranch(a.branch)),
+  },
+  "deploy.build": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["build", String(a.domain), String(a.buildCmd ?? "npm run build")],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 10 * 60_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      (a.buildCmd === undefined || a.buildCmd === null || validBuildCmd(a.buildCmd)),
+  },
+  "deploy.switch": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["switch", String(a.domain), String(a.releasePath)],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 30_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      typeof a.releasePath === "string" &&
+      a.releasePath.length <= 300 &&
+      !a.releasePath.includes("..") &&
+      SITE_RELEASE_PATH.test(a.releasePath) &&
+      a.releasePath.startsWith(`/srv/alo-sites/${a.domain}/releases/`),
+  },
+  "deploy.rollback": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["rollback", String(a.domain)],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 30_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "deploy.list": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["list-releases", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  // ── SSL / TLS (alo-ssl-helper) ────────────────────────────────────────────
+  "ssl.issue": {
+    executable: "alo-ssl-helper",
+    argv: (a) => ["issue", String(a.domain), ...(a.email ? [String(a.email)] : [])],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 5 * 60_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      (a.email === undefined ||
+        a.email === null ||
+        (typeof a.email === "string" && a.email.length >= 5 && a.email.length <= 200 && EMAIL_ADDR.test(a.email))),
+  },
+  "ssl.renew": {
+    executable: "alo-ssl-helper",
+    argv: (a) => ["renew", ...(a.domain ? [String(a.domain)] : [])],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 5 * 60_000,
+    validate: (a) => a.domain === undefined || a.domain === null || validDomain(a.domain),
+  },
+  "ssl.info": {
+    executable: "alo-ssl-helper",
+    argv: (a) => ["info", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "ssl.list": {
+    executable: "alo-ssl-helper",
+    argv: () => ["list"],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: () => true,
+  },
+  // ── DNS (alo-dns-helper) ──────────────────────────────────────────────────
+  "dns.add": {
+    executable: "alo-dns-helper",
+    argv: (a) => [
+      "add",
+      String(a.domain),
+      String(a.type),
+      String(a.name),
+      String(a.value),
+      String(a.ttl ?? 3600),
+      String(a.priority ?? 0),
+    ],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 15_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      typeof a.type === "string" &&
+      DNS_TYPES.has(a.type) &&
+      validDnsName(a.name) &&
+      validDnsValue(a.value) &&
+      (a.ttl === undefined ||
+        a.ttl === null ||
+        (typeof a.ttl === "number" && Number.isInteger(a.ttl) && a.ttl >= 60 && a.ttl <= 604_800)) &&
+      (a.priority === undefined ||
+        a.priority === null ||
+        (typeof a.priority === "number" && Number.isInteger(a.priority) && a.priority >= 0 && a.priority <= 65_535)),
+  },
+  "dns.delete": {
+    executable: "alo-dns-helper",
+    argv: (a) => ["delete", String(a.domain), String(a.type), String(a.name)],
+    sudo: true,
+    risk: "DESTRUCTIVE",
+    timeoutMs: 15_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      typeof a.type === "string" &&
+      DNS_TYPES.has(a.type) &&
+      validDnsName(a.name),
+  },
+  "dns.list": {
+    executable: "alo-dns-helper",
+    argv: (a) => ["list", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "dns.verify": {
+    executable: "alo-dns-helper",
+    argv: (a) => ["verify", String(a.domain), String(a.type), String(a.name), String(a.expected)],
+    risk: "READ_ONLY",
+    timeoutMs: 20_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      typeof a.type === "string" &&
+      DNS_TYPES.has(a.type) &&
+      validDnsName(a.name) &&
+      validDnsValue(a.expected),
   },
 };
 
@@ -517,10 +683,24 @@ export async function executeTask(task, secrets = []) {
     }
     const out = await run(entry.executable, argv, entry.timeoutMs, Boolean(entry.sudo));
     const succeeded = out.code === 0 || (task.command === "service.status" && out.code === 3);
+    let parsedData;
+    const trimmedOut = (out.stdout || "").trim();
+    if (trimmedOut.startsWith("{") && trimmedOut.endsWith("}")) {
+      try {
+        parsedData = JSON.parse(sanitize(trimmedOut, secrets));
+      } catch {
+        parsedData = undefined;
+      }
+    }
     return {
       status: succeeded ? "SUCCEEDED" : "FAILED",
       exitCode: out.code,
-      result: { command: task.command, argv: [entry.executable, ...argv], stdoutHead: (out.stdout || "").slice(0, 400) },
+      result: {
+        command: task.command,
+        argv: [entry.executable, ...argv],
+        stdoutHead: (out.stdout || "").slice(0, 400),
+        ...(parsedData !== undefined ? { data: parsedData } : {}),
+      },
       logs: sanitize(`${out.stdout || ""}\n${out.stderr || ""}`.trim(), secrets),
       error: out.error ? sanitize(out.error, secrets) : succeeded ? undefined : sanitize((out.stderr || "").slice(0, 500), secrets) || `exit code ${out.code}`,
       durationMs: Date.now() - started,

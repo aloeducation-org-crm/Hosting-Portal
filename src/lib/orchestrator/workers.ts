@@ -442,7 +442,8 @@ registerWorker(
         const root = await resolveScanRoot(input);
         await ctx.progress(20, `scanning ${root}`);
         for await (const rel of walk(root, 400)) {
-          const content = await fs.readFile(path.join(root, rel), "utf8").catch(() => null);
+          const filePath = path.join(/*turbopackIgnore: true*/ root, rel);
+          const content = await fs.readFile(/*turbopackIgnore: true*/ filePath, "utf8").catch(() => null);
           if (content === null) continue;
           inspect(rel, content);
           if (scanned >= 400) break;
@@ -485,11 +486,11 @@ async function* walk(root: string, budget: number): AsyncGenerator<string> {
   const stack: string[] = [""];
   while (stack.length && emitted < budget) {
     const rel = stack.pop() as string;
-    const abs = path.join(root, rel);
+    const abs = path.join(/*turbopackIgnore: true*/ root, rel);
     let names: string[];
     let kinds: Record<string, "dir" | "file">;
     try {
-      const entries = await fs.readdir(abs, { withFileTypes: true });
+      const entries = await fs.readdir(/*turbopackIgnore: true*/ abs, { withFileTypes: true });
       names = entries.map((e) => String(e.name));
       kinds = Object.fromEntries(entries.map((e) => [String(e.name), e.isDirectory() ? "dir" : e.isFile() ? "file" : "other"] as const)) as Record<string, "dir" | "file">;
     } catch {

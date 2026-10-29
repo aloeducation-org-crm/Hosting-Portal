@@ -5,9 +5,8 @@ import { requireSession } from '@/lib/auth';
 import { ensureDefaultAgentsSeeded } from '@/lib/seed-agents';
 import { apiError, apiSuccess, type ApiResponse } from '@/lib/response';
 import { requireAdmin } from '@/lib/auth';
-import { describeAgents } from '@/lib/agents/agent';
+import { describeAgents, dispatchTask, AGENT_SCOPES } from '@/lib/agents/agent';
 import { allowlistCatalogue } from '@/lib/agents/allowlist';
-import { dispatchTask } from '@/lib/agents/agent';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -104,7 +103,7 @@ export async function POST(request: NextRequest) {
       args: parsed.data.args ?? {},
       correlationId: parsed.data.correlationId,
       actorEmail: admin.email,
-      actorScopes: ['server:read', 'server:execute', 'monitoring:read', 'database:read', 'backup:read', 'backup:write'],
+      actorScopes: [...AGENT_SCOPES],
     });
     if (task.status === 'REFUSED') {
       return NextResponse.json(apiError(task.refuseReason ?? 'Task refused', 'TASK_REFUSED', { taskId: task.id }, 403), { status: 403 });

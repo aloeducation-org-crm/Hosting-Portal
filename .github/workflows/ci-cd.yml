@@ -85,6 +85,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hosting-release-${{ github.sha }}
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 2
           path: |
@@ -109,7 +110,7 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
-    timeout-minutes: 5
+    timeout-minutes: 20
     outputs:
       mode: ${{ steps.decide.outputs.mode }}
       decision: ${{ steps.decide.outputs.reason }}
@@ -139,13 +140,20 @@ jobs:
           DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
         run: |
           set -Eeuo pipefail
-          APP_DIR="$HOME/projects/Hosting-Portal"
-          test -d "$APP_DIR/.git" || { echo "::error::Canonical production checkout is missing"; exit 1; }
-          test -f "$APP_DIR/package.json" || { echo "::error::Canonical root package.json is missing"; exit 1; }
-          test -f "$APP_DIR/package-lock.json" || { echo "::error::package-lock.json is missing; refusing npm ci"; exit 1; }
-          if [[ -n "$(git -C "$APP_DIR" status --porcelain --untracked-files=normal)" ]]; then
-            echo "::error::Production checkout has local changes. Refusing to checkout or pull and risk overwriting them."
-            git -C "$APP_DIR" status --short --untracked-files=normal
+          APP_DIR="${ALO_INLINE_APP_DIR:-$HOME/projects/Hosting-Portal}"
+          if [[ ! -d "$APP_DIR/.git" && -d "$HOME/Hosting-Portal/.git" ]]; then
+            APP_DIR="$HOME/Hosting-Portal"
+          fi
+          if [[ -d "$APP_DIR/.git" ]]; then
+            test -f "$APP_DIR/package.json" || { echo "::error::Canonical root package.json is missing"; exit 1; }
+            test -f "$APP_DIR/package-lock.json" || { echo "::error::package-lock.json is missing; refusing npm ci"; exit 1; }
+            if [[ -n "$(git -C "$APP_DIR" status --porcelain --untracked-files=normal)" ]]; then
+              echo "::error::Production checkout has local changes. Refusing to checkout or pull and risk overwriting them."
+              git -C "$APP_DIR" status --short --untracked-files=normal
+              exit 1
+            fi
+          elif [[ ! -d "${ALO_HOSTING_ROOT:-$HOME/alo-hosting}" ]]; then
+            echo "::error::Canonical production checkout is missing ($HOME/projects/Hosting-Portal or $HOME/Hosting-Portal)"
             exit 1
           fi
           # Decides canonical (promote the CI artifact into an immutable release)
@@ -170,7 +178,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 30
     # One deployment at a time across every branch and every run, and never
     # cancelled mid-flight: an interrupted deploy is how a host ends up half
     # migrated. The per-ref CI group above cannot provide this.

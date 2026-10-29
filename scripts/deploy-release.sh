@@ -31,7 +31,15 @@ fail() { printf 'deploy: ERROR: %s\n' "$*" >&2; exit 1; }
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHA="${DEPLOY_COMMIT_SHA:-}"
 PAYLOAD="${DEPLOY_PAYLOAD_DIR:-${ROOT}/.deploy-artifact}"
-APP_DIR="${ALO_INLINE_APP_DIR:-${HOME}/projects/Hosting-Portal}"
+if [[ -n "${ALO_INLINE_APP_DIR:-}" ]]; then
+  APP_DIR="$ALO_INLINE_APP_DIR"
+elif [[ -d "${HOME}/projects/Hosting-Portal/.git" ]]; then
+  APP_DIR="${HOME}/projects/Hosting-Portal"
+elif [[ -d "${HOME}/Hosting-Portal/.git" ]]; then
+  APP_DIR="${HOME}/Hosting-Portal"
+else
+  APP_DIR="${HOME}/projects/Hosting-Portal"
+fi
 PORT="${PORT:-3051}"
 HEALTH_URL="http://127.0.0.1:${PORT}/api/health"
 LOGIN_URL="http://127.0.0.1:${PORT}/login"
@@ -163,6 +171,7 @@ restore() {
 restart_panel() {
   pm2 restart alo-hosting-portal --update-env >/dev/null 2>&1 \
     || pm2 restart alo-hosting --update-env >/dev/null 2>&1 \
+    || pm2 restart alo-dashboard --update-env >/dev/null 2>&1 \
     || PORT="$PORT" pm2 start npm --name "alo-hosting-portal" -- start >/dev/null 2>&1 \
     || { log "could not restart the panel through pm2"; return 1; }
   pm2 save >/dev/null 2>&1 || true

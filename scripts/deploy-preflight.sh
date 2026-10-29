@@ -24,7 +24,15 @@ PAYLOAD="${DEPLOY_PAYLOAD_DIR:-${ROOT}/.deploy-artifact}"
 APP_ROOT="${ALO_HOSTING_ROOT:-${HOME}/alo-hosting}"
 ENV_FILE="${PANEL_ENV_FILE:-/etc/alo-hosting/panel.env}"
 DB_FILE="${PRODUCTION_DB_FILE:-/var/lib/alo-hosting/alo.db}"
-INLINE_ROOT="${ALO_INLINE_APP_DIR:-${HOME}/projects/Hosting-Portal}"
+if [[ -n "${ALO_INLINE_APP_DIR:-}" ]]; then
+  INLINE_ROOT="$ALO_INLINE_APP_DIR"
+elif [[ -d "${HOME}/projects/Hosting-Portal/.git" ]]; then
+  INLINE_ROOT="${HOME}/projects/Hosting-Portal"
+elif [[ -d "${HOME}/Hosting-Portal/.git" ]]; then
+  INLINE_ROOT="${HOME}/Hosting-Portal"
+else
+  INLINE_ROOT="${HOME}/projects/Hosting-Portal"
+fi
 RELEASES="${APP_ROOT}/releases"
 
 bool() { if [[ "$1" == "0" ]]; then printf 'true'; else printf 'false'; fi; }
