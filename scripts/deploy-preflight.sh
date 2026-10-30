@@ -63,7 +63,18 @@ canonical_root=1; [[ -d "$APP_ROOT" ]] && canonical_root=0
 inline_is_git=1;  [[ -d "$INLINE_ROOT/.git" ]] && inline_is_git=0
 inline_clean=1
 if (( inline_is_git == 0 )); then
-  [[ -z "$(git -C "$INLINE_ROOT" status --porcelain --untracked-files=normal 2>/dev/null)" ]] && inline_clean=0
+  # Classified rather than "any output from git status": the deployment writes
+  # release-identity.json into this checkout so the running app can report its
+  # commit through /api/health, and counting that file as a local change made
+  # every deploy after the first one fail preflight (runs #54–#64). The
+  # classifier tolerates only untracked files it can validate as deployment
+  # output, so genuine uncommitted work still blocks the deployment.
+  if bash "$ROOT/scripts/host-checkout-status.sh" "$INLINE_ROOT" >/dev/null 2>&1; then
+    inline_clean=0
+  else
+    # Surface the offending paths in the job log; still read-only.
+    bash "$ROOT/scripts/host-checkout-status.sh" "$INLINE_ROOT" >&2 || true
+  fi
 fi
 pm2_present=1; command -v pm2 >/dev/null 2>&1 && pm2_present=0
 

@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { importRepository } from "@/lib/deploy/projects";
 import { createAuditLog } from "@/lib/audit";
 import { badRequest, canAccessProject, errorResponse } from "@/lib/deploy/http";
+import { assertNotCloudMetadataUrl } from '@/lib/security/url-guard';
 
 const importSchema = z.object({
   repository: z.string().min(3).max(200),
@@ -14,7 +15,28 @@ const importSchema = z.object({
   connectionId: z.string().optional(),
   autoDeploy: z.boolean().optional(),
   port: z.number().int().min(1024).max(65535).optional(),
-  healthUrl: z.string().url().optional(),
+  // Probed server-side by verifyDeployment during every deployment, and the
+  // result is persisted to deployment.healthResult. Without this it is a
+  // reflected SSRF: set healthUrl to an instance metadata endpoint and read the
+  // reply back out of the deployment record. Loopback and private ranges stay
+  // allowed because probing a service on the same host is the normal case.
+  healthUrl: z
+    .string()
+    .url()
+    .max(2048)
+    .optional()
+    .refine(
+      (value) => {
+        if (!value) return true;
+        try {
+          assertNotCloudMetadataUrl(value, 'healthUrl');
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'healthUrl cannot target a cloud metadata or link-local address' },
+    ),
   // Only used by the local staging harness; never by the webhook path.
   cloneUrlOverride: z.string().optional(),
 });

@@ -53,6 +53,116 @@ RUN_LOG="${LOG_DIR}/${SHA}-$(date -u +%Y%m%dT%H%M%SZ).log"
 exec > >(tee -a "$RUN_LOG") 2>&1
 log "commit ${SHA}; log ${RUN_LOG}"
 
+# ── 0. Is this release allowed to activate at all? ───────────────────────────
+# Decided before ANYTHING is touched and before the deployment shape is chosen,
+# so it protects the canonical path too — a stale or backwards release must not
+# be able to reach production through either shape.
+#
+# Two failure modes this closes, both observed in runs #54–#64:
+#   - Obsolete queued runs. Merge-to-main runs are serialized by the workflow's
+#     `hosting-production-deploy` group and never cancelled, so an old run waits
+#     its turn and then deploys. Commit 123d558 (run #62) is a direct ancestor
+#     of 7fc3d15 (run #64); only an unrelated preflight failure stopped it from
+#     resetting production backwards and reporting success.
+#   - A guard that passes vacuously. Actions checks out with `fetch-depth: 1`,
+#     and `git fetch origin main` in a shallow clone leaves `origin/main` at the
+#     run's own commit, so comparing against `git rev-parse origin/main` is true
+#     for exactly the stale run it should reject. The head of main is therefore
+#     resolved independently of the clone by scripts/latest-main-sha.mjs, and
+#     resolved-or-refuse: unknown means do not deploy.
+LATEST_MAIN_SHA="$(node "$ROOT/scripts/latest-main-sha.mjs" --ref main 2>/dev/null || true)"
+if [[ ! "$LATEST_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  log "WARNING: the head of main could not be resolved; the staleness guard fails closed"
+  LATEST_MAIN_SHA=""
+fi
+
+# The release that is serving right now, from the identity record the previous
+# deployment wrote; falling back to what the checkout points at. A host that has
+# never deployed through these scripts has neither, which is a first deployment,
+# not a rollback — the guard distinguishes those instead of guessing.
+RUNNING_SHA=""
+CANONICAL_ROOT="${ALO_HOSTING_ROOT:-${HOME}/alo-hosting}"
+if [[ -r "${CANONICAL_ROOT}/current/release-identity.json" ]]; then
+  RUNNING_SHA="$(node -e '
+    const fs = require("node:fs");
+    try {
+      const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (/^[0-9a-f]{40}$/.test(p.commitSha || "")) process.stdout.write(p.commitSha);
+    } catch { /* unknown stays unknown */ }
+  ' "${CANONICAL_ROOT}/current/release-identity.json" 2>/dev/null || true)"
+fi
+if [[ ! "$RUNNING_SHA" =~ ^[0-9a-f]{40}$ && -d "$APP_DIR/.git" ]]; then
+  if [[ -r "$APP_DIR/$IDENTITY_FILE" ]]; then
+    RUNNING_SHA="$(node -e '
+      const fs = require("node:fs");
+      try {
+        const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        if (/^[0-9a-f]{40}$/.test(p.commitSha || "")) process.stdout.write(p.commitSha);
+      } catch { /* unknown stays unknown */ }
+    ' "$APP_DIR/$IDENTITY_FILE" 2>/dev/null || true)"
+  fi
+  if [[ ! "$RUNNING_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    RUNNING_SHA="$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || true)"
+  fi
+fi
+[[ "$RUNNING_SHA" =~ ^[0-9a-f]{40}$ ]] || RUNNING_SHA=""
+
+# Ancestry needs real history. `git fetch origin main` without a refspec writes
+# only FETCH_HEAD in a shallow clone, so `origin/main` would stay stale and every
+# merge-base answer below would be meaningless (or a hard error).
+git -C "$ROOT" fetch --quiet origin 2>/dev/null || true
+if [[ -f "$(git -C "$ROOT" rev-parse --git-dir 2>/dev/null)/shallow" ]]; then
+  git -C "$ROOT" fetch --quiet --unshallow origin 2>/dev/null \
+    || git -C "$ROOT" fetch --quiet --deepen=500 origin 2>/dev/null \
+    || log "WARNING: history is still shallow; ancestry facts may be unavailable"
+fi
+git -C "$ROOT" fetch --quiet origin '+refs/heads/main:refs/remotes/origin/main' 2>/dev/null || true
+
+ancestor_or_unknown() {
+  # Echoes true / false / unknown. "unknown" is reported when either commit is
+  # absent from the local history, so the caller can fail closed instead of
+  # reading a git error as "not an ancestor".
+  local from="$1" to="$2"
+  [[ -n "$from" && -n "$to" ]] || { printf 'unknown'; return 0; }
+  git -C "$ROOT" cat-file -e "${from}^{commit}" 2>/dev/null || { printf 'unknown'; return 0; }
+  git -C "$ROOT" cat-file -e "${to}^{commit}"   2>/dev/null || { printf 'unknown'; return 0; }
+  if git -C "$ROOT" merge-base --is-ancestor "$from" "$to" 2>/dev/null; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+TARGET_ON_MAIN="$(ancestor_or_unknown "$SHA" "${LATEST_MAIN_SHA:-origin/main}")"
+RUNNING_ANCESTOR_OF_TARGET="$(ancestor_or_unknown "$RUNNING_SHA" "$SHA")"
+TARGET_ANCESTOR_OF_RUNNING="$(ancestor_or_unknown "$SHA" "$RUNNING_SHA")"
+
+json_string() {
+  # Quote a value as JSON without letting its content break the document, and
+  # without invoking a shell on it. Empty becomes null.
+  local value="$1"
+  if [[ -z "$value" ]]; then printf 'null'; return 0; fi
+  node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$value"
+}
+
+GUARD_FACTS="$(printf '{"targetSha":%s,"latestMainSha":%s,"runningSha":%s,"targetOnMain":%s,"runningIsAncestorOfTarget":%s,"targetIsAncestorOfRunning":%s}' \
+  "$(json_string "$SHA")" "$(json_string "$LATEST_MAIN_SHA")" "$(json_string "$RUNNING_SHA")" \
+  "$( [[ "$TARGET_ON_MAIN" == "true" ]] && echo true || echo false )" \
+  "$( [[ "$RUNNING_ANCESTOR_OF_TARGET" == "true" ]] && echo true || echo false )" \
+  "$( [[ "$TARGET_ANCESTOR_OF_RUNNING" == "true" ]] && echo true || echo false )")"
+
+GUARD_AUTH="$(printf '{"allowRollback":%s,"operator":%s,"reason":%s}' \
+  "$( [[ "${ALLOW_RELEASE_ROLLBACK:-0}" == "1" ]] && echo true || echo false )" \
+  "$(json_string "${RELEASE_ROLLBACK_OPERATOR:-}")" \
+  "$(json_string "${RELEASE_ROLLBACK_REASON:-}")")"
+
+GUARD_DECISION="$(printf '{"facts":%s,"authorization":%s}' "$GUARD_FACTS" "$GUARD_AUTH" \
+  | node "$ROOT/scripts/decide-release-activation.mjs")" \
+  || fail "release ${SHA} is not authorized to activate: $(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).reason)}catch{process.stdout.write(s.trim())}})' <<<"$GUARD_DECISION")"
+
+GUARD_ROLLBACK="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(String(JSON.parse(s).rollback===true))})' <<<"$GUARD_DECISION")"
+log "release guard: $(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);process.stdout.write(d.code+" — "+d.reason)})' <<<"$GUARD_DECISION")"
+
 # ── 1. Read-only preflight decides the shape ─────────────────────────────────
 export DEPLOY_COMMIT_SHA="$SHA" DEPLOY_PAYLOAD_DIR="$PAYLOAD" ALO_INLINE_APP_DIR="$APP_DIR"
 
@@ -211,6 +321,18 @@ changed=0
 trap 'code=$?; trap - EXIT; if (( code != 0 && changed == 1 )); then log "deployment failed after the checkout moved; attempting restore"; restore || log "MANUAL RECOVERY REQUIRED — see docs/DATABASE-RECOVERY-RUNBOOK.md"; fi; exit $code' EXIT
 
 # ── 3c. Move to the target commit ────────────────────────────────────────────
+# Section 0 already authorized this release against an authoritative main head.
+# Re-assert it here against the same resolved value rather than re-deriving it
+# from `git rev-parse origin/main`, which a shallow clone silently pins to this
+# run's own commit — the hole that made the original staleness check vacuous.
+[[ -n "$LATEST_MAIN_SHA" && "$SHA" == "$LATEST_MAIN_SHA" ]] \
+  || fail "commit ${SHA} is stale; main is now ${LATEST_MAIN_SHA:-<unresolved>}. Refusing to deploy an obsolete queued run."
+git fetch origin '+refs/heads/main:refs/remotes/origin/main'
+git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on origin/main; refusing to deploy something that was not merged"
+# Backwards movement was already decided in section 0 by the tested guard, which
+# reads the release that is actually serving rather than trusting HEAD. Kept as a
+# second, independent assertion because this is the last point before the tree
+# moves and the cost of being wrong is a production rollback nobody asked for.
 git fetch origin main
 LATEST_MAIN_SHA="$(git rev-parse origin/main)"
 [[ "$SHA" == "$LATEST_MAIN_SHA" ]] || fail "commit ${SHA} is stale; origin/main is now ${LATEST_MAIN_SHA}. Refusing to deploy an obsolete queued run."
@@ -220,6 +342,15 @@ if ! git merge-base --is-ancestor "$PREV_SHA" "$SHA"; then
   log "WARNING: explicitly authorized backwards deployment from ${PREV_SHA} to ${SHA}"
 fi
 git checkout main >/dev/null
+# Last revalidation before the only irreversible step. The workflow's
+# single-flight group makes deploys run one at a time, but a run can sit in that
+# queue for hours — run #62 waited two — so "was latest when the run started" is
+# not evidence of "is latest now". Anything that fails here fails before
+# `changed=1`, so nothing has been touched and no restore is needed.
+REVALIDATED_MAIN_SHA="$(node "$ROOT/scripts/latest-main-sha.mjs" --ref main 2>/dev/null || true)"
+if [[ "$REVALIDATED_MAIN_SHA" =~ ^[0-9a-f]{40}$ && "$REVALIDATED_MAIN_SHA" != "$SHA" ]]; then
+  fail "main advanced to ${REVALIDATED_MAIN_SHA} while this run waited to deploy ${SHA}. Refusing to activate a superseded release; re-run the workflow for the new head."
+fi
 git reset --hard "$SHA" >/dev/null
 changed=1
 log "checked out ${SHA}"
@@ -254,6 +385,31 @@ cat > "$IDENTITY_FILE" <<JSON
 }
 JSON
 log "recorded release identity ${DEPLOYMENT_ID}"
+
+# ── 3e-bis. Attribute the rollback, if this was one ──────────────────────────
+# A rollback is the only deployment that knowingly moves production backwards,
+# so it is the one that must still answer "who, from what, to what, why" months
+# later. The record is appended to the deploy-log directory OUTSIDE the Git
+# checkout: writing it into the tree would make the next deployment's dirty-tree
+# check fail, which is precisely the deadlock that blocked runs #54–#64.
+if [[ "$GUARD_ROLLBACK" == "true" ]]; then
+  ROLLBACK_AUDIT_FILE="${ALO_ROLLBACK_AUDIT_FILE:-${LOG_DIR}/rollback-audit.jsonl}"
+  node -e '
+    const fs = require("node:fs");
+    const record = JSON.parse(process.argv[1]);
+    record.deploymentId = process.argv[2];
+    fs.appendFileSync(process.argv[3], JSON.stringify(record) + "\n", { mode: 0o640 });
+  ' "$(printf '{"event":"release-rollback","recordedAt":"%s","operator":%s,"reason":%s,"sourceRelease":%s,"targetRelease":%s,"mainHeadAtDecision":%s,"result":"authorized"}' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(json_string "${RELEASE_ROLLBACK_OPERATOR:-}")" \
+        "$(json_string "${RELEASE_ROLLBACK_REASON:-}")" \
+        "$(json_string "$RUNNING_SHA")" \
+        "$(json_string "$SHA")" \
+        "$(json_string "$LATEST_MAIN_SHA")")" \
+     "$DEPLOYMENT_ID" "$ROLLBACK_AUDIT_FILE" \
+    && log "rollback audit record appended to ${ROLLBACK_AUDIT_FILE}" \
+    || log "WARNING: the rollback audit record could not be written to ${ROLLBACK_AUDIT_FILE}"
+fi
 
 restart_panel
 

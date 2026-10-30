@@ -5,6 +5,7 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { redact } from "./redact";
+import { assertNotCloudMetadataUrl } from "@/lib/security/url-guard";
 import type { ReleaseMarker, ServiceManager } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -194,6 +195,46 @@ export async function verifyDeployment(options: {
   const { baseUrl, healthPath, expectedSha, expectedDeploymentId } = options;
   const attempts = options.attempts ?? 12;
   const delayMs = options.delayMs ?? 400;
+
+  // `baseUrl` comes from `project.healthUrl`, which a user with WEBSITE_CREATE
+  // can set, and this result is persisted to `deployment.healthResult` — so an
+  // unguarded probe here is a reflected SSRF: point healthUrl at an instance
+  // metadata service and read the reply back out of the deployment record.
+  //
+  // Loopback and private ranges stay allowed because probing a service on the
+  // same host is the normal case (the default is 127.0.0.1). Metadata and
+  // link-local targets are never a legitimate deployment health endpoint.
+  //
+  // The composed URL is what gets checked, not just the base: `healthPath` is
+  // also user-influenced and an absolute value replaces `baseUrl` entirely.
+  const rejected = (message: string): VerifyResult => ({
+    ok: false,
+    httpStatus: null,
+    marker: null,
+    reason: message,
+    attempts: 0,
+  });
+
+  try {
+    assertNotCloudMetadataUrl(baseUrl, "healthUrl");
+  } catch (error) {
+    return rejected(error instanceof Error ? error.message : "healthUrl was rejected");
+  }
+
+  // Composed inside the same guard: `new URL()` throws on a malformed base, and
+  // this function reports failure through its return value rather than throwing
+  // past the deployment pipeline.
+  for (const [context, compose] of [
+    ["health probe target", () => new URL(healthPath, baseUrl).toString()],
+    ["release marker target", () => new URL(MARKER_PATH, baseUrl).toString()],
+  ] as const) {
+    try {
+      assertNotCloudMetadataUrl(compose(), context);
+    } catch (error) {
+      return rejected(error instanceof Error ? error.message : `${context} was rejected`);
+    }
+  }
+
   let lastStatus: number | null = null;
   let lastReason = "health endpoint never returned 2xx";
   for (let i = 1; i <= attempts; i++) {

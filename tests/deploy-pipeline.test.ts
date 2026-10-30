@@ -275,6 +275,50 @@ describe("CI/CD workflow controls", () => {
     expect(workflow.permissions).toEqual({ contents: "read" });
   });
 
+  it("validates every shell program in CI, not just the ones named *.sh", () => {
+    // 38 of the shell programs here are the extension-less helpers that agents
+    // execute on customer servers (helpers/alo-*, server-helpers/alo-*). A
+    // `-name '*.sh'` filter checks none of them and still reports green, so the
+    // gate would pass while the highest-privilege scripts go unvalidated.
+    const verifyRuns = (workflow.jobs.verify.steps ?? [])
+      .map((step) => String(step.run ?? ""))
+      .join("\n");
+    expect(verifyRuns).toContain("bash -n");
+    expect(verifyRuns).toContain("head -n1");
+    // The selection must be by shebang as well as extension. Asserted on the
+    // actual find invocation, because prose in the same step explains the old
+    // `-name '*.sh'` filter and would trip a naive whole-step match.
+    const findLine = verifyRuns
+      .split("\n")
+      .find((line) => line.includes("find scripts helpers server-helpers"));
+    expect(findLine).toBeTruthy();
+    expect(findLine).not.toContain("-name");
+    expect(verifyRuns).toMatch(/head -n1 "\$file" \| grep -qE/);
+    // And the gate fails if it ever matches nothing, rather than passing vacuously.
+    expect(verifyRuns).toContain("checked");
+    expect(verifyRuns).toContain("-ge 40");
+
+    // Prove the claim by running the same selection locally.
+    const found = execFileSync(
+      "bash",
+      [
+        "-c",
+        `cd "$1" && count=0
+         while IFS= read -r -d '' file; do
+           if [[ "$file" == *.sh ]] || head -n1 "$file" | grep -qE '^#!.*\\b(ba|da)?sh\\b'; then
+             bash -n "$file" || exit 1
+             count=$((count + 1))
+           fi
+         done < <(find scripts helpers server-helpers install-scripts deploy agent -type f -print0 2>/dev/null)
+         echo "$count"`,
+        "shell-gate",
+        REPO,
+      ],
+      { encoding: "utf8" },
+    ).trim();
+    expect(Number(found)).toBeGreaterThanOrEqual(40);
+  });
+
   it("gates the only mutating job behind the production environment and a global single flight", () => {
     expect(deployJob.environment).toBe("production");
     expect(deployJob.concurrency?.group).toBe("hosting-production-deploy");
@@ -297,7 +341,13 @@ describe("CI/CD workflow controls", () => {
   it("keeps the preflight job read-only: no install, build, migration or restart in the app checkout", () => {
     const runs = allRuns(preflightJob);
     expect(runs).toContain("deploy-preflight.sh");
-    expect(runs).toContain("status --porcelain");
+    // The dirty-tree rule is delegated to the versioned classifier rather than
+    // restated as an inline `git status` test, so it lives in one reviewable,
+    // unit-tested place. It still refuses a checkout with real local changes,
+    // and it no longer refuses one whose only "change" is the release identity
+    // record the previous deployment wrote — the loop that blocked runs #54–#64.
+    expect(runs).toContain("host-checkout-status.sh");
+    expect(runs).toContain("Production checkout has local changes");
     for (const forbidden of ["pm2 restart", "systemctl", "apply-deploy-schema", "npm run build", "git pull", "git checkout main", "git reset"]) {
       expect(runs, `preflight must not run: ${forbidden}`).not.toContain(forbidden);
     }
@@ -392,6 +442,18 @@ describe("deployment scripts", () => {
   });
 
   it("refuses stale queued runs and backwards releases unless rollback is explicitly authorized", () => {
+    // main's head is resolved independently of the local clone. The previous
+    // form, `LATEST_MAIN_SHA="$(git rev-parse origin/main)"`, is asserted absent
+    // below: Actions checks out with fetch-depth 1, and `git fetch origin main`
+    // in a shallow clone leaves origin/main at this run's own commit, so that
+    // comparison passed for exactly the stale run it existed to reject.
+    expect(releaseScript).toContain("latest-main-sha.mjs");
+    expect(releaseScript).not.toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
+    expect(releaseScript).toContain('"$SHA" == "$LATEST_MAIN_SHA"');
+    // The decision itself is made by the tested guard, not by shell string
+    // comparison, and it is made before either deployment shape is chosen.
+    expect(releaseScript).toContain("decide-release-activation.mjs");
+    expect(releaseScript).toContain("GUARD_DECISION=");
     expect(releaseScript).toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
     expect(releaseScript).toContain('[[ "$SHA" == "$LATEST_MAIN_SHA" ]]');
     expect(releaseScript).toContain('git merge-base --is-ancestor "$PREV_SHA" "$SHA"');
@@ -399,6 +461,13 @@ describe("deployment scripts", () => {
     expect(releaseScript).toContain("refusing backwards deployment");
     expect(releaseScript).toContain('git merge-base --is-ancestor "$SHA" origin/main');
     expect(releaseScript).toContain("refusing to deploy something that was not merged");
+    // An authorized rollback has to be attributable to a person and a reason.
+    expect(releaseScript).toContain("RELEASE_ROLLBACK_OPERATOR");
+    expect(releaseScript).toContain("RELEASE_ROLLBACK_REASON");
+  });
+
+  it("ignores the runtime release identity so inline deploys do not dirty the checkout", () => {
+    expect(read(".gitignore")).toMatch(/^release-identity\.json$/m);
   });
 
   it("ignores the runtime release identity so inline deploys do not dirty the checkout", () => {

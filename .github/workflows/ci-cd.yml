@@ -9,6 +9,34 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # The only supported way to move production backwards. A rollback is refused
+  # by scripts/deploy-release.sh unless it is deliberate and attributed, so the
+  # intent has to be expressible somewhere: these inputs are chosen at dispatch
+  # time by an operator with write access to this repository, which means a
+  # rollback cannot be armed permanently by a stored variable someone forgets,
+  # and the operator and reason are captured in the rollback audit record.
+  #
+  # Dispatching from a branch other than main cannot reach production: every
+  # deployment job below requires github.ref == 'refs/heads/main', the release
+  # guard requires the target to be merged into main, and the payload digest is
+  # still verified against what CI built.
+  workflow_dispatch:
+    inputs:
+      allow_rollback:
+        description: 'Set to 1 to authorize moving production to an OLDER commit that is merged in main. Leave empty for a normal forward release.'
+        required: false
+        default: ''
+        type: string
+      rollback_operator:
+        description: 'Who authorized this rollback (recorded in the rollback audit trail).'
+        required: false
+        default: ''
+        type: string
+      rollback_reason:
+        description: 'Why the newer release must be withdrawn (recorded in the rollback audit trail).'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -34,6 +62,27 @@ jobs:
       - name: Validate all shell scripts parse
         run: |
           set -Eeuo pipefail
+          # Matched by shebang as well as by extension: 38 of the shell programs
+          # in this repository are the extension-less helpers (`helpers/alo-*`,
+          # `server-helpers/alo-*`) that the agents execute on customer servers.
+          # A `-name '*.sh'` filter silently checks none of them, so the gate
+          # reports green while the highest-privilege scripts go unvalidated.
+          failed=0
+          checked=0
+          while IFS= read -r -d '' file; do
+            if [[ "$file" == *.sh ]] || head -n1 "$file" | grep -qE '^#!.*\b(ba|da)?sh\b'; then
+              checked=$((checked + 1))
+              if ! bash -n "$file" 2>/tmp/shell-syntax-error; then
+                echo "::error file=${file}::shell syntax error"
+                cat /tmp/shell-syntax-error
+                failed=1
+              fi
+            fi
+          done < <(find scripts helpers server-helpers install-scripts deploy agent -type f -print0 2>/dev/null)
+          echo "validated ${checked} shell programs"
+          # A gate that silently matched nothing would also be green.
+          [ "$checked" -ge 40 ] || { echo "::error::only ${checked} shell programs were found; the syntax gate is not covering the repository"; exit 1; }
+          exit "$failed"
           find scripts helpers server-helpers install-scripts deploy -type f -name '*.sh' -print0 2>/dev/null \
             | xargs -0 -r -n1 bash -n
       - run: npm ci --include=dev
@@ -86,7 +135,12 @@ jobs:
           } | tee .deploy-digest
           echo "value=$(cat .deploy-digest)" >> "$GITHUB_OUTPUT"
       - name: Upload verified release payload
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # Also on workflow_dispatch against main: that is the authorized-rollback
+        # path, and it still deploys the CI-built, digest-verified payload rather
+        # than anything built by hand on the host.
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: hosting-release-${{ github.sha }}
@@ -113,7 +167,12 @@ jobs:
   deploy-preflight:
     name: Read-only production preflight
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # push to main is the normal path. workflow_dispatch on main is the only
+    # supported way to authorize a rollback; dispatching from any other ref
+    # cannot reach production because this condition requires main.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: self-hosted
     timeout-minutes: 20
     outputs:
@@ -126,6 +185,34 @@ jobs:
           node-version: 22
       # Installed in the ephemeral workspace only, never in the app checkout.
       - run: npm ci --include=dev
+      # Resolved BEFORE the artifact is downloaded. The release payload is large
+      # and this runner spent ~5 minutes pulling it on every attempt; an obsolete
+      # run should learn it is obsolete in seconds, not after the download. Run
+      # #62 attempt 3 failed inside the digest step precisely because a queued
+      # run outlived the artifact's 2-day retention and downloaded nothing.
+      - name: Refuse to preflight a release that main has already moved past
+        env:
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          ALLOW_RELEASE_ROLLBACK: ${{ github.event.inputs.allow_rollback || '' }}
+        run: |
+          set -Eeuo pipefail
+          latest="$(node scripts/latest-main-sha.mjs --ref main)"
+          echo "main head is ${latest}; this run carries ${DEPLOY_COMMIT_SHA}"
+          if [ "$latest" = "$DEPLOY_COMMIT_SHA" ]; then
+            echo "release is the current head of main"
+            exit 0
+          fi
+          # An authorized rollback targets an older commit on purpose, so it is
+          # exempt from this one rule and nothing else: scripts/deploy-release.sh
+          # still requires the target to be merged in main, still requires the
+          # operator and reason, and still verifies the payload digest and the
+          # running release afterwards.
+          if [ "${ALLOW_RELEASE_ROLLBACK}" = "1" ]; then
+            echo "::warning::Rollback authorized: ${DEPLOY_COMMIT_SHA} is not main's head (${latest}). The release guard will still require it to be merged in main and attributed to an operator."
+            exit 0
+          fi
+          echo "::error::Obsolete run: main has moved to ${latest}. Only the current head of main may reach production. Re-run the workflow for ${latest}."
+          exit 1
       - uses: actions/download-artifact@v4
         with:
           name: hosting-release-${{ github.sha }}
@@ -152,11 +239,16 @@ jobs:
           if [[ -d "$APP_DIR/.git" ]]; then
             test -f "$APP_DIR/package.json" || { echo "::error::Canonical root package.json is missing"; exit 1; }
             test -f "$APP_DIR/package-lock.json" || { echo "::error::package-lock.json is missing; refusing npm ci"; exit 1; }
-            if [[ -n "$(git -C "$APP_DIR" status --porcelain --untracked-files=normal)" ]]; then
-              echo "::error::Production checkout has local changes. Refusing to checkout or pull and risk overwriting them."
-              git -C "$APP_DIR" status --short --untracked-files=normal
-              exit 1
-            fi
+            # Delegated to the versioned classifier instead of a bare
+            # `git status` test, for two reasons. It tolerates the deployment's
+            # own release-identity.json — counting that untracked file as a local
+            # change is what blocked runs #54, #58, #60, #62 and #64 in a loop,
+            # because the deploy could never pull the commit that ignores it. And
+            # it keeps the rule in one reviewable, testable place rather than
+            # duplicated here, where a copy can drift from the script's.
+            # Genuine uncommitted work still blocks, and is printed by name.
+            bash scripts/host-checkout-status.sh "$APP_DIR" \
+              || { echo "::error::Production checkout has local changes that are not deployment output. Refusing to checkout or pull and risk overwriting them."; exit 1; }
           elif [[ ! -d "${ALO_HOSTING_ROOT:-$HOME/alo-hosting}" ]]; then
             echo "::error::Canonical production checkout is missing ($HOME/projects/Hosting-Portal or $HOME/Hosting-Portal)"
             exit 1
@@ -180,7 +272,9 @@ jobs:
   deploy:
     name: Deploy canonical root portal to production server
     needs: [build, deploy-preflight]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: self-hosted
     environment: production
     timeout-minutes: 30
@@ -191,7 +285,38 @@ jobs:
       group: hosting-production-deploy
       cancel-in-progress: false
     steps:
+      # Full history, not the default depth of 1. The release guard has to prove
+      # ancestry relationships — that the target is on main, and whether the
+      # running release is ahead of or behind it. In a shallow clone those
+      # questions cannot be answered: `git merge-base --is-ancestor` errors out
+      # on commits outside the graft, and `git fetch origin main` leaves
+      # `origin/main` pointing at this run's own commit, which makes a staleness
+      # comparison silently pass for the stale run it exists to reject.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # This job waited in the `hosting-production-deploy` single-flight queue to
+      # get here, and a run can sit in that queue for hours (run #62 waited two).
+      # Re-check the head of main after acquiring the slot, so a release that was
+      # current when the run started cannot be activated after main moved on.
+      - name: Re-validate the release against main after acquiring the deploy slot
+        env:
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          ALLOW_RELEASE_ROLLBACK: ${{ github.event.inputs.allow_rollback || '' }}
+        run: |
+          set -Eeuo pipefail
+          latest="$(node scripts/latest-main-sha.mjs --ref main)"
+          echo "main head is ${latest}; this run carries ${DEPLOY_COMMIT_SHA}"
+          if [ "$latest" = "$DEPLOY_COMMIT_SHA" ]; then
+            echo "release is still the current head of main after waiting for the deploy slot"
+            exit 0
+          fi
+          if [ "${ALLOW_RELEASE_ROLLBACK}" = "1" ]; then
+            echo "::warning::Rollback authorized; skipping the head-of-main requirement. scripts/deploy-release.sh still enforces merged-in-main, attribution and post-activation verification."
+            exit 0
+          fi
+          echo "::error::Superseded release: main has moved to ${latest} while this run waited to deploy. Refusing to activate ${DEPLOY_COMMIT_SHA}."
+          exit 1
       - uses: actions/download-artifact@v4
         with:
           name: hosting-release-${{ github.sha }}
@@ -207,6 +332,14 @@ jobs:
           DEPLOY_PAYLOAD_DIR: ${{ github.workspace }}/.deploy-artifact
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
           DEPLOY_MODE: ${{ needs.deploy-preflight.outputs.mode }}
+          # A backwards deployment is refused unless all three are set. They are
+          # deliberately workflow-dispatch inputs rather than repository
+          # variables: an operator has to choose them at run time, so a rollback
+          # cannot be armed permanently by a config value someone forgets, and
+          # the operator and reason land in the rollback audit record.
+          ALLOW_RELEASE_ROLLBACK: ${{ github.event.inputs.allow_rollback || '' }}
+          RELEASE_ROLLBACK_OPERATOR: ${{ github.event.inputs.rollback_operator || github.actor }}
+          RELEASE_ROLLBACK_REASON: ${{ github.event.inputs.rollback_reason || '' }}
         run: |
           set -Eeuo pipefail
           export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$HOME/.nvm/versions/node/v22.0.0/bin:$PATH"

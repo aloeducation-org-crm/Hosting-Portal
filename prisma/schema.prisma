@@ -1037,6 +1037,72 @@ model Notification {
   @@map("notifications")
 }
 
+// ─── ServiceCredential ────────────────────────────────────────────────────────
+//
+// Machine-to-machine credentials for trusted backend services (the ALO
+// Education CRM talking to the Hosting-Portal document vault). Deliberately
+// SEPARATE from `ApiKey` below, which is a user-owned browser-session-adjacent
+// key with `onDelete: Cascade` and no scope model: a service identity must
+// survive the departure of whoever provisioned it and must carry explicit
+// per-operation scopes, an organization binding and a recorded revocation.
+//
+// The secret is NEVER stored. Only its sha256 hex digest is, so a database
+// read does not yield a usable credential. `prefix` is the non-secret head of
+// the key, kept for support staff to identify a credential without revealing
+// it, and used to find the candidate row before the timing-safe comparison.
+//
+// Fails closed: a credential with no organizationId cannot act, because every
+// vault operation is tenant-scoped.
+
+model ServiceCredential {
+  id              String    @id @default(uuid())
+  serviceName     String    // e.g. "alo-education-crm"
+  organizationId  String?   // tenant this credential is bound to; null = cannot act
+  keyHash         String    @unique // sha256 hex of the secret; plaintext never stored
+  prefix          String    // non-secret identifying head of the key
+  scopes          String    // space-delimited ServiceScope names
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  revokedBy       String?   // actor who revoked, for the audit trail
+  revokeReason    String?
+  lastUsedAt      DateTime?
+  lastUsedService String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([organizationId])
+  @@index([prefix])
+  @@index([isActive])
+  @@map("service_credentials")
+}
+
+// One row per completed service operation that carried an idempotency key.
+//
+// A retried webhook, a CRM background job restarted after a crash, or a client
+// that timed out and re-sent an upload must not create a second document. The
+// unique key makes the second attempt return the FIRST attempt's stored result
+// instead of performing the operation again.
+//
+// Kept as its own table rather than a column on document_files so the existing
+// browser-session upload path is not altered in any way.
+model ServiceOperationRecord {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  organizationId String
+  serviceName    String
+  operation      String   // e.g. "document.upload"
+  resourceId     String?  // id of the document created or returned
+  statusCode     Int      // HTTP status returned the first time
+  responseJson   String   // exact response body returned the first time
+  correlationId  String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([serviceName])
+  @@map("service_operation_records")
+}
+
 // ─── ApiKey ───────────────────────────────────────────────────────────────────
 
 model ApiKey {

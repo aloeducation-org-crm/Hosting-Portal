@@ -12,6 +12,7 @@ import {
   resolveProviders,
 } from '@/lib/ai/providers';
 import { getProviderCircuitStates } from '@/lib/ai/client';
+import { assertNotCloudMetadataUrl } from '@/lib/security/url-guard';
 
 const OPEN_SOURCE_SECRET_TYPE = 'ai_open_source_provider';
 
@@ -45,22 +46,21 @@ const OpenSourceActionSchema = z.discriminatedUnion('action', [
   }),
 ]);
 
+/**
+ * Delegates to the shared SSRF guard instead of keeping a second copy of the
+ * rule here. The local list this replaced was narrower than
+ * `isCloudMetadataOrLinkLocalHost` and had already drifted from it: it missed
+ * `0.0.0.0`, `::`, `metadata`, `metadata.azure.com`, `instance-data`, the
+ * `fe80::/10` link-local block and IPv4-mapped `::ffff:169.254.x.x`, and it did
+ * not reject credentials embedded in the URL. Two copies of a security rule
+ * diverge in the direction of the weaker one.
+ *
+ * Loopback and RFC1918 stay reachable on purpose — registering a self-hosted
+ * ollama, LocalAI, vLLM or LiteLLM engine on a private address is a supported
+ * use, and this route is already restricted to administrators.
+ */
 function assertSafeEndpointUrl(rawUrl: string): URL {
-  const parsed = new URL(rawUrl);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Only http:// and https:// endpoints are permitted');
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (
-    host === '169.254.169.254' ||
-    host === 'metadata.google.internal' ||
-    host === '100.100.100.200' ||
-    host.startsWith('169.254.') ||
-    host === '[fd00:ec2::254]'
-  ) {
-    throw new Error('Cloud metadata endpoints are blocked (SSRF protection)');
-  }
-  return parsed;
+  return assertNotCloudMetadataUrl(rawUrl, 'Provider endpoint');
 }
 
 function handleErr(e: unknown): NextResponse {
