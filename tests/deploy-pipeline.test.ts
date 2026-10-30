@@ -454,6 +454,8 @@ describe("deployment scripts", () => {
     // comparison, and it is made before either deployment shape is chosen.
     expect(releaseScript).toContain("decide-release-activation.mjs");
     expect(releaseScript).toContain("GUARD_DECISION=");
+    expect(releaseScript).toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
+    expect(releaseScript).toContain('[[ "$SHA" == "$LATEST_MAIN_SHA" ]]');
     expect(releaseScript).toContain('git merge-base --is-ancestor "$PREV_SHA" "$SHA"');
     expect(releaseScript).toContain("ALLOW_RELEASE_ROLLBACK");
     expect(releaseScript).toContain("refusing backwards deployment");
@@ -462,6 +464,10 @@ describe("deployment scripts", () => {
     // An authorized rollback has to be attributable to a person and a reason.
     expect(releaseScript).toContain("RELEASE_ROLLBACK_OPERATOR");
     expect(releaseScript).toContain("RELEASE_ROLLBACK_REASON");
+  });
+
+  it("ignores the runtime release identity so inline deploys do not dirty the checkout", () => {
+    expect(read(".gitignore")).toMatch(/^release-identity\.json$/m);
   });
 
   it("ignores the runtime release identity so inline deploys do not dirty the checkout", () => {

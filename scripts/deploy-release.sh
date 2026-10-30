@@ -333,6 +333,10 @@ git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on
 # reads the release that is actually serving rather than trusting HEAD. Kept as a
 # second, independent assertion because this is the last point before the tree
 # moves and the cost of being wrong is a production rollback nobody asked for.
+git fetch origin main
+LATEST_MAIN_SHA="$(git rev-parse origin/main)"
+[[ "$SHA" == "$LATEST_MAIN_SHA" ]] || fail "commit ${SHA} is stale; origin/main is now ${LATEST_MAIN_SHA}. Refusing to deploy an obsolete queued run."
+git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on origin/main; refusing to deploy something that was not merged"
 if ! git merge-base --is-ancestor "$PREV_SHA" "$SHA"; then
   [[ "${ALLOW_RELEASE_ROLLBACK:-0}" == "1" ]] || fail "refusing backwards deployment from ${PREV_SHA} to ${SHA}. For an explicitly approved rollback, set ALLOW_RELEASE_ROLLBACK=1 and follow the recovery runbook."
   log "WARNING: explicitly authorized backwards deployment from ${PREV_SHA} to ${SHA}"

@@ -83,6 +83,8 @@ jobs:
           # A gate that silently matched nothing would also be green.
           [ "$checked" -ge 40 ] || { echo "::error::only ${checked} shell programs were found; the syntax gate is not covering the repository"; exit 1; }
           exit "$failed"
+          find scripts helpers server-helpers install-scripts deploy -type f -name '*.sh' -print0 2>/dev/null \
+            | xargs -0 -r -n1 bash -n
       - run: npm ci --include=dev
       - run: npx prisma generate
       - run: npm run lint
