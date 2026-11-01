@@ -220,6 +220,7 @@ node -e '…@libsql/client…'      # fixture databases for the drill
 | `41338154769` (PR run) | `9ae3076` | **success** — `verify` 2m15s, `build` 1m24s; the Node 20 deprecation annotation is gone |
 | `41338529011` (PR run) | `fc7f1ac` | `verify` **passed** (2m56s); `build` was **cancelled**, not failed — the PR concurrency group cancels an in-progress run when a newer push lands on the same ref |
 | `41338862141` (PR run) | `e91ecef` | **success** — `verify` 2m29s, `build` 1m59s |
+| `41339293366` (PR run) | `091a5b2` | **success** — `verify` 2m58s, `build` 1m59s; this is the run at which the branch became green end to end |
 
 `deploy-preflight` and `deploy` are skipped on pull requests **by design** (they
 require `refs/heads/main`), so no PR run can reach production.
@@ -233,8 +234,11 @@ require `refs/heads/main`), so no PR run can reach production.
   main-head resolution, restore CI
 * `fc7f1ac` — fix(backup,restore): replace postgres-only scripts with verified
   SQLite snapshot + drilled restore
-* `4f24d1e`-era correction of this document (documentation only; it must pass the
-  same gate as any other commit — no `[skip ci]` is used to bypass it)
+* `091a5b2` — documentation correction to the CI table above
+
+Documentation-only commits are ordinary commits here: none carries `[skip ci]`, so
+each one runs the same gate. The head-of-branch run is always the authoritative
+one — see the PR's Checks tab, or `gh run list --branch arena/f8510b1e-hosting-portal`.
 
 ---
 
