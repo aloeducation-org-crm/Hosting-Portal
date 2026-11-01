@@ -273,22 +273,45 @@ docker compose logs -f app
 
 ## Backup & Restore
 
+The database is SQLite (`prisma/schema.prisma` declares `provider = "sqlite"`,
+`src/lib/db.ts` selects the libsql adapter for `file:` URLs). The scripts below take
+a **consistent, verified** snapshot with `VACUUM INTO`, check `PRAGMA
+integrity_check` and the presence of the tables the application needs, and keep the
+file owner-only. A backup is never reported as valid just because a file exists.
+
 ### Manual Backup
 ```bash
-./scripts/backup.sh /opt/backups
+# DATABASE_URL must be an absolute file: path (as in /etc/alo-hosting/panel.env)
+./scripts/backup.sh /home/alamin/backups
+# Prove the snapshot is restorable:
+./scripts/backup.sh --verify /home/alamin/backups/hosting-<timestamp>.db
 ```
 
-### Manual Restore
+### Restore drill (safe — production is not touched)
 ```bash
-./scripts/restore.sh /opt/backups/alolabs_backup_20260721_120000.sql
+./scripts/restore.sh /home/alamin/backups/hosting-<timestamp>.db --target /tmp/drill.db
 ```
+
+### Promoted Restore (deliberate)
+```bash
+pm2 stop alo-hosting-portal
+./scripts/restore.sh /home/alamin/backups/hosting-<timestamp>.db --yes
+pm2 restart alo-hosting-portal
+curl -s http://127.0.0.1:3051/api/health | jq '.data.release'
+```
+
+`--yes` takes and verifies a fresh snapshot of the current database first, so a
+restore cannot destroy the last good copy.
 
 ### Automated Backup (Cron)
 ```bash
-# Add daily backup at 2 AM
+# Daily 02:00 backup of the SQLite database, verified, into the backup directory
 crontab -e
-# Add: 0 2 * * * /opt/app/scripts/backup.sh /opt/backups >> /var/log/alolabs-backup.log 2>&1
+# Add: 0 2 * * * /home/alamin/Hosting-Portal/scripts/backup.sh /home/alamin/backups >> /var/log/alolabs-backup.log 2>&1
 ```
+
+Full recovery procedure, including the drill record and the rebuild-migration
+rules: `docs/DATABASE-RECOVERY-RUNBOOK.md`.
 
 ## Health Monitoring
 

@@ -232,6 +232,57 @@ listed, `audit_logs` has rows, deployment history is present.
 
 ---
 
+## 5.1 Backup and restore tooling (repaired)
+
+`scripts/backup.sh` and `scripts/restore.sh` used to be `pg_dump`/`psql` wrappers,
+against a datasource that declares `provider = "sqlite"` and a documented
+production database of `file:/…/hosting.db`. On this host they could only fail —
+and the deployment path worked around them by copying a live SQLite file, which can
+capture a torn write.
+
+They now delegate to `scripts/db-backup.mjs` / `scripts/db-restore.mjs` and keep
+their historical command lines:
+
+```bash
+# A verified, transactionally consistent snapshot (VACUUM INTO + integrity_check
+# + core-table presence + sha256 metadata, mode 0600):
+./scripts/backup.sh /home/alamin/backups
+./scripts/backup.sh --verify /home/alamin/backups/hosting-20261101T184559Z.db
+
+# Prove a snapshot is restorable WITHOUT touching production:
+./scripts/restore.sh /home/alamin/backups/hosting-….db --target /tmp/drill.db
+
+# Overwrite the live database only when it is deliberate: --yes takes and verifies
+# a fresh snapshot of the current database first, so a restore cannot be the step
+# that destroys the last good copy.
+pm2 stop alo-hosting-portal
+./scripts/restore.sh /home/alamin/backups/hosting-….db --yes
+pm2 restart alo-hosting-portal
+```
+
+A backup is reported as valid only after `PRAGMA integrity_check` returns `ok`
+**and** the tables the application needs (`users`, `audit_logs`, `servers`,
+`hosting_sites`) are present. A file that merely exists is not a backup; the
+scripts delete a failed snapshot and exit non-zero.
+
+The same snapshot satisfies the applier's rebuild precondition:
+
+```bash
+node scripts/apply-deploy-schema.mjs --allow-rebuild \
+  --backup /home/alamin/backups/hosting-….db
+```
+
+`tests/backup-restore.test.ts` performs the drill on real databases: snapshot
+`before@…`, change the data to `after@…`, restore into an isolated target and
+assert the snapshot's rows come back while the live file is byte-identical; plus
+the refusals (corrupt file, missing core tables, unconfirmed production overwrite,
+relative `DATABASE_URL`) and the safety-copy path.
+
+Still outstanding, and it needs the production host: a drill against a real
+production backup, and an offsite encrypted copy. Nothing here changes section 6.
+
+---
+
 ## 6. Restore drill (never run — required)
 
 | Field | Value |

@@ -65,9 +65,16 @@ permissions:
 # there. If it is older, those two jobs fail immediately with GitHub's own
 # "runs.using: node24 requires a newer runner" error — loudly, before any change
 # to production, which is the correct failure mode; no release is attempted.
-# Ubuntu-hosted runners (`ubuntu-latest`, used by `verify` and `build`) are always
-# current, and no job here depends on a pinned Ubuntu image, so the Ubuntu
-# migration warnings do not apply.
+# UBUNTU RUNNER MIGRATION: `verify` and `build` use `ubuntu-latest`, which GitHub
+# is migrating to a newer Ubuntu image (annotation on run 41338154769:
+# "ubuntu-latest will migrate to Ubuntu 26 beginning October 19, 2026"). Those two
+# jobs depend only on Node 22 (installed by setup-node), git, and the POSIX tools
+# in the shell-syntax gate — find/head/grep/xargs/sort — all of which exist on every
+# image GitHub ships. They deliberately do not pin an image version, because a pin
+# only moves the same retirement problem elsewhere, and they do not invoke any
+# runner-specific path or preinstalled language runtime. The notice is
+# informational; nothing in this workflow reads `ImageOS`, `RUNNER_*` internals or
+# a runner-provided toolchain.
 
 # CI concurrency is per-ref and cancellable for PRs, so a force-push does not
 # leave two runs racing. Production deployment has its own single-flight group

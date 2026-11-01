@@ -1,29 +1,31 @@
-#!/bin/bash
-# ALO Labs Database Backup Script
-# Usage: ./scripts/backup.sh [output_dir]
+#!/usr/bin/env bash
+# ALO Labs database backup.
+#
+#   ./scripts/backup.sh [output_dir] [extra args for db-backup.mjs]
+#
+# The work is done by scripts/db-backup.mjs, which takes a *consistent* snapshot of
+# the engine in use and verifies it before reporting success:
+#
+#   SQLite (the shipped deployment)  VACUUM INTO → PRAGMA integrity_check
+#                                    → core-table presence → sha256 metadata
+#   PostgreSQL                       pg_dump → non-empty file → sha256 metadata
+#
+# This replaces a `pg_dump "$DATABASE_URL"` one-liner that could only fail against
+# the configured `file:/…/hosting.db` database, and a deployment path that copied a
+# live SQLite file without checking that the copy was recoverable.
+#
+# Exit codes: 0 verified backup, 1 backup/verification failed, 2 configuration error.
+set -Eeuo pipefail
+umask 077
 
-set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-OUTPUT_DIR="${1:-./backups}"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-FILENAME="alolabs_backup_${TIMESTAMP}.sql"
-OUTPUT_PATH="${OUTPUT_DIR}/${FILENAME}"
-
-mkdir -p "${OUTPUT_DIR}"
-
-if [ -z "${DATABASE_URL:-}" ]; then
-    echo "ERROR: DATABASE_URL environment variable is not set"
-    exit 1
+# First positional argument is the output directory (the historical interface),
+# unless it is a flag, so `backup.sh --verify <file>` keeps working too.
+OUT_DIR="${ALO_BACKUP_DIR:-./backups}"
+if (($# > 0)) && [[ "${1}" != --* ]]; then
+  OUT_DIR="$1"
+  shift
 fi
 
-echo "Starting database backup..."
-pg_dump "${DATABASE_URL}" > "${OUTPUT_PATH}"
-
-if [ $? -eq 0 ]; then
-    SIZE=$(du -h "${OUTPUT_PATH}" | cut -f1)
-    echo "Backup completed: ${OUTPUT_PATH} (${SIZE})"
-else
-    echo "ERROR: Backup failed"
-    rm -f "${OUTPUT_PATH}"
-    exit 1
-fi
+exec node "${HERE}/db-backup.mjs" --out "${OUT_DIR}" "$@"
