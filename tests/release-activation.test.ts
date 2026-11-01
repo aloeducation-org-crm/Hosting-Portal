@@ -553,12 +553,14 @@ describe("guard placement and workflow wiring", () => {
     // "targeting Node.js 20 but being forced to run on Node.js 24". The minimum
     // majors below are the first releases of each action that declare node24, so
     // the workflow does not rely on GitHub forcing an undeclared runtime.
+    // Read from each tag's action.yml (`runs.using`), not from release prose:
+    // upload-artifact@v5 and download-artifact@v6 still declared node20, which run
+    // 41340723944 flagged after the first attempt at this upgrade.
     const minimumMajor: Record<string, number> = {
       "actions/checkout": 5,
       "actions/setup-node": 5,
-      "actions/upload-artifact": 5,
-      // download-artifact@v5 still targeted node20; v6 is the first node24 one.
-      "actions/download-artifact": 6,
+      "actions/upload-artifact": 6,
+      "actions/download-artifact": 7,
     };
     const yaml = read(".github/workflows/ci-cd.yml");
     const uses = [...yaml.matchAll(/uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@v(\d+)/g)];

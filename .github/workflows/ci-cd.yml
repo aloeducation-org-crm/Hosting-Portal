@@ -48,15 +48,25 @@ permissions:
 # are the oldest releases of each action that run on node24 natively, so the
 # workflow no longer depends on GitHub silently forcing an unsupported runtime:
 #
-#   actions/checkout@v5        node24 (requires runner >= 2.327.1)
-#   actions/setup-node@v5      node24
-#   actions/upload-artifact@v5 node24
-#   actions/download-artifact@v6  node24 (v5 was still node20)
+#   actions/checkout@v5           runs.using: node24
+#   actions/setup-node@v5         runs.using: node24
+#   actions/upload-artifact@v6    runs.using: node24   (v5 still declared node20)
+#   actions/download-artifact@v7  runs.using: node24   (v6 still declared node20)
+#
+# Those majors were not guessed from release notes: `runs.using` was read from each
+# tag's `action.yml`. The first attempt at this upgrade used upload-artifact@v5 and
+# download-artifact@v6 on the strength of their "supports Node v24" release text,
+# and run 41340723944 immediately annotated upload-artifact@v5 as
+# "targeting Node.js 20 but being forced to run on Node.js 24". The versions below
+# are the ones that *declare* node24, so the workflow no longer relies on GitHub
+# forcing an undeclared runtime. They are also the majors that require a
+# self-hosted runner >= 2.327.1.
 #
 # They are pinned by major tag rather than by SHA, which is the convention this
 # repository already used for @v4 and matches its "reviewable, upgradeable"
-# intent. All jobs use the same families, so the artifact produced by upload@v5
-# is downloaded by download@v6 — neither release changed the artifact backend.
+# intent. All jobs use the same families, so the artifact produced by upload@v6 is
+# downloaded by download@v7 — v5/v6 of these actions changed only the runtime and
+# dependencies, not the artifact backend.
 #
 # OPERATOR NOTE (self-hosted runners): the `deploy-preflight` and `deploy` jobs
 # run on the repository's self-hosted runner. That runner must be updated to
@@ -174,7 +184,7 @@ jobs:
         if: >-
           github.ref == 'refs/heads/main' &&
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hosting-release-${{ github.sha }}
           include-hidden-files: true
@@ -246,7 +256,7 @@ jobs:
           fi
           echo "::error::Obsolete run: main has moved to ${latest}. Only the current head of main may reach production. Re-run the workflow for ${latest}."
           exit 1
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v7
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
@@ -350,7 +360,7 @@ jobs:
           fi
           echo "::error::Superseded release: main has moved to ${latest} while this run waited to deploy. Refusing to activate ${DEPLOY_COMMIT_SHA}."
           exit 1
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v7
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact

@@ -313,7 +313,8 @@ resolver reports the remote's real head instead of the clone's pinned ref.
 
 Node 20 is deprecated on Actions runners. The workflow now uses the oldest majors
 that declare `node24`: `actions/checkout@v5`, `actions/setup-node@v5`,
-`actions/upload-artifact@v5`, `actions/download-artifact@v6`.
+`actions/upload-artifact@v6`, `actions/download-artifact@v7` (`v5` and `v6` still declared
+`runs.using: node20`, which run 41340723944 reported).
 
 `deploy-preflight` and `deploy` run on the repository's **self-hosted** runner,
 which must therefore be at Actions Runner **>= 2.327.1**. If it is older, those

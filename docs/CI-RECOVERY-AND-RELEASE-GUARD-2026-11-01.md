@@ -93,7 +93,7 @@ head — corrupting `mainHeadAtDecision` in the rollback audit record as well.
 | `scripts/db-backup.mjs`, `scripts/db-restore.mjs` (new) | Verified SQLite snapshot (`VACUUM INTO` + `integrity_check` + core tables + sha256, mode 0600) and a restore that rehearses into an isolated target, and only overwrites production with `--yes` after taking a verified safety copy. |
 | `scripts/backup.sh`, `scripts/restore.sh` | Rewritten as thin wrappers over the above, preserving the documented command lines; PostgreSQL still supported. |
 | `scripts/verify.sh` | Accepts the documented SQLite `file:/` database (was postgres-only). |
-| `.github/workflows/ci-cd.yml` | `checkout@v5`, `setup-node@v5`, `upload-artifact@v5`, `download-artifact@v6` (first node24 majors), runner/migration notes, two unreachable lines removed. |
+| `.github/workflows/ci-cd.yml` | `checkout@v5`, `setup-node@v5`, `upload-artifact@v6`, `download-artifact@v7` — the first majors whose `action.yml` declares `runs.using: node24` (see §K); runner/migration notes; two unreachable lines removed. |
 | `tests/latest-main-sha.test.ts` (new) | 8 behavioural tests: stale shallow clone vs. remote head, JSON source, ls-remote fallback, fail-closed, malformed/absent/all-zero SHA, unusable refs, credential redaction, and `deploy-release.sh` refusing an unverifiable release before touching anything. |
 | `tests/production-config.test.ts` (new) | 12 tests: baseline passes; no secret/URL ever printed; in-checkout DB error vs. accepted warning; relative path; URL disagreement / non-https; secret via `NEXT_PUBLIC_*`; hardening flags; SSO/boot-restore warnings; CLI exit codes; env file parsed, not executed (canary file). |
 | `tests/backup-restore.test.ts` (new) | 8 tests: real backup drill (restore into an isolated target, live file byte-identical), corrupt/missing-table refusal, relative URL refusal, unconfirmed production overwrite refused, safety copy on `--yes`, no database URL printed. |
@@ -220,6 +220,7 @@ node -e '…@libsql/client…'      # fixture databases for the drill
 | `41338154769` (PR run) | `9ae3076` | **success** — `verify` 2m15s, `build` 1m24s; the Node 20 deprecation annotation is gone |
 | `41338529011` (PR run) | `fc7f1ac` | `verify` **passed** (2m56s); `build` was **cancelled**, not failed — the PR concurrency group cancels an in-progress run when a newer push lands on the same ref |
 | `41338862141` (PR run) | `e91ecef` | **success** — `verify` 2m29s, `build` 1m59s |
+| `41340723944` (push to `main` after the merge) | `25354c9` | `verify` ✅ 2m17s, `build` ✅ 1m48s — and this run **annotated `actions/upload-artifact@v5` as still targeting Node 20**, which the follow-up commit corrects to `upload-artifact@v6` / `download-artifact@v7` |
 | `41339293366` (PR run) | `091a5b2` | **success** — `verify` 2m58s, `build` 1m59s; this is the run at which the branch became green end to end |
 
 `deploy-preflight` and `deploy` are skipped on pull requests **by design** (they
