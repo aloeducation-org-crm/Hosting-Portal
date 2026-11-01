@@ -33,7 +33,12 @@ else
   RESULTS+=("FAIL|JWT_SECRET length"); FAIL=$((FAIL + 1))
 fi
 
-if grep -qE '^DATABASE_URL=postgresql://' .env 2>/dev/null; then
+# This application ships on SQLite through the libsql adapter (prisma/schema.prisma
+# declares `provider = "sqlite"`), so requiring a postgresql:// URL here reported a
+# failure on the documented production baseline. Accept either engine, but insist
+# on an absolute SQLite path: a relative one resolves against the process working
+# directory, which is how a deploy ends up migrating a different database file.
+if grep -qE '^DATABASE_URL=file:/' .env 2>/dev/null || grep -qE '^DATABASE_URL=postgres(ql)?://' .env 2>/dev/null; then
   RESULTS+=("PASS|DATABASE_URL format"); PASS=$((PASS + 1))
 else
   RESULTS+=("FAIL|DATABASE_URL format"); FAIL=$((FAIL + 1))

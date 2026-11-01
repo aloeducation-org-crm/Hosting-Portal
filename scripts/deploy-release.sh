@@ -329,14 +329,25 @@ trap 'code=$?; trap - EXIT; if (( code != 0 && changed == 1 )); then log "deploy
   || fail "commit ${SHA} is stale; main is now ${LATEST_MAIN_SHA:-<unresolved>}. Refusing to deploy an obsolete queued run."
 git fetch origin '+refs/heads/main:refs/remotes/origin/main'
 git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on origin/main; refusing to deploy something that was not merged"
+# The ancestry check above asks the local clone only "is this commit contained in
+# the history main had?", which a fetched ref can answer. It deliberately does
+# NOT re-derive the head of main from a ref.
+#
+# Re-deriving it here from `git rev-parse origin/main` is the vacuous-guard
+# pattern the whole of section 0 exists to remove, and a duplicate of it survived
+# a merge in PR #20 and sat immediately below this comment. In a shallow
+# clone `origin/main` is pinned to the run's own commit, so comparing the target
+# against it was true for precisely the obsolete run it was meant to reject; and
+# because the assignment overwrote the authoritative value resolved in section 0,
+# it also corrupted the `mainHeadAtDecision` field of the rollback audit record.
+# `LATEST_MAIN_SHA` therefore has exactly one writer: scripts/latest-main-sha.mjs.
+# Its value is already re-asserted above against the target, and an unresolved
+# head fails closed through the guard (`unknown-main-head`) before this point.
+#
 # Backwards movement was already decided in section 0 by the tested guard, which
 # reads the release that is actually serving rather than trusting HEAD. Kept as a
 # second, independent assertion because this is the last point before the tree
 # moves and the cost of being wrong is a production rollback nobody asked for.
-git fetch origin main
-LATEST_MAIN_SHA="$(git rev-parse origin/main)"
-[[ "$SHA" == "$LATEST_MAIN_SHA" ]] || fail "commit ${SHA} is stale; origin/main is now ${LATEST_MAIN_SHA}. Refusing to deploy an obsolete queued run."
-git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on origin/main; refusing to deploy something that was not merged"
 if ! git merge-base --is-ancestor "$PREV_SHA" "$SHA"; then
   [[ "${ALLOW_RELEASE_ROLLBACK:-0}" == "1" ]] || fail "refusing backwards deployment from ${PREV_SHA} to ${SHA}. For an explicitly approved rollback, set ALLOW_RELEASE_ROLLBACK=1 and follow the recovery runbook."
   log "WARNING: explicitly authorized backwards deployment from ${PREV_SHA} to ${SHA}"

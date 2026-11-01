@@ -547,6 +547,34 @@ describe("guard placement and workflow wiring", () => {
     expect(checkout?.with?.["fetch-depth"]).toBe(0);
   });
 
+  it("runs every workflow action on a declared, supported Node runtime", () => {
+    // Node 20 was deprecated on Actions runners; the annotation on run
+    // 41058844163 named actions/checkout@v4 and actions/setup-node@v4 as
+    // "targeting Node.js 20 but being forced to run on Node.js 24". The minimum
+    // majors below are the first releases of each action that declare node24, so
+    // the workflow does not rely on GitHub forcing an undeclared runtime.
+    const minimumMajor: Record<string, number> = {
+      "actions/checkout": 5,
+      "actions/setup-node": 5,
+      "actions/upload-artifact": 5,
+      // download-artifact@v5 still targeted node20; v6 is the first node24 one.
+      "actions/download-artifact": 6,
+    };
+    const yaml = read(".github/workflows/ci-cd.yml");
+    const uses = [...yaml.matchAll(/uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@v(\d+)/g)];
+    expect(uses.length).toBeGreaterThanOrEqual(4);
+    for (const [, action, major] of uses) {
+      const minimum = minimumMajor[action];
+      expect(minimum, `${action} is not covered by this policy; extend it deliberately`).toBeTypeOf(
+        "number",
+      );
+      expect(
+        Number(major),
+        `${action}@v${major} does not declare node24; Node 20 is deprecated on runners`,
+      ).toBeGreaterThanOrEqual(minimum);
+    }
+  });
+
   it("re-checks main's head after the run has waited for the deploy slot", () => {
     const names = (workflow.jobs.deploy.steps ?? []).map((step) => String(step.name ?? ""));
     expect(names.some((n) => n.includes("after acquiring the deploy slot"))).toBe(true);
