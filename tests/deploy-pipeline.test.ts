@@ -449,41 +449,15 @@ describe("deployment scripts", () => {
     // comparison passed for exactly the stale run it existed to reject.
     expect(releaseScript).toContain("latest-main-sha.mjs");
     expect(releaseScript).not.toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
-
-    // The head of main has exactly one writer, and it is the authoritative
-    // resolver. Every executable assignment is checked rather than one favoured
-    // spelling, because a duplicate guard that re-derived the value from a local
-    // ref is what actually shipped in PR #20: it was placed *below* the correct
-    // guard, so it silently overwrote the authoritative head (and the
-    // mainHeadAtDecision field of the rollback audit record) with a ref whose
-    // value in a shallow clone is this run's own commit.
-    const executableLines = releaseScript
-      .split("\n")
-      .filter((line) => !line.trimStart().startsWith("#"));
-    const writers = executableLines.filter((line) => /^\s*(export\s+)?LATEST_MAIN_SHA=/.test(line));
-    expect(writers.length).toBeGreaterThan(0);
-    for (const line of writers) {
-      // Clearing the value is the fail-closed path and is allowed: an empty head
-      // cannot equal a 40-hex target, and the guard refuses on it.
-      if (/^\s*LATEST_MAIN_SHA=""\s*$/.test(line)) continue;
-      expect(line, `LATEST_MAIN_SHA must come from the authoritative resolver: ${line}`).toContain(
-        "latest-main-sha.mjs",
-      );
-      expect(line, line).not.toMatch(/git\s+rev-parse|origin\/main|git\s+ls-remote/);
-    }
-
-    // The staleness comparison must be guarded on the head actually being known,
-    // so an unresolved head fails closed instead of comparing equal to nothing.
-    expect(releaseScript).toContain('"$SHA" == "$LATEST_MAIN_SHA"');
-    expect(releaseScript).toContain('[[ -n "$LATEST_MAIN_SHA" && "$SHA" == "$LATEST_MAIN_SHA" ]]');
+    expect(releaseScript).toContain("REVALIDATED_DECISION=");
     // The decision itself is made by the tested guard, not by shell string
     // comparison, and it is made before either deployment shape is chosen.
     expect(releaseScript).toContain("decide-release-activation.mjs");
     expect(releaseScript).toContain("GUARD_DECISION=");
-    expect(releaseScript).toContain('git merge-base --is-ancestor "$PREV_SHA" "$SHA"');
+    expect(releaseScript).toContain('checked_ancestor "$PREV_SHA" "$SHA"');
     expect(releaseScript).toContain("ALLOW_RELEASE_ROLLBACK");
     expect(releaseScript).toContain("refusing backwards deployment");
-    expect(releaseScript).toContain('git merge-base --is-ancestor "$SHA" origin/main');
+    expect(releaseScript).toContain('checked_ancestor "$SHA" "$REVALIDATED_MAIN_SHA"');
     expect(releaseScript).toContain("refusing to deploy something that was not merged");
     // An authorized rollback has to be attributable to a person and a reason.
     expect(releaseScript).toContain("RELEASE_ROLLBACK_OPERATOR");

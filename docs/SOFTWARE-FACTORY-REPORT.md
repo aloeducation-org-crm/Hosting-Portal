@@ -161,3 +161,9 @@ None (no production deployment claim). Deliverable is verified locally: producti
 - [x] Registry admin APIs admin-only; public pages public
 - [x] Full gate green: lint, typecheck, tests (432), build
 - [x] Live preview verified end-to-end
+
+## Internal delivery workflow addendum — 2026-10-31
+
+The owner requires preservation of existing work, reuse of existing project formats and private admin/supervisor-controlled delivery. The additive specification is in [`design/INTERNAL-DELIVERY-WORKFLOW.md`](design/INTERNAL-DELIVERY-WORKFLOW.md). It defines project records, scoped authority, independent approvals, client-safe outputs, authorized source analysis, licence obligations and acceptance tests.
+
+**Status: design only.** No supervisor role, approval API or internal workflow UI is claimed implemented by this addendum. Existing phase history above is retained. Hosting release blockers remain first priority under [`SELF-HOSTED-ACCEPTANCE-GATE.md`](SELF-HOSTED-ACCEPTANCE-GATE.md); optional integrations remain deferred in [`EXTERNAL-TOOLS-EVALUATION-BACKLOG.md`](EXTERNAL-TOOLS-EVALUATION-BACKLOG.md). No production release or deletion is authorized.

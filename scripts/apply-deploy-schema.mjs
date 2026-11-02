@@ -110,6 +110,8 @@ const MIGRATIONS = [
   // CRM ↔ Hosting-Portal service credentials. Purely additive: one new table
   // (service_credentials) created with IF NOT EXISTS, no existing table altered.
   { name: "20261029120000_service_credentials", kind: "ADDITIVE" },
+  // Internal scope review only; creating this table enables no execution.
+  { name: "20261031090000_ai_capability_requests", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",

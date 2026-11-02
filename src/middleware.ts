@@ -100,6 +100,7 @@ const HMAC_AUTHENTICATED_API_PATHS = [
 ];
 
 const ADMIN_UI_PREFIXES = [
+  "/ai/research",
   "/admin",
   "/users",
   "/servers",
@@ -126,6 +127,7 @@ const DASHBOARD_UI_PREFIXES = [
   "/onboarding",
   "/deployments",
   "/apps",
+  "/sales-channels",
 ];
 
 const ADMIN_API_PREFIXES = [

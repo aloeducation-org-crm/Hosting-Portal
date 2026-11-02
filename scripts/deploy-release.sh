@@ -321,47 +321,71 @@ changed=0
 trap 'code=$?; trap - EXIT; if (( code != 0 && changed == 1 )); then log "deployment failed after the checkout moved; attempting restore"; restore || log "MANUAL RECOVERY REQUIRED — see docs/DATABASE-RECOVERY-RUNBOOK.md"; fi; exit $code' EXIT
 
 # ── 3c. Move to the target commit ────────────────────────────────────────────
-# Section 0 already authorized this release against an authoritative main head.
-# Re-assert it here against the same resolved value rather than re-deriving it
-# from `git rev-parse origin/main`, which a shallow clone silently pins to this
-# run's own commit — the hole that made the original staleness check vacuous.
-[[ -n "$LATEST_MAIN_SHA" && "$SHA" == "$LATEST_MAIN_SHA" ]] \
-  || fail "commit ${SHA} is stale; main is now ${LATEST_MAIN_SHA:-<unresolved>}. Refusing to deploy an obsolete queued run."
-git fetch origin '+refs/heads/main:refs/remotes/origin/main'
-git merge-base --is-ancestor "$SHA" origin/main || fail "commit ${SHA} is not on origin/main; refusing to deploy something that was not merged"
-# The ancestry check above asks the local clone only "is this commit contained in
-# the history main had?", which a fetched ref can answer. It deliberately does
-# NOT re-derive the head of main from a ref.
-#
-# Re-deriving it here from `git rev-parse origin/main` is the vacuous-guard
-# pattern the whole of section 0 exists to remove, and a duplicate of it survived
-# a merge in PR #20 and sat immediately below this comment. In a shallow
-# clone `origin/main` is pinned to the run's own commit, so comparing the target
-# against it was true for precisely the obsolete run it was meant to reject; and
-# because the assignment overwrote the authoritative value resolved in section 0,
-# it also corrupted the `mainHeadAtDecision` field of the rollback audit record.
-# `LATEST_MAIN_SHA` therefore has exactly one writer: scripts/latest-main-sha.mjs.
-# Its value is already re-asserted above against the target, and an unresolved
-# head fails closed through the guard (`unknown-main-head`) before this point.
-#
-# Backwards movement was already decided in section 0 by the tested guard, which
-# reads the release that is actually serving rather than trusting HEAD. Kept as a
-# second, independent assertion because this is the last point before the tree
-# moves and the cost of being wrong is a production rollback nobody asked for.
-if ! git merge-base --is-ancestor "$PREV_SHA" "$SHA"; then
-  [[ "${ALLOW_RELEASE_ROLLBACK:-0}" == "1" ]] || fail "refusing backwards deployment from ${PREV_SHA} to ${SHA}. For an explicitly approved rollback, set ALLOW_RELEASE_ROLLBACK=1 and follow the recovery runbook."
-  log "WARNING: explicitly authorized backwards deployment from ${PREV_SHA} to ${SHA}"
+# Refresh the authoritative head and re-run the SAME policy used in section 0.
+# A rollback is deliberately older than main: a blanket equality check here
+# would contradict the attributed rollback decision made earlier.
+REVALIDATED_MAIN_SHA="$(node "$ROOT/scripts/latest-main-sha.mjs" --ref main)" \
+  || fail "main head revalidation failed; refusing to change the checkout"
+[[ "$REVALIDATED_MAIN_SHA" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "main head revalidation returned an invalid SHA; refusing to change the checkout"
+git fetch origin '+refs/heads/main:refs/remotes/origin/main' \
+  || fail "could not refresh main history; refusing to change the checkout"
+
+# Git exit 1 means not an ancestor; other errors mean unknown, never false.
+checked_ancestor() {
+  local status
+  if git merge-base --is-ancestor "$1" "$2"; then
+    printf 'true'
+  else
+    status=$?
+    [[ "$status" == 1 ]] || return "$status"
+    printf 'false'
+  fi
+}
+REVALIDATED_ON_MAIN="$(checked_ancestor "$SHA" "$REVALIDATED_MAIN_SHA")" \
+  || fail "could not verify target ancestry; refusing to deploy something that was not merged"
+REVALIDATED_RUNNING_ANCESTOR=true
+REVALIDATED_TARGET_ANCESTOR=false
+if [[ -n "$RUNNING_SHA" ]]; then
+  REVALIDATED_RUNNING_ANCESTOR="$(checked_ancestor "$RUNNING_SHA" "$SHA")" \
+    || fail "could not verify running release ancestry"
+  REVALIDATED_TARGET_ANCESTOR="$(checked_ancestor "$SHA" "$RUNNING_SHA")" \
+    || fail "could not verify rollback ancestry"
 fi
+REVALIDATED_FACTS="$(node -e '
+  const f = JSON.parse(process.argv[1]);
+  f.latestMainSha = process.argv[2];
+  f.targetOnMain = process.argv[3] === "true";
+  f.runningIsAncestorOfTarget = process.argv[4] === "true";
+  f.targetIsAncestorOfRunning = process.argv[5] === "true";
+  process.stdout.write(JSON.stringify(f));
+' "$GUARD_FACTS" "$REVALIDATED_MAIN_SHA" "$REVALIDATED_ON_MAIN" "$REVALIDATED_RUNNING_ANCESTOR" "$REVALIDATED_TARGET_ANCESTOR")"
+REVALIDATED_DECISION="$(printf '{"facts":%s,"authorization":%s}' "$REVALIDATED_FACTS" "$GUARD_AUTH" \
+  | node "$ROOT/scripts/decide-release-activation.mjs")" \
+  || fail "release activation revalidation refused: $REVALIDATED_DECISION"
+
+# An older checkout must not be restored under a raw environment flag alone:
+# require the original guard's attributed rollback decision as well.
+REVALIDATED_PREV_ANCESTOR="$(checked_ancestor "$PREV_SHA" "$SHA")" \
+  || fail "could not verify checkout ancestry"
+if [[ "$REVALIDATED_PREV_ANCESTOR" != "true" ]]; then
+  [[ "$GUARD_ROLLBACK" == "true" ]] \
+    || fail "refusing backwards deployment without an attributed rollback decision"
+fi
+# A rollback must have a durable attributed authorization BEFORE checkout,
+# package installation or schema work. Audit failure is never a warning.
+DEPLOYMENT_ID="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+if [[ "$GUARD_ROLLBACK" == "true" ]]; then
+  ROLLBACK_AUDIT_FILE="${ALO_ROLLBACK_AUDIT_FILE:-${LOG_DIR}/rollback-audit.jsonl}"
+  node -e '
+    const facts=JSON.parse(process.argv[1]), auth=JSON.parse(process.argv[2]);
+    process.stdout.write(JSON.stringify({event:"release-rollback",recordedAt:new Date().toISOString(),operator:auth.operator,reason:auth.reason,sourceRelease:facts.runningSha,targetRelease:facts.targetSha,mainHeadAtDecision:facts.latestMainSha,result:"authorized",deploymentId:process.argv[3]}));
+  ' "$REVALIDATED_FACTS" "$GUARD_AUTH" "$DEPLOYMENT_ID" | node "$ROOT/scripts/release-audit.mjs" "$ROLLBACK_AUDIT_FILE"     || fail "rollback audit unavailable; refusing to move the checkout"
+  log "rollback audit record appended to ${ROLLBACK_AUDIT_FILE}"
+fi
+# No checkout/reset happens until all fresh evidence has passed. Explicit reset
+# below is still covered by the existing restore trap and captured backup.
 git checkout main >/dev/null
-# Last revalidation before the only irreversible step. The workflow's
-# single-flight group makes deploys run one at a time, but a run can sit in that
-# queue for hours — run #62 waited two — so "was latest when the run started" is
-# not evidence of "is latest now". Anything that fails here fails before
-# `changed=1`, so nothing has been touched and no restore is needed.
-REVALIDATED_MAIN_SHA="$(node "$ROOT/scripts/latest-main-sha.mjs" --ref main 2>/dev/null || true)"
-if [[ "$REVALIDATED_MAIN_SHA" =~ ^[0-9a-f]{40}$ && "$REVALIDATED_MAIN_SHA" != "$SHA" ]]; then
-  fail "main advanced to ${REVALIDATED_MAIN_SHA} while this run waited to deploy ${SHA}. Refusing to activate a superseded release; re-run the workflow for the new head."
-fi
 git reset --hard "$SHA" >/dev/null
 changed=1
 log "checked out ${SHA}"
@@ -385,7 +409,7 @@ ARTIFACT_SHA="null"
 if [[ -d "$PAYLOAD" ]]; then
   ARTIFACT_SHA="\"$(find "$PAYLOAD" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d" " -f1)\""
 fi
-DEPLOYMENT_ID="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+
 cat > "$IDENTITY_FILE" <<JSON
 {
   "commitSha": "${SHA}",
@@ -397,30 +421,6 @@ cat > "$IDENTITY_FILE" <<JSON
 JSON
 log "recorded release identity ${DEPLOYMENT_ID}"
 
-# ── 3e-bis. Attribute the rollback, if this was one ──────────────────────────
-# A rollback is the only deployment that knowingly moves production backwards,
-# so it is the one that must still answer "who, from what, to what, why" months
-# later. The record is appended to the deploy-log directory OUTSIDE the Git
-# checkout: writing it into the tree would make the next deployment's dirty-tree
-# check fail, which is precisely the deadlock that blocked runs #54–#64.
-if [[ "$GUARD_ROLLBACK" == "true" ]]; then
-  ROLLBACK_AUDIT_FILE="${ALO_ROLLBACK_AUDIT_FILE:-${LOG_DIR}/rollback-audit.jsonl}"
-  node -e '
-    const fs = require("node:fs");
-    const record = JSON.parse(process.argv[1]);
-    record.deploymentId = process.argv[2];
-    fs.appendFileSync(process.argv[3], JSON.stringify(record) + "\n", { mode: 0o640 });
-  ' "$(printf '{"event":"release-rollback","recordedAt":"%s","operator":%s,"reason":%s,"sourceRelease":%s,"targetRelease":%s,"mainHeadAtDecision":%s,"result":"authorized"}' \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        "$(json_string "${RELEASE_ROLLBACK_OPERATOR:-}")" \
-        "$(json_string "${RELEASE_ROLLBACK_REASON:-}")" \
-        "$(json_string "$RUNNING_SHA")" \
-        "$(json_string "$SHA")" \
-        "$(json_string "$LATEST_MAIN_SHA")")" \
-     "$DEPLOYMENT_ID" "$ROLLBACK_AUDIT_FILE" \
-    && log "rollback audit record appended to ${ROLLBACK_AUDIT_FILE}" \
-    || log "WARNING: the rollback audit record could not be written to ${ROLLBACK_AUDIT_FILE}"
-fi
 
 restart_panel
 

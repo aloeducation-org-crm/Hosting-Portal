@@ -61,6 +61,12 @@ if os.path.commonpath((os.path.realpath(db_file), os.path.realpath(repo))) == os
 PY
 
 mkdir -p "$RELEASES" "${APP_ROOT}/logs"
+# Canonical deploys cooperate on one host-local lock for assembly, activation,
+# health verification AND rollback. It is held until the EXIT trap finishes.
+command -v flock >/dev/null 2>&1 || fail "flock is required for canonical activation"
+[[ ! -L "${APP_ROOT}/.canonical-deploy.lock" ]] || fail "deploy lock must not be a symlink"
+exec 9>"${APP_ROOT}/.canonical-deploy.lock"
+flock -n 9 || fail "another canonical deployment holds the host lock"
 [[ -w "$RELEASES" ]] || fail "runner cannot write release directory $RELEASES"
 if [[ -e "$CURRENT" && ! -L "$CURRENT" ]]; then
   fail "$CURRENT exists but is not a symlink; refusing to replace it"
@@ -75,6 +81,10 @@ cleanup() {
   trap - EXIT
   rm -rf "$STAGING"
   if (( activated == 1 && succeeded == 0 )); then
+    if [[ ! -L "$CURRENT" || "$(readlink -f "$CURRENT" || true)" != "$RELEASE" ]]; then
+      log "ERROR: current changed externally; automatic rollback refused; operator recovery required"
+      exit 1
+    fi
     log "deployment verification failed; restoring previous release"
     if [[ -n "$previous" && -d "$previous" ]]; then
       local rollback_link="${APP_ROOT}/.current-rollback.$$"
@@ -90,6 +100,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
+[[ ! -L "$RELEASE" ]] || fail "release directory must not be a symlink"
 if [[ ! -d "$RELEASE" ]]; then
   mkdir -p "$STAGING/.next" "$STAGING/scripts"
   cp -a "$PAYLOAD/.next/standalone/." "$STAGING/"
@@ -123,11 +134,30 @@ else
   log "release $SHA already exists; reusing immutable release"
 fi
 
+# Reused releases must carry the identity that this activation claims.
+node -e 'const fs=require("node:fs");const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(p.commitSha!==process.argv[2])process.exit(1)' "$RELEASE/release-identity.json" "$SHA"   || fail "target release identity does not match its directory"
+
 # The sudoers rule intentionally permits only this fixed helper path and a
 # source under /home/alamin/alo-hosting/releases/<sha>/scripts/.
 sudo -n /usr/bin/install -m 0755 "$RELEASE/scripts/init-production-db.sh" /usr/local/sbin/alo-init-db
 
-link_tmp="${APP_ROOT}/.current-${SHA}"
+# Final canonical activation boundary: fresh remote head + actual current
+# identity, shared policy and durable audit. No current-link write on refusal.
+FINAL_GUARD="$(node "$ROOT/scripts/canonical-release-check.mjs" "$ROOT" "$CURRENT" "$SHA")"   || fail "fresh canonical policy refused activation"
+printf '%s' "$FINAL_GUARD" | node "$ROOT/scripts/release-audit.mjs" "${APP_ROOT}/logs/activation-audit.jsonl"   || fail "activation audit unavailable"
+if [[ -L "$CURRENT" ]]; then
+  [[ "$(readlink -f "$CURRENT" 2>/dev/null || true)" == "$previous" ]] || fail "current release changed since deployment began"
+else
+  [[ -z "$previous" ]] || fail "current release changed since deployment began"
+fi
+EXPECTED_LINK="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).sourceRelease || "")' "$FINAL_GUARD")"
+# Detect non-cooperating manual changes made while the guard/audit ran.
+if [[ -L "$CURRENT" ]]; then
+  [[ -n "$EXPECTED_LINK" && "$(readlink "$CURRENT")" == "$EXPECTED_LINK" ]] || fail "current release changed during revalidation"
+elif [[ -e "$CURRENT" || -n "$EXPECTED_LINK" ]]; then
+  fail "current release changed during revalidation"
+fi
+link_tmp="${APP_ROOT}/.current-${SHA}.$$"
 ln -s "$RELEASE" "$link_tmp"
 mv -Tf "$link_tmp" "$CURRENT"
 activated=1
