@@ -3,7 +3,7 @@
 Repository: `aloeducation-org-crm/Hosting-Portal`
 Working branch: `arena/13edf05e-hosting-portal`
 Baseline `main`: `808e649d0a2459a990da47405f9da028072624a0` (merge of PR #23)
-Consolidation pull request: **pending creation**
+Consolidation pull request: [#24](https://github.com/aloeducation-org-crm/Hosting-Portal/pull/24)
 
 ## 1. Why no PR was waiting to be merged
 
@@ -68,7 +68,7 @@ Local, in this checkout:
 - `git diff --check` — PASS
 - `npm audit --omit=dev` — 0 production advisories. `npm audit` reports 16 moderate dev-tool advisories whose suggested fixes require breaking major changes; no forced downgrade was applied.
 
-GitHub PR checks: **pending**.
+GitHub PR checks on run `41426813472`: `Lint, typecheck, and tests` **PASS** (2m1s), `Production build` **PASS** (1m57s); `Read-only production preflight` and `Deploy ...` are **intentionally skipped** on pull requests. The workflow-level release hold also prevents a plain merge/push from deploying.
 
 ## 6. Production status
 
