@@ -17,13 +17,17 @@
 #   thing it just created is a deadlock, not a safety property.
 #
 # WHAT THIS DOES
-#   It keeps the safety property and removes the deadlock. A file is tolerated
-#   only when ALL of these hold:
+#   It keeps the safety property and removes the deadlock. A deployment-output
+#   file is tolerated only when ALL of these hold:
 #     - it is untracked (a *modified tracked* file is never tolerated), and
 #     - its path is in an explicit allowlist of deployment outputs, and
 #     - its content parses as the record that deployment writes (so an attacker
 #       or a stray process cannot smuggle an arbitrary file past the check by
 #       giving it a familiar name).
+#   An exact local UI/UX reference clone is tolerated only when it is untracked,
+#   is not a symlink, is its own Git work tree and has the documented upstream
+#   remote. `git reset --hard` does not remove or rewrite such a directory, and
+#   the new .gitignore entries make it ignored after the host pulls this commit.
 #   Anything else fails closed with the offending paths printed, so genuine
 #   uncommitted work still blocks the deployment and is still visible.
 #
@@ -53,10 +57,41 @@ JSON_ONLY=0
 # short and explicit; anything not listed here blocks the deployment.
 TOLERATED_FILES=("release-identity.json")
 
+# Exact untracked reference-clone paths already present on the production host.
+# These are not deployment outputs and are never committed or bundled.
+TOLERATED_REFERENCE_DIRS=("aerus-usage-hud" "alo-hosting-portal/aerus-usage-hud")
+EXPECTED_REFERENCE_REMOTES=("https://github.com/xAerux/aerus-usage-hud.git" "https://github.com/xAerux/aerus-usage-hud")
+
 is_tolerated_path() {
   local candidate="$1" allowed
   for allowed in "${TOLERATED_FILES[@]}"; do
     [[ "$candidate" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+
+is_tolerated_reference_dir() {
+  local candidate="${1%/}" allowed
+  for allowed in "${TOLERATED_REFERENCE_DIRS[@]}"; do
+    [[ "$candidate" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+
+is_valid_reference_clone() {
+  local root="$1" candidate="${2%/}" clone clone_abs toplevel remote expected
+  clone="$root/$candidate"
+  [[ -d "$clone" && ! -L "$clone" ]] || return 1
+  clone_abs="$(cd "$clone" && pwd -P)" || return 1
+  toplevel="$(git -C "$clone" rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "$toplevel" ]] || return 1
+  toplevel="$(cd "$toplevel" && pwd -P)" || return 1
+  # A `git -C <dir>` inside an ordinary subdirectory would otherwise discover
+  # the enclosing production checkout's remote. Require this directory itself.
+  [[ "$toplevel" == "$clone_abs" ]] || return 1
+  remote="$(git -C "$clone" remote get-url origin 2>/dev/null || true)"
+  for expected in "${EXPECTED_REFERENCE_REMOTES[@]}"; do
+    [[ "$remote" == "$expected" ]] && return 0
   done
   return 1
 }
@@ -101,6 +136,10 @@ while IFS= read -r -d '' entry; do
   # "??" is untracked; "!!" is ignored (not emitted with default flags).
   if [[ "$status" == "??" ]]; then
     if is_tolerated_path "$file" && is_valid_deploy_record "$DIR/$file"; then
+      TOLERATED+=("$file")
+      continue
+    fi
+    if is_tolerated_reference_dir "$file" && is_valid_reference_clone "$DIR" "$file"; then
       TOLERATED+=("$file")
       continue
     fi
@@ -156,7 +195,7 @@ if (( JSON_ONLY == 1 )); then
   printf '\n'
 else
   if (( ${#TOLERATED[@]} > 0 )); then
-    printf 'host-checkout: %s is safe to deploy (tolerating deployment output: %s)\n' "$DIR" "${TOLERATED[*]}"
+    printf 'host-checkout: %s is safe to deploy (tolerating validated untracked paths: %s)\n' "$DIR" "${TOLERATED[*]}"
   else
     printf 'host-checkout: %s is clean and safe to deploy\n' "$DIR"
   fi

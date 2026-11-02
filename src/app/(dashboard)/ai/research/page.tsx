@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/stores/authStore";
+import { EXTERNAL_AI_TOOL_CATALOG } from "@/lib/ai/external-tool-catalog";
 
 type ReviewRequest = { id: string; projectId: string; capability: string; targetKind: string; targetReference: string; targetSha256: string; objective: string; authorizationEvidence: string; scopeDigest: string; effectiveStatus: string; executionState: string; requestedBy: string; reviewReason: string | null; expiresAt: string | null };
 type Project = { id: string; name: string };
@@ -35,6 +36,21 @@ export default function ResearchWorkspace() {
   return <div className="mx-auto max-w-6xl space-y-6 p-6">
     <header className="space-y-3"><p className="text-sm font-medium text-primary">INTERNAL • ADMINISTRATOR REVIEW</p><h1 className="text-3xl font-bold">AI Research &amp; Evolution</h1><p className="text-muted-foreground">Record an authorized target, define reconstruction or code-change scope, and obtain independent review.</p></header>
     <div className="rounded-xl border bg-muted/40 p-5 space-y-2 text-sm"><p><strong>Execution requires setup.</strong> Saving or approving a request does not run REA, fetch a website, inspect your Mac, send source to an AI provider, edit files or deploy code.</p><p>REA transport and proposal-generation libraries are implemented locally. A verified isolated runner, durable execution grants, Mac companion and voice integration are not enabled.</p><p>No DRM, licensing, authentication or access-control bypass. Do not enter credentials, private keys or customer secrets.</p></div>
+    <section className="space-y-4 rounded-xl border p-5">
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold">External AI capability intake</h2>
+        <p className="text-sm text-muted-foreground">All owner-supplied references are recorded here as review-only candidates. None is installed, connected, executable or approved for production. Truncated links are resolved to canonical repositories where GitHub evidence allowed it.</p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {EXTERNAL_AI_TOOL_CATALOG.map((entry) => <article key={entry.id} className="space-y-2 rounded-lg border bg-background p-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2"><strong>{entry.suppliedLabel}</strong><span className="rounded border px-2 py-0.5 text-xs">{entry.admissionState}</span><span className="text-xs text-muted-foreground">{entry.executionState.replaceAll("_", " ")}</span></div>
+          <p className="text-xs text-muted-foreground">{entry.track} • {entry.license} • pinned {entry.pinnedCommit ? entry.pinnedCommit.slice(0, 12) : "n/a"}</p>
+          <p className="break-all text-xs">{entry.canonicalRef}</p>
+          <p className="text-xs">{entry.notes}</p>
+          <details><summary className="cursor-pointer text-xs">Candidate features and gates</summary><div className="mt-2 space-y-2 break-words text-xs"><p><strong>Features:</strong> {entry.candidateFeatures.length ? entry.candidateFeatures.join("; ") : "None — excluded"}</p><p><strong>Gates:</strong> {entry.gates.join("; ")}</p></div></details>
+        </article>)}
+      </div>
+    </section>
     {error && <p role="alert" className="rounded-lg border border-destructive p-3 text-destructive">{error}</p>}
     {notice && <p role="status" className="rounded-lg border p-3">{notice}</p>}
     <form className="grid gap-4 rounded-xl border p-5 md:grid-cols-2" onSubmit={async (event) => { event.preventDefault(); if (await submit("/api/ai/capability-requests", "POST", form)) setForm((previous) => ({ ...previous, objective: "", authorizationEvidence: "", authorizedInspection: false })); }}>

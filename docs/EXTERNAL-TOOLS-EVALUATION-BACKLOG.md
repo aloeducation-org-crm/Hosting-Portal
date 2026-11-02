@@ -41,3 +41,9 @@ Local-REA is an installation/configuration/results reference, not a verified int
 ## Controlled REA adapter development — 2026-10-31
 
 Owner-approved capability development now includes a first-party, bounded REA protocol/session library; see [`design/REA-MCP-ADAPTER.md`](design/REA-MCP-ADAPTER.md). This is not an installed external integration or permission for arbitrary target access. Optional package installation and activation remain gated; hosting release blockers/manual production policy remain unchanged. No upstream tool was run during this implementation.
+
+## Consolidated owner-supplied intake — 2026-11-02
+
+All references in the latest owner list are now recorded as typed, review-only records in [`design/EXTERNAL-AI-CAPABILITY-CATALOG.md`](design/EXTERNAL-AI-CAPABILITY-CATALOG.md) and in `src/lib/ai/external-tool-catalog.ts`. Truncated aliases were resolved where GitHub evidence permits: `anthropics/claude-` → `anthropics/claude-plugins-official`, `K-Dense-AI/scienti` → `K-Dense-AI/scientific-agent-skills`, and `akitaonrails/ai-me` → `akitaonrails/ai-memory`. The `treg.to` landing page links to `superdesigndev/treg`; no account, API key, endpoint or paid provider was used.
+
+The catalogue is visible to the administrator research UI and to a read-only AI workflow tool. It is **not** an installed-app inventory. Every record remains `executable: false`; the Wi-Fi credential attack utility is explicitly excluded. REA remains a bounded first-party protocol/review foundation, not an upstream runtime integration. Voice cloning remains subject to speaker consent and AGPL review. All deferred admission gates, hosting acceptance prerequisites and the production NO-GO/manual-only policy are unchanged.

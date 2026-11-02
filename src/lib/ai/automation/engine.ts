@@ -264,6 +264,7 @@ export async function runWorkflowGraph(
       case "hosting.listDeployments":
       case "hosting.automationOverview":
       case "hosting.billingOverview":
+      case "hosting.externalToolCatalog":
       case "hosting.marketingOverview": {
         const toolName = node.type.replace("hosting.", "");
         const tool = deps.tools[toolName];

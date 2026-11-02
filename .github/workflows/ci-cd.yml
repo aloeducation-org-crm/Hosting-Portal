@@ -37,6 +37,21 @@ on:
         required: false
         default: ''
         type: string
+      # A merge/push to main must never deploy production unattended. The
+      # repository's production environment has no required reviewers and this
+      # token cannot create that protection rule, so the workflow itself now
+      # requires an explicit, attributable dispatch decision for the exact
+      # commit. This is a release hold, not proof of environment protection.
+      release_approval:
+        description: 'Type APPROVED to authorize a production release for this exact main commit. Pushes never deploy.'
+        required: false
+        default: ''
+        type: string
+      release_ticket:
+        description: 'Owner approval reference recorded in the run (3-120 letters, numbers, dot, dash, underscore, slash or colon).'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -178,12 +193,14 @@ jobs:
           } | tee .deploy-digest
           echo "value=$(cat .deploy-digest)" >> "$GITHUB_OUTPUT"
       - name: Upload verified release payload
-        # Also on workflow_dispatch against main: that is the authorized-rollback
-        # path, and it still deploys the CI-built, digest-verified payload rather
-        # than anything built by hand on the host.
+        # Only an explicitly approved dispatch on main creates a deployable
+        # payload. A normal merge to main still verifies and builds, but cannot
+        # publish a release artifact for an unattended production deployment.
         if: >-
           github.ref == 'refs/heads/main' &&
-          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.release_approval == 'APPROVED' &&
+          github.event.inputs.release_ticket != ''
         uses: actions/upload-artifact@v6
         with:
           name: hosting-release-${{ github.sha }}
@@ -204,18 +221,22 @@ jobs:
             scripts/decide-release-target.mjs
             .deploy-digest
 
-  # Read-only. Runs on the production runner BEFORE any approval gate so the
-  # approver sees host evidence, and it changes nothing on the host: no checkout,
-  # no install into the app directory, no build, no migration, no restart.
+  # Read-only. Runs only for an explicitly approved production dispatch, before
+  # the mutating job. It changes nothing on the host: no checkout, no install
+  # into the app directory, no build, no migration, no restart. A normal merge
+  # to main does not produce host evidence or a deployable artifact because it
+  # cannot deploy; this avoids a slow unnecessary artifact download per merge.
   deploy-preflight:
     name: Read-only production preflight
     needs: build
-    # push to main is the normal path. workflow_dispatch on main is the only
-    # supported way to authorize a rollback; dispatching from any other ref
-    # cannot reach production because this condition requires main.
+    # Dispatching from any other ref cannot reach production because this
+    # condition requires main. The typed approval and ticket are explicit
+    # dispatch-time decisions, never a stored variable that can be forgotten.
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.release_approval == 'APPROVED' &&
+      github.event.inputs.release_ticket != ''
     runs-on: self-hosted
     timeout-minutes: 20
     outputs:
@@ -283,12 +304,12 @@ jobs:
             test -f "$APP_DIR/package.json" || { echo "::error::Canonical root package.json is missing"; exit 1; }
             test -f "$APP_DIR/package-lock.json" || { echo "::error::package-lock.json is missing; refusing npm ci"; exit 1; }
             # Delegated to the versioned classifier instead of a bare
-            # `git status` test, for two reasons. It tolerates the deployment's
-            # own release-identity.json — counting that untracked file as a local
-            # change is what blocked runs #54, #58, #60, #62 and #64 in a loop,
-            # because the deploy could never pull the commit that ignores it. And
-            # it keeps the rule in one reviewable, testable place rather than
-            # duplicated here, where a copy can drift from the script's.
+            # `git status` test. It validates the deployment's own
+            # release-identity.json and exact local reference clones — counting
+            # those untracked paths as local changes blocked runs 54, 58, 60,
+            # 62 and 64 in a loop. It keeps the rule in one reviewable,
+            # testable place rather than duplicated here, where a copy can drift
+            # from the script's.
             # Genuine uncommitted work still blocks, and is printed by name.
             bash scripts/host-checkout-status.sh "$APP_DIR" \
               || { echo "::error::Production checkout has local changes that are not deployment output. Refusing to checkout or pull and risk overwriting them."; exit 1; }
@@ -306,18 +327,19 @@ jobs:
       - name: Record when this evidence was collected
         run: date -u +"preflight evidence collected at %Y-%m-%dT%H:%M:%SZ"
 
-  # The only job that changes production. It declares the `production`
-  # environment, which is where a required reviewer must be configured so a
-  # merge to main cannot deploy unattended. Until that protection rule exists,
-  # this job starts immediately — see docs/DEPLOYMENT-AND-ROLLBACK.md, which
-  # records the exact administrator action required and why this file cannot
-  # create it.
+  # The only job that changes production. It still declares the `production`
+  # environment, where an administrator should add required reviewers. GitHub's
+  # API refused to create that rule with this integration token, so the job is
+  # additionally gated on an explicit approved workflow_dispatch; a push to
+  # main skips it entirely. See docs/DEPLOYMENT-AND-ROLLBACK.md.
   deploy:
     name: Deploy canonical root portal to production server
     needs: [build, deploy-preflight]
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.release_approval == 'APPROVED' &&
+      github.event.inputs.release_ticket != ''
     runs-on: self-hosted
     environment: production
     timeout-minutes: 30
@@ -328,6 +350,16 @@ jobs:
       group: hosting-production-deploy
       cancel-in-progress: false
     steps:
+      - name: Verify explicit release approval for this commit
+        env:
+          RELEASE_APPROVAL: ${{ github.event.inputs.release_approval || '' }}
+          RELEASE_TICKET: ${{ github.event.inputs.release_ticket || '' }}
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_APPROVAL" == "APPROVED" ]] || { echo "::error::Production release requires the typed APPROVED dispatch input; no host change was made."; exit 1; }
+          [[ "$RELEASE_TICKET" =~ ^[A-Za-z0-9._:/-]{3,120}$ ]] || { echo "::error::A bounded owner approval reference is required; no host change was made."; exit 1; }
+          echo "release approval recorded: ${RELEASE_TICKET} for ${DEPLOY_COMMIT_SHA}"
       # Full history, not the default depth of 1. The release guard has to prove
       # ancestry relationships — that the target is on main, and whether the
       # running release is ahead of or behind it. In a shallow clone those
