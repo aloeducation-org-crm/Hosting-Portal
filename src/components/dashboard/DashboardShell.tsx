@@ -72,6 +72,7 @@ const clientNavItems = [
   { label: "AI Automations", href: "/ai/automations", icon: Zap },
   { label: "Self-Hosted AI", href: "/ai/self-hosted", icon: Server },
   { label: "Digital Marketing", href: "/dashboard/marketing", icon: Megaphone },
+  { label: "Sales Channels", href: "/sales-channels", icon: Network },
   { label: "CRM", href: "/dashboard/crm", icon: Users },
   { label: "Email", href: "/dashboard/email", icon: Mail },
   { label: "Billing", href: "/dashboard/billing", altPrefix: "/billing", icon: CreditCard },
@@ -80,6 +81,7 @@ const clientNavItems = [
 ];
 
 const adminNavItems = [
+  { label: "AI Research & Evolution", href: "/ai/research", icon: Cpu },
   { label: "Manage Users", href: "/users", altPrefix: "/dashboard/users", icon: Users },
   { label: "Unified Infrastructure", href: "/infrastructure", altPrefix: "/dashboard/infrastructure", icon: Network },
   { label: "Servers & Nodes", href: "/servers", altPrefix: "/dashboard/servers", icon: Server },

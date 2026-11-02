@@ -2347,3 +2347,29 @@ model ServiceIndustry {
   @@index([industryId])
   @@map("service_industries")
 }
+
+// Internal REA / code-evolution intake. Approval does not dispatch execution.
+// Actor IDs are retained as immutable audit identifiers, never cascade-deleted.
+model AiCapabilityRequest {
+  id                    String   @id @default(uuid())
+  projectId             String
+  capability            String
+  targetKind            String
+  targetReference       String
+  targetSha256          String
+  objective             String
+  authorizationEvidence String
+  scopeDigest           String
+  status                String   @default("REQUESTED")
+  requestedBy           String
+  reviewedBy            String?
+  reviewedAt            DateTime?
+  expiresAt             DateTime?
+  reviewReason          String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([status, expiresAt])
+  @@map("ai_capability_requests")
+}

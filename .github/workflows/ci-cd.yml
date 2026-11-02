@@ -51,10 +51,10 @@ concurrency:
 jobs:
   verify:
     name: Lint, typecheck, and tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -94,12 +94,12 @@ jobs:
   build:
     name: Production build
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       artifact-digest: ${{ steps.digest.outputs.value }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -179,8 +179,8 @@ jobs:
       mode: ${{ steps.decide.outputs.mode }}
       decision: ${{ steps.decide.outputs.reason }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       # Installed in the ephemeral workspace only, never in the app checkout.
@@ -292,7 +292,7 @@ jobs:
       # on commits outside the graft, and `git fetch origin main` leaves
       # `origin/main` pointing at this run's own commit, which makes a staleness
       # comparison silently pass for the stale run it exists to reject.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       # This job waited in the `hosting-production-deploy` single-flight queue to

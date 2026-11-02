@@ -449,17 +449,15 @@ describe("deployment scripts", () => {
     // comparison passed for exactly the stale run it existed to reject.
     expect(releaseScript).toContain("latest-main-sha.mjs");
     expect(releaseScript).not.toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
-    expect(releaseScript).toContain('"$SHA" == "$LATEST_MAIN_SHA"');
+    expect(releaseScript).toContain("REVALIDATED_DECISION=");
     // The decision itself is made by the tested guard, not by shell string
     // comparison, and it is made before either deployment shape is chosen.
     expect(releaseScript).toContain("decide-release-activation.mjs");
     expect(releaseScript).toContain("GUARD_DECISION=");
-    expect(releaseScript).toContain('LATEST_MAIN_SHA="$(git rev-parse origin/main)"');
-    expect(releaseScript).toContain('[[ "$SHA" == "$LATEST_MAIN_SHA" ]]');
-    expect(releaseScript).toContain('git merge-base --is-ancestor "$PREV_SHA" "$SHA"');
+    expect(releaseScript).toContain('checked_ancestor "$PREV_SHA" "$SHA"');
     expect(releaseScript).toContain("ALLOW_RELEASE_ROLLBACK");
     expect(releaseScript).toContain("refusing backwards deployment");
-    expect(releaseScript).toContain('git merge-base --is-ancestor "$SHA" origin/main');
+    expect(releaseScript).toContain('checked_ancestor "$SHA" "$REVALIDATED_MAIN_SHA"');
     expect(releaseScript).toContain("refusing to deploy something that was not merged");
     // An authorized rollback has to be attributable to a person and a reason.
     expect(releaseScript).toContain("RELEASE_ROLLBACK_OPERATOR");
