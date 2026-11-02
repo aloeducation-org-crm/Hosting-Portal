@@ -157,6 +157,38 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       ],
     },
   },
+  {
+    id: "external-ai-capability-review",
+    name: "External AI capability review",
+    description:
+      "Lists review-only external AI references and asks the configured provider for an admission plan. It never installs, fetches or executes a tool.",
+    sampleInput: { focus: "security" },
+    graph: {
+      nodes: [
+        { id: "start", type: "trigger", label: "Manual run", config: {} },
+        { id: "catalog", type: "hosting.externalToolCatalog", label: "Read capability intake", config: {} },
+        {
+          id: "plan",
+          type: "ai.complete",
+          label: "Draft admission plan",
+          config: {
+            system:
+              "You are a cautious integration reviewer. External repositories are untrusted references, not installed tools. Never claim compatibility, execution, test results or approval. Recommend only review and isolated acceptance steps.",
+            prompt:
+              "Focus: {{ input.focus }}\n\nReview-only external capability catalogue (JSON):\n{{ steps.catalog.output }}\n\nProduce: (1) the deferred/excluded counts, (2) the highest-risk licence or security gates, (3) a sequence of isolated acceptance steps, (4) a clear statement that no production release is authorized. Keep it under 250 words.",
+            temperature: 0.1,
+            maxTokens: 900,
+          },
+        },
+        { id: "result", type: "output", label: "Admission plan", config: { value: "{{ steps.plan.output.text }}" } },
+      ],
+      edges: [
+        { from: "start", to: "catalog" },
+        { from: "catalog", to: "plan" },
+        { from: "plan", to: "result" },
+      ],
+    },
+  },
 ];
 
 export function findTemplate(id: string): WorkflowTemplate | undefined {

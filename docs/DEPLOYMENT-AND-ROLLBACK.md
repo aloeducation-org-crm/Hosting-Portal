@@ -5,6 +5,8 @@
 **BLOCKED** require an action nobody has taken yet. Nothing in here has been
 executed against the production host.
 
+> **2026-11-02 superseding update:** a plain push/merge to `main` no longer starts a production deployment. See §10 at the end. Earlier sections describing `push` as an automatic deployment path are historical baseline evidence, not current behaviour.
+
 ---
 
 ## 1. What can trigger a production deployment
@@ -339,3 +341,15 @@ It exits non-zero on a release-blocking misconfiguration (URLs that disagree, a
 placeholder secret, a database inside the checkout, a non-loopback site bind,
 insecure webhook/preview flags, anonymous AI) and never prints a value. See
 [`PRODUCTION-CONFIG-VALIDATION.md`](PRODUCTION-CONFIG-VALIDATION.md).
+
+## 10. 2026-11-02 — workflow-level manual-only release hold
+
+The production environment still reports `protection_rules: []`, and a read-only attempt to add a required reviewer with this integration token returned `403 Resource not accessible by integration`. An administrator must still configure required reviewers and branch protection in GitHub Settings. Because that API setting could not be created here, the workflow now enforces a code-level hold:
+
+- `push` to `main` runs `verify` and `build` only. It does not upload a deployable artifact, run production preflight or start the mutating job.
+- `pull_request` runs `verify` and `build` only.
+- A production release requires `workflow_dispatch` on `main` with `release_approval=APPROVED` and a bounded `release_ticket`. These are dispatch-time inputs, not a stored variable that can be forgotten.
+- The deploy job verifies those inputs again before touching the host. The existing production environment, single-flight group, head-of-main revalidation, digest verification, additive-only migrations, release identity and automatic restore remain unchanged.
+- A skipped deploy on a normal merge is intentional, not a CI failure. Explicitly approving a dispatch is a release decision; it is not a substitute for environment required reviewers or the owner acceptance gates.
+
+The 2026-11-02 `main` run `41408412785` passed verification and build but stopped in read-only preflight because the host had untracked `aerus-usage-hud/` and `alo-hosting-portal/aerus-usage-hud/` directories. The classifier now tolerates only exact untracked reference clones whose own Git work tree has the documented upstream remote; plain directories, wrong remotes, symlinks and genuine uncommitted work still block. `scripts/deploy-release.sh` re-checks through the same classifier, and `.gitignore` covers both paths after the host pulls the fix. No host files were deleted or overwritten by this change.

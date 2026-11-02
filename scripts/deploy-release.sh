@@ -198,9 +198,12 @@ cd "$APP_DIR"
 PREV_SHA="$(git rev-parse HEAD)"
 log "current commit ${PREV_SHA}"
 
-# The preflight already proved the tree is clean; re-check because a build may
-# have written into it since, and pulling over local changes is how work is lost.
-[[ -z "$(git status --porcelain --untracked-files=normal)" ]] \
+# The preflight already proved the tree is safe; re-check through the SAME
+# versioned classifier because a build may have written into it since. A bare
+# git-status test here would reject the validated untracked paths that the
+# classifier just allowed, recreating the old deadlock before the host could
+# pull the commit whose .gitignore covers them.
+bash "$ROOT/scripts/host-checkout-status.sh" "$APP_DIR" >/dev/null \
   || fail "the checkout gained local changes after preflight; refusing to pull over them"
 
 # ── 3a. The database must be identified explicitly ───────────────────────────

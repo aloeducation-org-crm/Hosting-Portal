@@ -73,9 +73,25 @@ function makeRepo(): string {
   git("config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(dir, "package.json"), '{"name":"canonical-root"}\n');
   fs.writeFileSync(path.join(dir, "package-lock.json"), '{"lockfileVersion":3}\n');
+  // The real repository has a tracked alo-hosting-portal/ directory, so Git
+  // descends into it and reports a nested untracked clone by its full path.
+  fs.mkdirSync(path.join(dir, "alo-hosting-portal"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "alo-hosting-portal", ".gitkeep"), "");
   git("add", "-A");
   git("commit", "-qm", "initial production state");
   return dir;
+}
+
+/** A separate, untracked Git clone used only as a local UI/UX reference. */
+function makeReferenceClone(dir: string, relativePath: string, remote = "https://github.com/xAerux/aerus-usage-hud.git"): string {
+  const clone = path.join(dir, relativePath);
+  fs.mkdirSync(clone, { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: clone, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  git("init", "-q", "-b", "main", ".");
+  git("remote", "add", "origin", remote);
+  fs.writeFileSync(path.join(clone, "README.md"), "local reference only\n");
+  return clone;
 }
 
 /** The record `scripts/deploy-release.sh` writes after a successful deployment. */
@@ -150,6 +166,36 @@ describe("production checkout classification (runs #54–#64 blocker)", () => {
     // The tolerated file is reported separately, so an operator can see that the
     // block is about their hotfix and not about deployment output.
     expect(json.tolerated).toContain("release-identity.json");
+  });
+
+  it("tolerates exact validated reference clones at both host paths", () => {
+    const dir = makeRepo();
+    makeReferenceClone(dir, "aerus-usage-hud");
+    makeReferenceClone(dir, "alo-hosting-portal/aerus-usage-hud", "https://github.com/xAerux/aerus-usage-hud");
+    const json = JSON.parse(classify(dir, true).stdout);
+    expect(json.safe).toBe(true);
+    expect(json.tolerated).toContain("aerus-usage-hud/");
+    expect(json.tolerated).toContain("alo-hosting-portal/aerus-usage-hud/");
+    expect(json.blocking).toEqual([]);
+    expect(read(".gitignore")).toMatch(/^\/aerus-usage-hud\/$/m);
+    expect(read(".gitignore")).toMatch(/^\/alo-hosting-portal\/aerus-usage-hud\/$/m);
+  });
+
+  it("still blocks a lookalike directory without the documented Git remote", () => {
+    const dir = makeRepo();
+    makeReferenceClone(dir, "aerus-usage-hud", "https://github.com/untrusted/other.git");
+    const json = JSON.parse(classify(dir, true).stdout);
+    expect(json.safe).toBe(false);
+    expect(json.blocking).toContain("untracked: aerus-usage-hud/");
+  });
+
+  it("still blocks a plain directory with a tolerated reference-clone name", () => {
+    const dir = makeRepo();
+    fs.mkdirSync(path.join(dir, "aerus-usage-hud"));
+    fs.writeFileSync(path.join(dir, "aerus-usage-hud", "notes.txt"), "manual work\n");
+    const json = JSON.parse(classify(dir, true).stdout);
+    expect(json.safe).toBe(false);
+    expect(json.blocking).toContain("untracked: aerus-usage-hud/");
   });
 
   it("blocks a modified tracked file even when it has a tolerated name", () => {
@@ -534,6 +580,12 @@ describe("guard placement and workflow wiring", () => {
     expect(resetAt).toBeGreaterThan(revalidateAt);
   });
 
+  it("re-checks the production checkout through the same classifier before reset", () => {
+    const releaseScript = read("scripts/deploy-release.sh");
+    expect(releaseScript).toContain('bash "$ROOT/scripts/host-checkout-status.sh" "$APP_DIR"');
+    expect(releaseScript).not.toContain('git status --porcelain --untracked-files=normal');
+  });
+
   it("keeps deployment serialization single-flight and never cancels a deploy in flight", () => {
     const deploy = workflow.jobs.deploy;
     expect(deploy.concurrency).toMatchObject({ group: "hosting-production-deploy", "cancel-in-progress": false });
@@ -606,6 +658,26 @@ describe("guard placement and workflow wiring", () => {
     ) as { if?: string } | undefined;
     expect(String(upload?.if)).toContain("refs/heads/main");
     expect(String(upload?.if)).not.toContain("pull_request");
+  });
+
+  it("requires an explicit typed production approval and skips unattended pushes", () => {
+    const triggers = workflow.on as Record<string, { inputs?: Record<string, unknown> }>;
+    expect(triggers.workflow_dispatch?.inputs).toMatchObject({
+      release_approval: expect.any(Object),
+      release_ticket: expect.any(Object),
+    });
+    for (const job of ["deploy-preflight", "deploy"]) {
+      const condition = String(workflow.jobs[job].if ?? "");
+      expect(condition).toContain("github.event_name == 'workflow_dispatch'");
+      expect(condition).toContain("github.event.inputs.release_approval == 'APPROVED'");
+      expect(condition).toContain("github.event.inputs.release_ticket != ''");
+      expect(condition).not.toContain("github.event_name == 'push'");
+    }
+    const upload = (workflow.jobs.build.steps ?? []).find((step) =>
+      String(step.name ?? "").includes("Upload verified release payload"),
+    ) as { if?: string } | undefined;
+    expect(String(upload?.if)).toContain("release_approval");
+    expect(String(upload?.if)).not.toContain("github.event_name == 'push'");
   });
 
   it("exposes rollback only as an attributed, dispatch-time decision", () => {

@@ -11,6 +11,7 @@
 
 import { db } from "@/lib/db";
 import type { ToolContext, ToolRegistry, WorkflowActor } from "./engine";
+import { externalToolCatalogForAgent } from "@/lib/ai/external-tool-catalog";
 
 export type HostingToolActor = WorkflowActor;
 
@@ -221,6 +222,15 @@ export function createScopedHostingTools(boundActor?: WorkflowActor): ToolRegist
         dealCount,
         subscriberCount,
       };
+    },
+    /**
+     * Review-only external capability intake. It is not tenant data, but it is
+     * still gated on an authenticated workflow actor so an anonymous run cannot
+     * enumerate the internal research catalogue.
+     */
+    externalToolCatalog: async (_args, context) => {
+      void resolveTenantOwnerFilter(effectiveActor(context));
+      return externalToolCatalogForAgent();
     },
   };
 }

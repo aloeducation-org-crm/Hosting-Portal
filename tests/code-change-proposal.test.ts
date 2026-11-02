@@ -41,7 +41,7 @@ describe("own-agent code change proposal admission (not an executor)", () => {
     const { proposal, context } = fixture(); context.allowedPaths = [path]; context.snapshot.set(path, null);
     expect(() => prepareCodeChangeProposal({ ...proposal, changes: [{ action: "add", path, content: "code" }] }, context)).toThrow();
   });
-  it.each(["src/security/policy.ts", "src/lib/ai/rea/analysis-session.ts", "src/lib/ai/capability-requests.ts", "src/lib/ai/capability-http.ts", "src/agents/allowlist.ts", "src/auth.ts", "src/middleware.ts", "src/ai/code-change-proposal.ts", "package.json", "src/credentials.json"])("blocks protected path %s", (path) => {
+  it.each(["src/security/policy.ts", "src/lib/ai/rea/analysis-session.ts", "src/lib/ai/capability-requests.ts", "src/lib/ai/capability-http.ts", "src/agents/allowlist.ts", "src/auth.ts", "src/middleware.ts", "src/ai/code-change-proposal.ts", "src/lib/ai/external-tool-catalog.ts", "package.json", "src/credentials.json"])("blocks protected path %s", (path) => {
     const { proposal, context } = fixture(); context.allowedPaths = [path]; context.snapshot.set(path, null);
     expect(() => prepareCodeChangeProposal({ ...proposal, changes: [{ action: "add", path, content: "code" }] }, context)).toThrow();
   });

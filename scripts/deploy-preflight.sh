@@ -67,8 +67,8 @@ if (( inline_is_git == 0 )); then
   # release-identity.json into this checkout so the running app can report its
   # commit through /api/health, and counting that file as a local change made
   # every deploy after the first one fail preflight (runs #54–#64). The
-  # classifier tolerates only untracked files it can validate as deployment
-  # output, so genuine uncommitted work still blocks the deployment.
+  # classifier validates deployment output and exact local reference clones,
+  # so genuine uncommitted work still blocks the deployment.
   if bash "$ROOT/scripts/host-checkout-status.sh" "$INLINE_ROOT" >/dev/null 2>&1; then
     inline_clean=0
   else

@@ -112,3 +112,13 @@ Verification: **869 tests / 53 files, lint, typecheck, production build and diff
 Continued the requested remaining work by addressing core release blockers before enabling experimental execution. Canonical activation now has a fresh identity/main/ancestry policy check at its final activation boundary, a canonical host lock, durable authorization audit, target-identity checks and refusal to overwrite externally changed current releases during activation/automatic recovery. Inline rollback audit now must persist before checkout/reset; failures block rather than warn. Authorization records are not deployment-completion evidence.
 
 **885 tests / 54 files + lint/typecheck/build/diff PASS**; 14 canonical regressions and 2 new inline audit regressions use actual shell/Git/filesystem operations on temporary fixtures. Current database and production were not modified. Canonical-only locking does not yet cover inline/manual tools; live recovery and remaining infrastructure/AI execution acceptance are still incomplete. See the dated follow-up in `SELF-HOSTED-ACCEPTANCE-GATE.md`. Production remains NO-GO/manual-only. This is tested progress, not a claim that “all” requested capabilities are complete.
+
+## 2026-11-02 — consolidated intake and release-hold increment
+
+- All 23 PRs are merged; zero open PRs remain. The one leftover remote branch is 67 commits behind `main` and has no unmerged commits.
+- The latest main verification and production build passed. Production preflight stopped on two untracked local reference clones; deploy was skipped. The classifier now validates only exact documented clones, `deploy-release.sh` uses the same classifier on its second check, and `.gitignore` covers the paths after the host pulls the fix.
+- A workflow-level approval gate now prevents any plain push/merge from starting production deployment. Required environment reviewers are still not configured because the API returned 403; an administrator must do that in GitHub Settings.
+- All supplied external AI-agent references were added to a typed, non-executable catalogue, an administrator UI section, a read-only workflow tool and a review-only workflow template. `WiFi-Password-Cracker-Pro` is recorded as excluded. No external package, plugin, model, endpoint, voice service or MCP server was installed or executed.
+- REA remains a bounded first-party protocol/proposal foundation. Upstream runtime compatibility, isolated worker execution, live rollback/restore and self-edit promotion remain unproven.
+
+Overall status remains **NO-GO for production release / manual-only**. The release hold is now enforced in the workflow; it does not remove the acceptance or owner-approval requirements.

@@ -4,6 +4,8 @@ Date: 2026-10-31
 Branch: `arena/649ce968-hosting-portal`
 Decision: **NO-GO for production release or customer-workload migration.**
 
+> **2026-11-02 update:** the workflow now also enforces a manual-only release hold in code because the production-environment reviewer API returned 403. See the dated section at the end. Acceptance and production NO-GO remain unchanged.
+
 ## Operating policy
 
 The owner requires the previous manual deployment process to remain in use until explicit production-release approval. Do not deploy this branch, change production DNS, migrate workloads, replace the production workflow, delete customer files/databases, or remove recovery paths. Passing CI is not release approval. Destructive tests require separately approved, disposable targets. Changes to existing configuration require a reviewed diff and recoverable backup, never silent replacement.
@@ -154,3 +156,13 @@ Still required before GO:
 - Canonical rollback restart/postcondition verification and durable outcome/recovery records still need hardening and actual failure drills. An authorization-intent audit does not establish successful activation or restoration.
 - Artifact provenance, supported schema compatibility, privileged-route/tenant review, isolated builds and the complete infrastructure acceptance matrix above remain outstanding.
 - No staging/production access, inventory, live deployment, DNS/TLS, backup restoration, workload migration or release approval was performed. Existing manual deployment policy and production **NO-GO** remain.
+
+## 2026-11-02 — release hold and consolidated external intake
+
+- A read-only check confirmed `production` still has `protection_rules: []`. Updating it with this integration token returned `403 Resource not accessible by integration`; branch/ruleset administration is still an administrator action.
+- `.github/workflows/ci-cd.yml` now requires an explicit approved `workflow_dispatch` on `main` with a bounded owner ticket before it uploads a deployable artifact, preflights the host or starts the mutating job. A normal merge no longer deploys unattended. This is an additional hold, not a replacement for required reviewers.
+- All 23 PRs are merged and there are no open PRs. The latest `main` CI run passed verification/build; its read-only preflight correctly stopped on two untracked local reference clones. The classifier now validates those exact clones by their own Git remote; all other local changes still fail closed.
+- All owner-supplied external AI references are added as review-only catalogue records. No external tool was installed, executed or enabled; the Wi-Fi credential attack reference is excluded.
+- Full local verification and PR checks are recorded in [`../MERGE-AND-RELEASE-STATUS-2026-11-02.md`](../MERGE-AND-RELEASE-STATUS-2026-11-02.md).
+
+**Decision remains NO-GO.** Passing CI and merging code are not release approval. Staging/production lifecycle, rollback/restore, permissions, monitoring, security acceptance and explicit owner approval are still outstanding.

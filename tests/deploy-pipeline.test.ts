@@ -253,7 +253,7 @@ interface WorkflowJob {
   environment?: string | { name: string };
   concurrency?: { group: string; "cancel-in-progress": boolean };
   outputs?: Record<string, string>;
-  steps: Array<{ name?: string; uses?: string; run?: string; id?: string; env?: Record<string, string>; with?: Record<string, unknown> }>;
+  steps: Array<{ name?: string; uses?: string; run?: string; id?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }>;
 }
 interface Workflow {
   on: { push?: { branches?: string[] }; pull_request?: { branches?: string[] } };
@@ -330,12 +330,24 @@ describe("CI/CD workflow controls", () => {
   });
 
   it("can only deploy a merged commit on main, and only after a read-only preflight", () => {
-    expect(deployJob.if).toContain("github.event_name == 'push'");
+    expect(deployJob.if).toContain("github.event_name == 'workflow_dispatch'");
+    expect(deployJob.if).toContain("github.event.inputs.release_approval == 'APPROVED'");
     expect(deployJob.if).toContain("refs/heads/main");
     expect(deployJob.needs).toEqual(["build", "deploy-preflight"]);
     expect(preflightJob.if).toContain("refs/heads/main");
+    expect(preflightJob.if).toContain("release_approval");
     expect(preflightJob["runs-on"]).toBe("self-hosted");
     expect(buildJob.outputs?.["artifact-digest"]).toContain("steps.digest.outputs.value");
+  });
+
+  it("never publishes a deployable artifact or starts a host job from a plain push", () => {
+    const upload = buildJob.steps.find((step) => step.name === "Upload verified release payload");
+    expect(String(upload?.if)).toContain("github.event_name == 'workflow_dispatch'");
+    expect(String(upload?.if)).not.toContain("github.event_name == 'push'");
+    for (const job of [preflightJob, deployJob]) {
+      expect(String(job.if)).not.toContain("github.event_name == 'push'");
+      expect(String(job.if)).toContain("release_approval");
+    }
   });
 
   it("keeps the preflight job read-only: no install, build, migration or restart in the app checkout", () => {
