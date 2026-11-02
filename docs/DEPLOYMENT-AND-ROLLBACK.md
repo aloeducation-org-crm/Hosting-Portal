@@ -259,3 +259,83 @@ After a deployment:
 | The inline path end to end | Needs a host with `pm2` and the panel running. Not available here; every step is asserted statically and the decision logic is unit-tested. |
 | The production database path and engine | `docs/PRODUCTION-DEPLOYMENT-AUDIT-2026-10-27.md` records that this was never confirmed on the host. Run `scripts/audit-database.mjs --json` and `scripts/server-doctor.sh` there. |
 | Restore of a production backup | No drill has been run. See `DATABASE-RECOVERY-RUNBOOK.md` §Drill. |
+
+---
+
+## 7. The head of `main` has exactly one writer
+
+Staleness is decided against the **authoritative** head of `main`, never against a
+local ref. `scripts/latest-main-sha.mjs` is the only thing allowed to answer the
+question, and `scripts/deploy-release.sh` is the only consumer:
+
+```
+LATEST_MAIN_SHA="$(node "$ROOT/scripts/latest-main-sha.mjs" --ref main)"
+  → GitHub commits API (GET /repos/{owner}/{repo}/commits/{ref})
+  → fallback: git ls-remote origin refs/heads/main
+  → otherwise: exit 1, nothing on stdout, "Refusing to guess"
+```
+
+Neither source reads a local ref, so a shallow checkout cannot make the answer
+wrong. The resolver rejects anything that is not a full 40-hex SHA (and normalises
+case), refuses an unusable `--ref` instead of forwarding it to `git`, bounds every
+request with a timeout, never asks for credentials interactively, and scrubs the
+ambient token and URL userinfo out of its own error text.
+
+An empty or invalid answer is not "probably fine": it becomes an empty
+`LATEST_MAIN_SHA`, the staleness comparison is guarded on the value being known
+(`[[ -n "$LATEST_MAIN_SHA" && "$SHA" == "$LATEST_MAIN_SHA" ]]`), and the release
+guard refuses with `unknown-main-head` before anything is touched.
+
+### 7.1 What broke CI, and what it cost
+
+PR #20 merged a **duplicate** of the old guard *below* the correct one:
+
+```bash
+git fetch origin main
+LATEST_MAIN_SHA="$(git rev-parse origin/main)"     # ← the vacuous pattern, again
+```
+
+That block overwrote the authoritative head with a local ref, so the guard could
+pass for the exact stale run it exists to reject — and it silently replaced the
+`mainHeadAtDecision` field of the rollback audit record with whatever the clone
+happened to point at. It was also why `verify` failed on `main` (run
+`41058844163`, job `124081509591`): `release-activation.test.ts` asserts the
+pattern is absent, and `deploy-pipeline.test.ts` contained a leftover assertion
+that demanded it be present. Both files failed; `build` and `deploy` never ran.
+
+The duplicate is gone. `tests/deploy-pipeline.test.ts` now checks **every**
+executable assignment to `LATEST_MAIN_SHA` instead of one favoured spelling, so a
+duplicate placed anywhere in the script fails the suite, and
+`tests/latest-main-sha.test.ts` reproduces the stale shallow clone and proves the
+resolver reports the remote's real head instead of the clone's pinned ref.
+
+## 8. Action versions and the self-hosted runner
+
+Node 20 is deprecated on Actions runners. The workflow now uses the oldest majors
+that declare `node24`: `actions/checkout@v5`, `actions/setup-node@v5`,
+`actions/upload-artifact@v6`, `actions/download-artifact@v7` (`v5` and `v6` still declared
+`runs.using: node20`, which run 41340723944 reported).
+
+`deploy-preflight` and `deploy` run on the repository's **self-hosted** runner,
+which must therefore be at Actions Runner **>= 2.327.1**. If it is older, those
+two jobs fail immediately with GitHub's own "requires a newer runner" error —
+before any production change, which is the correct failure mode. Update it from
+<https://github.com/actions/runner/releases> and re-run the workflow.
+`tests/release-activation.test.ts` fails if an action older than these majors is
+re-introduced.
+
+## 9. Configuration preflight
+
+Before approving a release, run the redacted configuration report on the host:
+
+```bash
+node scripts/validate-prod-config.mjs \
+  --env-file /etc/alo-hosting/panel.env \
+  --app-dir "$HOME/Hosting-Portal" \
+  --check-paths
+```
+
+It exits non-zero on a release-blocking misconfiguration (URLs that disagree, a
+placeholder secret, a database inside the checkout, a non-loopback site bind,
+insecure webhook/preview flags, anonymous AI) and never prints a value. See
+[`PRODUCTION-CONFIG-VALIDATION.md`](PRODUCTION-CONFIG-VALIDATION.md).
