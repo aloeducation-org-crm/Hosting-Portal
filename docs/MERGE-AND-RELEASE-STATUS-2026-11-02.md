@@ -68,7 +68,7 @@ Local, in this checkout:
 - `git diff --check` — PASS
 - `npm audit --omit=dev` — 0 production advisories. `npm audit` reports 16 moderate dev-tool advisories whose suggested fixes require breaking major changes; no forced downgrade was applied.
 
-GitHub PR checks on runs `41426813472` and final-head run `41427502765` (`c9435e6`): `Lint, typecheck, and tests` and `Production build` **PASS**; `Read-only production preflight` and `Deploy canonical root portal to production server` are **intentionally skipped** on pull requests. The workflow-level release hold also prevents a plain merge/push from deploying.
+GitHub PR checks on PR #24: `Lint, typecheck, and tests` and `Production build` **PASS** on every pushed head; final-head run `41428195501` (`644c2f8`) succeeded. `Read-only production preflight` and `Deploy canonical root portal to production server` are **intentionally skipped** on pull requests. The workflow-level release hold also prevents a plain merge/push from deploying.
 
 ## 6. Production status
 
