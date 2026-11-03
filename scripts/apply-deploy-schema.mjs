@@ -115,6 +115,11 @@ const MIGRATIONS = [
   // Appwrite-style Cloud Projects (BaaS workspace, scoped API keys, client
   // platforms, webhooks, and function definitions). Purely additive tables.
   { name: "20261102120000_cloud_baas_projects", kind: "ADDITIVE" },
+  // Full Cloud Platform Phases 1-6 (environments, sealed versioned secrets,
+  // key rotation/usage, project RBAC members, worker nodes, sites/previews,
+  // custom domains, customer DBs, storage buckets/objects, isolated function
+  // versions/executions, webhook deliveries, idempotent usage & quotas).
+  { name: "20261104090000_cloud_platform_full", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",

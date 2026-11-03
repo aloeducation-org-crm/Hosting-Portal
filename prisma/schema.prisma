@@ -2400,10 +2400,26 @@ model CloudProject {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  keys      CloudProjectKey[]
-  platforms CloudProjectPlatform[]
-  webhooks  CloudProjectWebhook[]
-  functions CloudProjectFunction[]
+  keys             CloudProjectKey[]
+  keyUsageEvents   CloudKeyUsageEvent[]
+  keyRotations     CloudKeyRotation[]
+  platforms        CloudProjectPlatform[]
+  webhooks         CloudProjectWebhook[]
+  webhookDeliveries CloudWebhookDelivery[]
+  functions        CloudProjectFunction[]
+  environments     CloudEnvironment[]
+  secrets          CloudSecret[]
+  members          CloudProjectMember[]
+  siteRepository   CloudSiteRepository?
+  siteDeployments  CloudSiteDeployment[]
+  customDomains    CloudCustomDomain[]
+  databases        CloudDatabaseInstance[]
+  databaseBackups  CloudDatabaseBackup[]
+  storageBuckets   CloudStorageBucket[]
+  storageObjects   CloudStorageObject[]
+  storageBackups   CloudStorageBackup[]
+  usageEvents      CloudUsageEvent[]
+  quota            CloudProjectQuota?
 
   @@index([ownerId])
   @@index([organizationId])
@@ -2424,7 +2440,8 @@ model CloudProjectKey {
   createdBy  String
   createdAt  DateTime  @default(now())
 
-  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     CloudProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  usageEvents CloudKeyUsageEvent[]
 
   @@index([projectId])
   @@index([prefix])
@@ -2463,7 +2480,8 @@ model CloudProjectWebhook {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    CloudProject           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deliveries CloudWebhookDelivery[]
 
   @@index([projectId])
   @@map("cloud_project_webhooks")
@@ -2474,7 +2492,7 @@ model CloudProjectFunction {
   projectId      String
   slug           String
   name           String
-  runtime        String   // node-22 | bun-1.4 | deno-2.1 | python-3.12 | go-1.23 | php-8.4
+  runtime        String   // node-22 | python-3.11 | bun-1.4 | deno-2.1 | go-1.23 | php-8.4
   entrypoint     String   @default("src/main.ts")
   commands       String?
   events         String   @default("[]") // JSON array of trigger events
@@ -2486,9 +2504,488 @@ model CloudProjectFunction {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    CloudProject             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions   CloudFunctionVersion[]
+  executions CloudFunctionExecution[]
 
   @@unique([projectId, slug])
   @@index([projectId])
   @@map("cloud_project_functions")
+}
+
+// ─── Full Cloud Platform Additive Models (Phases 1–6) ─────────────────────────
+
+model CloudEnvironment {
+  id              String   @id @default(uuid())
+  projectId       String
+  slug            String   // development | preview | production
+  name            String
+  branchPattern   String   @default("main")
+  isProtected     Boolean  @default(false)
+  requireApproval Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, slug])
+  @@index([projectId])
+  @@map("cloud_environments")
+}
+
+model CloudSecret {
+  id              String    @id @default(uuid())
+  projectId       String
+  environmentSlug String    // development | preview | production | all
+  key             String
+  sealedValue     String    // AES-256-GCM enc:v1:... ciphertext
+  isSecret        Boolean   @default(true)
+  currentVersion  Int       @default(1)
+  accessScope     String    @default("build_and_runtime") // build_and_runtime | runtime_only | functions_only
+  rotatedAt       DateTime?
+  updatedBy       String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  project  CloudProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions CloudSecretVersion[]
+
+  @@unique([projectId, environmentSlug, key])
+  @@index([projectId, environmentSlug])
+  @@map("cloud_secrets")
+}
+
+model CloudSecretVersion {
+  id             String   @id @default(uuid())
+  secretId       String
+  version        Int
+  sealedValue    String
+  checksumSha256 String
+  createdBy      String
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  secret CloudSecret @relation(fields: [secretId], references: [id], onDelete: Cascade)
+
+  @@unique([secretId, version])
+  @@index([secretId])
+  @@map("cloud_secret_versions")
+}
+
+model CloudKeyUsageEvent {
+  id         String   @id @default(uuid())
+  projectId  String
+  keyId      String
+  endpoint   String
+  scopeUsed  String
+  statusCode Int
+  createdAt  DateTime @default(now())
+
+  project CloudProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key     CloudProjectKey @relation(fields: [keyId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([keyId, createdAt])
+  @@map("cloud_key_usage_events")
+}
+
+model CloudKeyRotation {
+  id             String    @id @default(uuid())
+  projectId      String
+  oldKeyId       String
+  newKeyId       String
+  graceExpiresAt DateTime?
+  rotatedBy      String
+  reason         String?
+  createdAt      DateTime  @default(now())
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([oldKeyId])
+  @@map("cloud_key_rotations")
+}
+
+model CloudProjectMember {
+  id        String    @id @default(uuid())
+  projectId String
+  userId    String    // References existing users.id (never a second identity table)
+  role      String    @default("DEVELOPER") // OWNER | ADMIN | DEVELOPER | VIEWER | SERVICE
+  scopes    String    @default("[]") // JSON array of granular project permissions
+  expiresAt DateTime?
+  addedBy   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@map("cloud_project_members")
+}
+
+model CloudWorkerNode {
+  id              String   @id @default(uuid())
+  workerKey       String   @unique
+  hostname        String
+  pid             Int
+  mode            String   @default("ISOLATED_SUBPROCESS") // ISOLATED_SUBPROCESS | HOST_AGENT
+  capabilities    String   @default("{}") // JSON verified runtime & sandbox capabilities
+  status          String   @default("ONLINE") // ONLINE | DEGRADED | OFFLINE
+  activeJobs      Int      @default(0)
+  maxConcurrency  Int      @default(2)
+  cpuCores        Int?
+  memoryTotalMb   Int?
+  lastHeartbeatAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([lastHeartbeatAt])
+  @@map("cloud_worker_nodes")
+}
+
+model CloudSiteRepository {
+  id                  String   @id @default(uuid())
+  projectId           String   @unique
+  connectionId        String?
+  provider            String   @default("github") // github | git
+  repository          String
+  cloneUrl            String
+  productionBranch    String   @default("main")
+  previewBranches     String   @default("[\"*\"]")
+  autoDeploy          Boolean  @default(true)
+  webhookSecretSealed String?  // AES-256-GCM enc:v1:...
+  detectedFramework   String   @default("{}")
+  overrideConfig      String   @default("{}")
+  cacheKey            String?
+  lastCommitSha       String?
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([repository])
+  @@map("cloud_site_repositories")
+}
+
+model CloudSiteDeployment {
+  id                       String    @id @default(uuid())
+  projectId                String
+  environmentSlug          String    @default("production") // production | preview
+  releaseImmutableId       String    @unique
+  commitSha                String
+  branch                   String
+  pullRequestNumber        Int?
+  trigger                  String    @default("manual") // manual | webhook | promotion | rollback
+  promotedFromDeploymentId String?
+  rollbackOfDeploymentId   String?
+  status                   String    @default("QUEUED") // QUEUED | BUILDING | PACKAGING | VERIFYING | READY | ACTIVE | FAILED | CANCELLED | ROLLED_BACK
+  jobId                    String?
+  workerId                 String?
+  artifactPath             String?
+  previewSubdomain         String?
+  buildDurationMs          Int?
+  buildCacheHit            Boolean   @default(false)
+  healthCheckPassed        Boolean   @default(false)
+  buildLogs                String    @default("")
+  errorSummary             String?
+  attempt                  Int       @default(1)
+  maxAttempts              Int       @default(2)
+  createdBy                String
+  startedAt                DateTime?
+  finishedAt               DateTime?
+  createdAt                DateTime  @default(now())
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, environmentSlug, createdAt])
+  @@index([projectId, status])
+  @@map("cloud_site_deployments")
+}
+
+model CloudCustomDomain {
+  id                   String    @id @default(uuid())
+  projectId            String
+  environmentSlug      String    @default("production")
+  hostname             String    @unique
+  isPlatformSubdomain  Boolean   @default(false)
+  verificationTxtName  String
+  verificationTxtValue String
+  dnsVerified          Boolean   @default(false)
+  dnsVerifiedAt        DateTime?
+  tlsStatus            String    @default("PENDING_DNS") // PENDING_DNS | PENDING_ISSUANCE | ISSUED | RENEWING | FAILED
+  tlsVerifiedAt        DateTime?
+  certExpiresAt        DateTime?
+  redirectToHost       String?
+  redirectStatusCode   Int?
+  status               String    @default("PENDING_VERIFICATION") // PENDING_VERIFICATION | ACTIVE | ERROR
+  lastCheckedAt        DateTime?
+  lastError            String?
+  createdBy            String
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
+  @@map("cloud_custom_domains")
+}
+
+model CloudDatabaseInstance {
+  id                String    @id @default(uuid())
+  projectId         String
+  slug              String
+  name              String
+  engine            String    // SQLITE_ISOLATED | MARIADB | POSTGRESQL
+  environmentSlug   String    @default("development")
+  status            String    @default("PROVISIONING") // PROVISIONING | AVAILABLE | REQUIRES_INFRASTRUCTURE | BACKING_UP | RESTORING | ERROR | DELETED
+  isolatedFilePath  String?
+  host              String?
+  port              Int?
+  databaseName      String
+  username          String
+  passwordSealed    String    // AES-256-GCM enc:v1:...
+  credentialVersion Int       @default(1)
+  maxConnections    Int       @default(20)
+  storageLimitMb    Int       @default(512)
+  storageUsedBytes  Int       @default(0)
+  healthStatus      String    @default("UNVERIFIED") // HEALTHY | DEGRADED | UNVERIFIED
+  lastHealthCheckAt DateTime?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project CloudProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  backups CloudDatabaseBackup[]
+
+  @@unique([projectId, slug])
+  @@index([projectId])
+  @@map("cloud_database_instances")
+}
+
+model CloudDatabaseBackup {
+  id                String    @id @default(uuid())
+  databaseId        String
+  projectId         String
+  archivePath       String
+  sizeBytes         Int
+  checksumSha256    String
+  credentialVersion Int
+  status            String    @default("COMPLETED") // COMPLETED | FAILED | RESTORED
+  restoredCount     Int       @default(0)
+  lastRestoredAt    DateTime?
+  createdBy         String
+  createdAt         DateTime  @default(now())
+
+  database CloudDatabaseInstance @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  project  CloudProject          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([databaseId, createdAt])
+  @@index([projectId])
+  @@map("cloud_database_backups")
+}
+
+model CloudStorageBucket {
+  id                  String   @id @default(uuid())
+  projectId           String
+  slug                String
+  name                String
+  visibility          String   @default("private") // private | public
+  allowedMimeTypes    String   @default("[]") // JSON array; empty = default safe allowlist
+  maxFileSizeBytes    Int      @default(26214400) // 25 MiB default
+  quotaBytes          Int      @default(536870912) // 512 MiB default
+  usedBytes           Int      @default(0)
+  objectCount         Int      @default(0)
+  lifecycleDeleteDays Int?
+  versioningEnabled   Boolean  @default(false)
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  project CloudProject         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objects CloudStorageObject[]
+  backups CloudStorageBackup[]
+
+  @@unique([projectId, slug])
+  @@index([projectId])
+  @@map("cloud_storage_buckets")
+}
+
+model CloudStorageObject {
+  id             String    @id @default(uuid())
+  bucketId       String
+  projectId      String
+  objectKey      String
+  storageRelPath String
+  mimeType       String
+  sizeBytes      Int
+  checksumSha256 String
+  metadataJson   String    @default("{}")
+  expiresAt      DateTime?
+  uploadedBy     String
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  bucket  CloudStorageBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  project CloudProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([bucketId, objectKey])
+  @@index([projectId])
+  @@index([expiresAt])
+  @@map("cloud_storage_objects")
+}
+
+model CloudStorageBackup {
+  id             String   @id @default(uuid())
+  bucketId       String
+  projectId      String
+  manifestJson   String
+  archiveDir     String
+  objectCount    Int
+  totalBytes     Int
+  checksumSha256 String
+  createdBy      String
+  createdAt      DateTime @default(now())
+
+  bucket  CloudStorageBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  project CloudProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([bucketId, createdAt])
+  @@index([projectId])
+  @@map("cloud_storage_backups")
+}
+
+model CloudFunctionVersion {
+  id                 String   @id @default(uuid())
+  functionId         String
+  projectId          String
+  version            Int
+  runtime            String
+  entrypoint         String
+  sourceKind         String   @default("inline") // inline | git
+  sourceCode         String
+  codeSha256         String
+  memoryLimitMb      Int      @default(128)
+  cpuLimitSeconds    Int      @default(5)
+  timeoutMs          Int      @default(10000)
+  maxRetries         Int      @default(0)
+  environmentSlug    String   @default("production")
+  isActive           Boolean  @default(false)
+  verifiedCompatible Boolean  @default(false)
+  createdBy          String
+  createdAt          DateTime @default(now())
+
+  function   CloudProjectFunction     @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  executions CloudFunctionExecution[]
+
+  @@unique([functionId, version])
+  @@index([functionId, isActive])
+  @@map("cloud_function_versions")
+}
+
+model CloudFunctionExecution {
+  id                 String    @id @default(uuid())
+  functionId         String
+  versionId          String
+  projectId          String
+  triggerKind        String    @default("http") // http | event | schedule
+  triggerEvent       String?
+  requestPayloadJson String    @default("{}")
+  status             String    @default("QUEUED") // QUEUED | RUNNING | RETRYING | SUCCEEDED | FAILED | TIMED_OUT | REQUIRES_INFRASTRUCTURE
+  attempt            Int       @default(1)
+  maxAttempts        Int       @default(1)
+  workerId           String?
+  exitCode           Int?
+  durationMs         Int?
+  memoryLimitMb      Int       @default(128)
+  responseBody       String?
+  stdoutLog          String    @default("")
+  stderrLog          String    @default("")
+  errorCode          String?
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  createdAt          DateTime  @default(now())
+
+  function CloudProjectFunction @relation(fields: [functionId], references: [id], onDelete: Cascade)
+  version  CloudFunctionVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([functionId, createdAt])
+  @@index([projectId, status])
+  @@map("cloud_function_executions")
+}
+
+model CloudWebhookDelivery {
+  id              String    @id @default(uuid())
+  webhookId       String
+  projectId       String
+  eventId         String
+  eventType       String
+  payloadJson     String
+  signatureHeader String
+  status          String    @default("PENDING") // PENDING | RETRYING | DELIVERED | FAILED | BLOCKED_SSRF
+  attemptCount    Int       @default(0)
+  maxAttempts     Int       @default(3)
+  nextAttemptAt   DateTime?
+  resolvedIp      String?
+  httpStatus      Int?
+  durationMs      Int?
+  responseSnippet String?
+  failureReason   String?
+  deliveredAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  webhook CloudProjectWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  project CloudProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
+  @@index([projectId, status, nextAttemptAt])
+  @@map("cloud_webhook_deliveries")
+}
+
+model CloudUsageEvent {
+  id             String   @id @default(uuid())
+  idempotencyKey String   @unique
+  projectId      String
+  ownerId        String
+  metric         String   // build_minutes | function_exec_ms | function_memory_mb_s | database_storage_bytes | storage_capacity_bytes | storage_bandwidth_bytes | deployment_count | project_count | worker_cpu_ms
+  quantity       Float
+  unit           String
+  referenceType  String?
+  referenceId    String?
+  recordedAt     DateTime @default(now())
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, metric, recordedAt])
+  @@index([ownerId, recordedAt])
+  @@map("cloud_usage_events")
+}
+
+model CloudProjectQuota {
+  id                       String   @id @default(uuid())
+  projectId                String   @unique
+  planCode                 String   @default("standard-configurable")
+  maxBuildMinutesMonthly   Float    @default(300)
+  maxFunctionExecMsMonthly Float    @default(600000)
+  maxDatabaseBytes         Int      @default(1073741824) // 1 GiB
+  maxStorageBytes          Int      @default(2147483648) // 2 GiB
+  maxStorageBandwidthBytes Int      @default(10737418240) // 10 GiB
+  maxDeploymentsMonthly    Int      @default(200)
+  maxFunctions             Int      @default(25)
+  maxDatabases             Int      @default(10)
+  maxBuckets               Int      @default(20)
+  hardEnforce              Boolean  @default(true)
+  updatedBy                String
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("cloud_project_quotas")
 }
