@@ -232,6 +232,66 @@ export function createScopedHostingTools(boundActor?: WorkflowActor): ToolRegist
       void resolveTenantOwnerFilter(effectiveActor(context));
       return externalToolCatalogForAgent();
     },
+
+    /**
+     * Tenant-isolated, secret-free summary of Appwrite-style Cloud Projects.
+     * Never exposes API key hashes, webhook signing secrets, or foreign tenants.
+     */
+    cloudProjects: async (args, context) => {
+      const ownerFilter = resolveTenantOwnerFilter(effectiveActor(context));
+      const limit = clampInt(args.limit, 20, 1, 50);
+      try {
+        const rows = await db.cloudProject.findMany({
+          where: ownerFilter.ownerId ? { ownerId: ownerFilter.ownerId } : {},
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            stage: true,
+            region: true,
+            frameworkPreset: true,
+            renderingMode: true,
+            status: true,
+            linkedWebsiteId: true,
+            linkedDatabaseId: true,
+            linkedBucketId: true,
+            _count: { select: { keys: true, platforms: true, webhooks: true, functions: true } },
+          },
+        });
+        return {
+          setupState: "AVAILABLE" as const,
+          checkedAt: new Date().toISOString(),
+          count: rows.length,
+          projects: rows.map((row) => ({
+            id: row.id,
+            slug: row.slug,
+            name: row.name,
+            stage: row.stage,
+            region: row.region,
+            frameworkPreset: row.frameworkPreset,
+            renderingMode: row.renderingMode,
+            status: row.status,
+            hasLinkedSite: Boolean(row.linkedWebsiteId),
+            hasLinkedDatabase: Boolean(row.linkedDatabaseId),
+            hasLinkedBucket: Boolean(row.linkedBucketId),
+            counts: row._count,
+          })),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err ?? "");
+        if (/no such table:\s*(?:["`]?main["`]?\.)?["`]?cloud_projects|table.*cloud_projects.*does not exist/i.test(message)) {
+          return {
+            setupState: "REQUIRES_SETUP" as const,
+            checkedAt: new Date().toISOString(),
+            count: 0,
+            projects: [],
+          };
+        }
+        throw err;
+      }
+    },
   };
 }
 

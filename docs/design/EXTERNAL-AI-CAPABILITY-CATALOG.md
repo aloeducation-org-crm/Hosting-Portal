@@ -26,6 +26,7 @@ The REA entry is the feature-reconstruction baseline. The existing first-party R
 | 11 | Container — Linux sandbox | `https://github.com/aerovato/container` | same | `4b23fc15fd0a02fd2a40fcced2be61afae7db5aa` | BSD-3-Clause | Deferred; candidate isolated-worker boundary |
 | 12 | treg.to | `https://treg.to/` | `https://github.com/superdesigndev/treg` | `0a77dbf04f8a7ecf9d02f5edc0d738a87b63a596` | NOASSERTION | Deferred; no account, key or endpoint call |
 | 13 | WiFi-Password-Cracker-Pro | `https://github.com/YouBTech01/WiFi-Password-Cracker-Pro.git` | `https://github.com/YouBTech01/WiFi-Password-Cracker-Pro` | `219623edfaeac3ff588e1f8636dadb020fbb8666` | MIT | **Excluded** from agent, images and deployment |
+| 14 | Appwrite — Open-Source Cloud & MCP BaaS | `https://github.com/appwrite/appwrite.git` | `https://github.com/appwrite/appwrite` | `da8e595a804834ffcf63b83140ff09b29ce77140` | BSD-3-Clause | Deferred upstream runtime; core BaaS project console reconstructed first-party at `/cloud` (see `APPWRITE-REA-RECONSTRUCTION.md`) |
 
 Pinned commits are reproducible source-review baselines from the existing `OWN-AGENT-RECONSTRUCTION-RESEARCH.md`, `LOCAL-REA-REFERENCE-REVIEW.md` or a read-only GitHub lookup on 2026-11-02. They are not deployed versions or compatibility certificates. GitHub licence classifications are not legal clearance; `NOASSERTION` requires inspection of the actual licence terms before commercial reuse.
 

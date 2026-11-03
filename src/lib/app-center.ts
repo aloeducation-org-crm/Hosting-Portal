@@ -485,6 +485,34 @@ export const BUILTIN_APPS: BuiltinApp[] = [
     ],
     defaultSettings: { senderName: "The Team", sendWindow: "Business hours", autoInvoice: false },
   },
+  {
+    slug: "cloud-baas",
+    name: "Cloud Projects (BaaS)",
+    summary: "Appwrite-style BaaS workspace: scoped keys, Sites, DB, storage & webhooks",
+    description:
+      "Unify Sites, Databases, Storage buckets, serverless function specs, client platforms, event webhooks, and scoped API keys per Cloud Project.",
+    category: "projects",
+    icon: "Layers",
+    accentColor: "#F02E65",
+    version: "1.0.0",
+    route: "/cloud",
+    configSchema: [
+      {
+        key: "defaultStage",
+        label: "Default project stage",
+        type: "select",
+        options: ["development", "staging", "production"],
+        default: "development",
+      },
+      {
+        key: "requireKeyExpiry",
+        label: "Recommend API key expiration",
+        type: "boolean",
+        default: true,
+      },
+    ],
+    defaultSettings: { defaultStage: "development", requireKeyExpiry: true },
+  },
 ];
 
 // ─── Company-scoped authorization ────────────────────────────────────────────

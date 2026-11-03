@@ -18,6 +18,7 @@ export const WORKFLOW_NODE_TYPES = [
   "hosting.billingOverview",
   "hosting.marketingOverview",
   "hosting.externalToolCatalog",
+  "hosting.cloudProjects",
   "logic.condition",
   "transform.template",
   "output",
