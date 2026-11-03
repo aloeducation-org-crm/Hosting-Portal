@@ -36,7 +36,7 @@ function safePath(value: string): boolean {
 }
 
 function protectedPath(value: string): boolean {
-  return /(^|\/)(node_modules|vendor|secrets?|credentials?|deploy|agents?|orchestrator|security|rea)(\/|$)/i.test(value) ||
+  return /(^|\/)(node_modules|vendor|secrets?|credentials?|deploy|agents?|orchestrator|security|rea|cloud)(\/|$)/i.test(value) ||
     /(^|\/)(auth|middleware|proxy|code-change-proposal|code-evolution|capability-requests|capability-http|external-tool-catalog|external-ai-capability-catalog)([.-]|\/|$)/i.test(value) ||
     !/\.(ts|tsx|js|jsx|json|css|md|txt|py)$/.test(value) ||
     /(^|\/)(package(-lock)?\.json|.*lock.*|.*private.*|.*secret.*|.*credential.*)$/i.test(value);

@@ -57,6 +57,7 @@ import {
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Cloud Projects (BaaS)", href: "/cloud", icon: Layers },
   { label: "App Center", href: "/apps", icon: LayoutGrid },
   { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },

@@ -112,6 +112,9 @@ const MIGRATIONS = [
   { name: "20261029120000_service_credentials", kind: "ADDITIVE" },
   // Internal scope review only; creating this table enables no execution.
   { name: "20261031090000_ai_capability_requests", kind: "ADDITIVE" },
+  // Appwrite-style Cloud Projects (BaaS workspace, scoped API keys, client
+  // platforms, webhooks, and function definitions). Purely additive tables.
+  { name: "20261102120000_cloud_baas_projects", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",

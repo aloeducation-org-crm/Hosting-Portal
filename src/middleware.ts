@@ -97,6 +97,8 @@ const HMAC_AUTHENTICATED_API_PATHS = [
   "/api/agents/tasks/claim",
   "/api/agents/tasks/result",
   "/api/orchestrator/run",
+  // Scoped Cloud Project API key endpoint (`x-alo-project` + `x-alo-key`).
+  "/api/cloud/v1",
 ];
 
 const ADMIN_UI_PREFIXES = [
@@ -118,6 +120,7 @@ const ADMIN_UI_PREFIXES = [
 
 const DASHBOARD_UI_PREFIXES = [
   "/dashboard",
+  "/cloud",
   "/sites",
   "/databases",
   "/storage",
@@ -486,6 +489,7 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/dashboard/:path*",
+    "/cloud/:path*",
     "/admin/:path*",
     "/users/:path*",
     "/servers/:path*",

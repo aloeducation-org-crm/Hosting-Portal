@@ -189,6 +189,37 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
       ],
     },
   },
+  {
+    id: "cloud-baas-posture-advisor",
+    name: "Cloud Projects (BaaS) Posture Review",
+    description:
+      "Read-only review of your Cloud Projects (Sites presets, linked DB/storage, key/webhook/platform counts) with Appwrite-style security recommendations. Never reads secrets or mutates resources.",
+    sampleInput: { focus: "production readiness and least-privilege API keys" },
+    graph: {
+      nodes: [
+        { id: "start", type: "trigger", label: "Manual run" },
+        { id: "projects", type: "hosting.cloudProjects", label: "Read Cloud Projects" },
+        {
+          id: "review",
+          type: "ai.complete",
+          label: "Advisor posture summary",
+          config: {
+            system:
+              "You are a Cloud BaaS security advisor. Base every statement strictly on the supplied JSON. Never invent metrics, secrets, or running containers.",
+            prompt:
+              "Review these Cloud Projects and list concrete least-privilege, platform-origin, webhook-TLS, and resource-linking recommendations:\n\n{{ steps.projects.output }}",
+            maxTokens: 700,
+          },
+        },
+        { id: "out", type: "output", label: "Advisor summary", config: { value: "{{ steps.review.output.text }}" } },
+      ],
+      edges: [
+        { from: "start", to: "projects" },
+        { from: "projects", to: "review" },
+        { from: "review", to: "out" },
+      ],
+    },
+  },
 ];
 
 export function findTemplate(id: string): WorkflowTemplate | undefined {

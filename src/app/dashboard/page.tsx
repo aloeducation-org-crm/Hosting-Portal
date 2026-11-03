@@ -112,6 +112,11 @@ const statCards = [
 
 const quickActions = [
   {
+    label: "Cloud BaaS Console",
+    icon: Layers,
+    href: "/cloud",
+  },
+  {
     label: "Deploy New Site",
     icon: Plus,
     href: "/sites/new",

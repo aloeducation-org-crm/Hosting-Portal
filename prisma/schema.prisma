@@ -2373,3 +2373,122 @@ model AiCapabilityRequest {
   @@index([status, expiresAt])
   @@map("ai_capability_requests")
 }
+
+// ─── Cloud Projects (Appwrite-style BaaS & Sites workspace) ──────────────────
+// Purely additive tables. Plain String references to existing User,
+// Organization, Website, DatabaseInstance and StorageBucket records keep all
+// existing models and migrations untouched.
+
+model CloudProject {
+  id               String   @id @default(uuid())
+  slug             String   @unique
+  name             String
+  description      String?
+  organizationId   String?
+  ownerId          String
+  region           String   @default("local-primary")
+  stage            String   @default("development") // development | staging | production
+  frameworkPreset  String   @default("nextjs")
+  renderingMode    String   @default("ssr") // ssr | static
+  installCommand   String   @default("npm ci")
+  buildCommand     String   @default("npm run build")
+  outputDirectory  String   @default("./.next")
+  linkedWebsiteId  String?
+  linkedDatabaseId String?
+  linkedBucketId   String?
+  status           String   @default("ACTIVE") // ACTIVE | ARCHIVED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  keys      CloudProjectKey[]
+  platforms CloudProjectPlatform[]
+  webhooks  CloudProjectWebhook[]
+  functions CloudProjectFunction[]
+
+  @@index([ownerId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("cloud_projects")
+}
+
+model CloudProjectKey {
+  id         String    @id @default(uuid())
+  projectId  String
+  name       String
+  prefix     String
+  keyHash    String    @unique
+  scopes     String    // space-delimited validated project scopes
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdBy  String
+  createdAt  DateTime  @default(now())
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([prefix])
+  @@map("cloud_project_keys")
+}
+
+model CloudProjectPlatform {
+  id         String   @id @default(uuid())
+  projectId  String
+  name       String
+  type       String   // web | nextjs | flutter-web | flutter-ios | flutter-android | apple-ios | apple-macos | android | react-native
+  identifier String   // validated hostname or reverse-DNS bundle/package ID
+  enabled    Boolean  @default(true)
+  createdBy  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, type, identifier])
+  @@index([projectId])
+  @@map("cloud_project_platforms")
+}
+
+model CloudProjectWebhook {
+  id               String   @id @default(uuid())
+  projectId        String
+  name             String
+  url              String
+  events           String   // JSON array of validated event channels
+  signingKeyHash   String
+  signingKeyPrefix String
+  enabled          Boolean  @default(true)
+  tlsVerify        Boolean  @default(true)
+  createdBy        String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("cloud_project_webhooks")
+}
+
+model CloudProjectFunction {
+  id             String   @id @default(uuid())
+  projectId      String
+  slug           String
+  name           String
+  runtime        String   // node-22 | bun-1.4 | deno-2.1 | python-3.12 | go-1.23 | php-8.4
+  entrypoint     String   @default("src/main.ts")
+  commands       String?
+  events         String   @default("[]") // JSON array of trigger events
+  schedule       String?
+  timeoutSeconds Int      @default(15)
+  enabled        Boolean  @default(true)
+  executionState String   @default("REQUIRES_SETUP")
+  createdBy      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, slug])
+  @@index([projectId])
+  @@map("cloud_project_functions")
+}

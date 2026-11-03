@@ -1,10 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/stores/authStore";
 import { EXTERNAL_AI_TOOL_CATALOG } from "@/lib/ai/external-tool-catalog";
+import {
+  APPWRITE_REA_EVIDENCE_LEDGER,
+  APPWRITE_RECONSTRUCTION_MATRIX,
+} from "@/lib/ai/rea/reconstruction-ledger";
 
 type ReviewRequest = { id: string; projectId: string; capability: string; targetKind: string; targetReference: string; targetSha256: string; objective: string; authorizationEvidence: string; scopeDigest: string; effectiveStatus: string; executionState: string; requestedBy: string; reviewReason: string | null; expiresAt: string | null };
 type Project = { id: string; name: string };
@@ -48,6 +53,23 @@ export default function ResearchWorkspace() {
           <p className="break-all text-xs">{entry.canonicalRef}</p>
           <p className="text-xs">{entry.notes}</p>
           <details><summary className="cursor-pointer text-xs">Candidate features and gates</summary><div className="mt-2 space-y-2 break-words text-xs"><p><strong>Features:</strong> {entry.candidateFeatures.length ? entry.candidateFeatures.join("; ") : "None — excluded"}</p><p><strong>Gates:</strong> {entry.gates.join("; ")}</p></div></details>
+        </article>)}
+      </div>
+    </section>
+    <section className="space-y-4 rounded-xl border p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold">REA First-Party Reconstruction Ledger — Appwrite → Cloud Projects</h2>
+          <p className="text-sm text-muted-foreground">Source-evidence observations ({APPWRITE_REA_EVIDENCE_LEDGER.length} items) and first-party reconstructed capabilities ({APPWRITE_RECONSTRUCTION_MATRIX.length} items). Upstream containers and binaries are never executed.</p>
+        </div>
+        <Button asChild variant="outline" size="sm"><Link href="/cloud">Open Cloud Projects Console</Link></Button>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {APPWRITE_RECONSTRUCTION_MATRIX.map((cap) => <article key={cap.id} className="space-y-1.5 rounded-lg border bg-background p-4 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{cap.title}</strong><span className="rounded border px-2 py-0.5">{cap.operationalState}</span></div>
+          <p className="text-muted-foreground">Surface: <code>{cap.portalSurface}</code> • Evidence: {cap.evidenceIds.join(", ")}</p>
+          <p>{cap.whatWorksNow}</p>
+          <p className="text-muted-foreground"><strong>Boundary:</strong> {cap.remainingGate}</p>
         </article>)}
       </div>
     </section>

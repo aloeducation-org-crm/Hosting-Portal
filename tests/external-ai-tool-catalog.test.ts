@@ -11,6 +11,7 @@ import { runWorkflowGraph } from "@/lib/ai/automation/engine";
 
 const EXPECTED_IDS = [
   "rea",
+  "appwrite",
   "claude-plugins-official",
   "ruflo",
   "android-skills",
