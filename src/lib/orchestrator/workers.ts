@@ -951,9 +951,12 @@ function extractCommit(body: string): string | null {
 // ─── 10. Backup & restore ───────────────────────────────────────────────────
 
 const backupInput = z.object({
-  action: z.enum(["verify", "snapshot-record", "restore-drill"]),
+  action: z.enum(["verify", "snapshot-record", "restore-drill", "cloud-sqlite-restore"]),
   websiteId: z.string().min(1).optional(),
   backupId: z.string().min(1).optional(),
+  /** Cloud-only IDs for the approval-gated isolated SQLite restore path. */
+  databaseId: z.string().min(1).optional(),
+  cloudBackupId: z.string().min(1).optional(),
   /** Directory to checksum when verifying off-disk artifacts. */
   path: z.string().min(1).optional(),
 });
@@ -971,6 +974,19 @@ registerWorker(
     defaultTimeoutMs: 15 * 60_000,
     inputSchema: backupInput,
     async handler(input, ctx) {
+      if (input.action === "cloud-sqlite-restore") {
+        if (!input.databaseId || !input.cloudBackupId) {
+          throw new WorkerError("VALIDATION_FAILED", "databaseId and cloudBackupId are required for Cloud SQLite restore", false);
+        }
+        await ctx.progress(20, "verifying checksummed Cloud SQLite backup");
+        const { restoreCloudSqliteDatabase } = await import("@/lib/cloud/databases");
+        const restored = await restoreCloudSqliteDatabase(input.databaseId, input.cloudBackupId);
+        await ctx.progress(90, "atomically restored isolated SQLite database from verified backup");
+        return ok(restored, `Cloud SQLite database restored from verified backup ${input.cloudBackupId}`, {
+          evidence: `databaseId=${input.databaseId}; backupId=${input.cloudBackupId}; sha256=${restored.checksumSha256}`,
+        });
+      }
+
       if (input.action === "verify") {
         if (!input.backupId && !input.path) throw new WorkerError("VALIDATION_FAILED", "backupId or path is required");
         const backup = input.backupId ? await db.backup.findUnique({ where: { id: input.backupId } }) : null;

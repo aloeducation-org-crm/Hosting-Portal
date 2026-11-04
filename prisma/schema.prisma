@@ -2396,7 +2396,16 @@ model CloudProject {
   linkedWebsiteId  String?
   linkedDatabaseId String?
   linkedBucketId   String?
-  status           String   @default("ACTIVE") // ACTIVE | ARCHIVED
+  // Direct Git links are plain identifiers so existing Git tables remain additive.
+  // They are always ownership-validated in Cloud service code before persistence.
+  gitConnectionId  String?
+  gitProjectId     String?
+  // Destructive deletion is two-step: a manager must create a short-lived
+  // request, then repeat the project slug in the final delete call.
+  deletionRequestedAt DateTime?
+  deletionRequestedBy String?
+  deletionTokenHash  String?
+  status           String   @default("ACTIVE") // ACTIVE | ARCHIVED | PENDING_DELETION
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -2474,6 +2483,9 @@ model CloudProjectWebhook {
   events           String   // JSON array of validated event channels
   signingKeyHash   String
   signingKeyPrefix String
+  // The signing secret must be recoverable only by the outbound dispatcher;
+  // it is AES-256-GCM sealed and is never exposed after creation.
+  signingSecretSealed String?
   enabled          Boolean  @default(true)
   tlsVerify        Boolean  @default(true)
   createdBy        String
@@ -2628,6 +2640,10 @@ model CloudProjectMember {
 model CloudWorkerNode {
   id              String   @id @default(uuid())
   workerKey       String   @unique
+  // `workerKey` is a public worker identity; its CSPRNG bearer secret is
+  // stored only as a SHA-256 digest and returned exactly once on registration.
+  workerSecretHash   String?
+  workerSecretPrefix String?
   hostname        String
   pid             Int
   mode            String   @default("ISOLATED_SUBPROCESS") // ISOLATED_SUBPROCESS | HOST_AGENT
@@ -2692,6 +2708,7 @@ model CloudSiteDeployment {
   healthCheckPassed        Boolean   @default(false)
   buildLogs                String    @default("")
   errorSummary             String?
+  cancellationRequestedAt  DateTime?
   attempt                  Int       @default(1)
   maxAttempts              Int       @default(2)
   createdBy                String
@@ -2907,6 +2924,7 @@ model CloudFunctionExecution {
   stdoutLog          String    @default("")
   stderrLog          String    @default("")
   errorCode          String?
+  maxRssKb           Int?
   startedAt          DateTime?
   finishedAt         DateTime?
   createdAt          DateTime  @default(now())

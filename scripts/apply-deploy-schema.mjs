@@ -120,6 +120,9 @@ const MIGRATIONS = [
   // custom domains, customer DBs, storage buckets/objects, isolated function
   // versions/executions, webhook deliveries, idempotent usage & quotas).
   { name: "20261104090000_cloud_platform_full", kind: "ADDITIVE" },
+  // Cloud Foundation v2: direct Git links, two-step deletion, sealed outbound
+  // webhook material, worker bearer hashes, build cancellation and function RSS.
+  { name: "20261104110000_cloud_foundation_v2", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",
