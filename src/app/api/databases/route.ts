@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission, ROLES } from '@/lib/auth';
+import { assertWebsiteAccess, isAdminRole, requireSession, requirePermission } from '@/lib/auth';
+import { redact } from '@/lib/deploy/redact';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
@@ -30,13 +31,21 @@ export async function GET(request: NextRequest) {
 
     const where: any = { deletedAt: null };
     if (websiteId) where.websiteId = websiteId;
-    if (user.role !== ROLES.SUPER_ADMIN) {
-      // VIEWER can only see databases for their websites
+    if (websiteId && !isAdminRole(user.role)) {
+      const requestedSite = await db.website.findUnique({ where: { id: websiteId }, select: { ownerId: true, deletedAt: true } });
+      if (!requestedSite || requestedSite.deletedAt) {
+        return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
+      }
+      assertWebsiteAccess(user, requestedSite);
+    }
+    if (!isAdminRole(user.role)) {
+      // Non-admins are constrained at query level as a defence in depth guard;
+      // a user supplied websiteId cannot widen this owner filter.
       const userWebsites = await db.website.findMany({
         where: { ownerId: user.id, deletedAt: null },
         select: { id: true },
       });
-      where.websiteId = { in: userWebsites.map((w) => w.id) };
+      where.websiteId = websiteId ? websiteId : { in: userWebsites.map((w) => w.id) };
     }
 
     const databases = await db.databaseInstance.findMany({
@@ -63,11 +72,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(apiError('Website not found', 'NOT_FOUND', undefined, 404), { status: 404 });
     }
 
+    // Tenant authorization must happen before any host-side helper invocation.
+    // This closes the cross-tenant provisioning IDOR where a permitted user
+    // could submit another tenant's websiteId.
+    assertWebsiteAccess(user, website);
+
     // Call real helper
     const helperCmd = input.engine === 'MARIADB' ? 'create-mariadb' : 'create-postgresql';
     const result = await callHelper('alo-database-helper', [helperCmd, website.domain, input.name]);
     if (!result.success) {
-      return NextResponse.json(apiError('Database creation failed', 'DATABASE_ERROR', { stderr: result.stderr }), { status: 500 });
+      return NextResponse.json(apiError('Database creation failed', 'DATABASE_ERROR', { stderr: redact(result.stderr).slice(0, 500) }), { status: 500 });
     }
 
     let helperData;

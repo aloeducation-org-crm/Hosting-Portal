@@ -11,7 +11,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { apiError, type ApiResponse } from "@/lib/response";
@@ -45,11 +45,23 @@ import {
 import {
   CLOUD_API_KEY_PREFIX_TAG,
   authenticateCloudProjectKey,
+  constantTimeHexEquals,
   extractCloudKeyHeaders,
   generateCloudApiKey,
   generateWebhookSigningSecret,
+  hashCloudSecret,
   redactCloudSecrets,
 } from "./crypto-auth";
+import {
+  cloudProjectMemberDecision,
+  ensureCloudFoundation,
+  memberAllows,
+  parseJsonStringArray,
+  presentCloudSecret,
+  sealCloudSecret,
+} from "./foundation";
+import { assertCloudResourceQuota, recordCloudUsageEvent } from "./usage";
+import { sealSecretValue } from "@/lib/secret-store";
 
 type DbTx = Prisma.TransactionClient | typeof db;
 
@@ -118,27 +130,37 @@ export async function readCloudJson(request: Request, maxBytes = 16_384): Promis
 export async function canViewCloudProject(
   client: DbTx,
   actor: { id: string; role: string },
-  project: { ownerId: string; organizationId: string | null },
+  project: { id: string; ownerId: string; organizationId: string | null },
 ): Promise<boolean> {
-  if (isAdminRole(actor.role)) return true;
-  if (project.ownerId === actor.id) return true;
-  if (project.organizationId) {
-    return canViewCompany(client as never, actor, project.organizationId);
-  }
+  if (isAdminRole(actor.role) || project.ownerId === actor.id) return true;
+  // A direct CloudProjectMember binding is intentionally evaluated before the
+  // broader organization fallback. Expired bindings fail closed.
+  const member = await cloudProjectMemberDecision(client, actor, project);
+  if (memberAllows(member, "view")) return true;
+  if (project.organizationId) return canViewCompany(client as never, actor, project.organizationId);
   return false;
 }
 
 export async function canManageCloudProject(
   client: DbTx,
   actor: { id: string; role: string },
-  project: { ownerId: string; organizationId: string | null },
+  project: { id: string; ownerId: string; organizationId: string | null },
 ): Promise<boolean> {
-  if (isAdminRole(actor.role)) return true;
-  if (project.ownerId === actor.id) return true;
-  if (project.organizationId) {
-    return canManageCompany(client as never, actor, project.organizationId);
-  }
+  if (isAdminRole(actor.role) || project.ownerId === actor.id) return true;
+  const member = await cloudProjectMemberDecision(client, actor, project);
+  if (memberAllows(member, "write")) return true;
+  if (project.organizationId) return canManageCompany(client as never, actor, project.organizationId);
   return false;
+}
+
+export async function canManageCloudProjectMembers(
+  client: DbTx,
+  actor: { id: string; role: string },
+  project: { id: string; ownerId: string; organizationId: string | null },
+): Promise<boolean> {
+  if (isAdminRole(actor.role) || project.ownerId === actor.id) return true;
+  const member = await cloudProjectMemberDecision(client, actor, project);
+  return memberAllows(member, "manage-members");
 }
 
 async function resolveProjectOrThrow(client: DbTx, idOrSlug: string) {
@@ -483,6 +505,32 @@ export async function createCloudProject(actor: AuthUser, rawInput: unknown) {
       },
     });
 
+    // Foundation rows are created in the same transaction as the project, so a
+    // project is never visible without development/preview/production, a quota,
+    // and an explicit owner binding.
+    await ensureCloudFoundation(tx, project.id, actor.id);
+    await tx.cloudProjectMember.upsert({
+      where: { projectId_userId: { projectId: project.id, userId: actor.id } },
+      create: {
+        projectId: project.id,
+        userId: actor.id,
+        role: "OWNER",
+        scopes: JSON.stringify(CLOUD_PROJECT_SCOPES.map((scope) => scope.id)),
+        addedBy: actor.id,
+      },
+      update: { role: "OWNER", expiresAt: null },
+    });
+    await recordCloudUsageEvent(tx, {
+      idempotencyKey: `project-count:${project.id}`,
+      projectId: project.id,
+      ownerId: actor.id,
+      metric: "project_count",
+      quantity: 1,
+      unit: "project",
+      referenceType: "CloudProject",
+      referenceId: project.id,
+    });
+
     await tx.auditLog.create({
       data: {
         actorUserId: actor.id,
@@ -744,11 +792,61 @@ export async function updateCloudProject(actor: AuthUser, idOrSlug: string, rawI
   });
 }
 
-export async function deleteCloudProject(actor: AuthUser, idOrSlug: string) {
+export async function deleteCloudProject(
+  actor: AuthUser,
+  idOrSlug: string,
+  confirmation?: { slug?: string; token?: string },
+) {
   return db.$transaction(async (tx) => {
     const project = await resolveProjectOrThrow(tx, idOrSlug);
-    if (!(await canManageCloudProject(tx, actor, project))) {
+    if (!(await canManageCloudProjectMembers(tx, actor, project))) {
       throw apiError("Forbidden to delete this Cloud Project", "FORBIDDEN", undefined, 403);
+    }
+
+    // The first DELETE is intentionally non-destructive. It archives the
+    // project, creates a short-lived confirmation token and preserves all data
+    // for review/rollback. This also keeps legacy clients from turning a stale
+    // click into irreversible tenant deletion.
+    const validConfirmation = Boolean(
+      confirmation?.slug === project.slug &&
+      confirmation.token &&
+      project.deletionTokenHash &&
+      project.deletionRequestedAt &&
+      Date.now() - project.deletionRequestedAt.getTime() <= 15 * 60_000 &&
+      constantTimeHexEquals(hashCloudSecret(confirmation.token), project.deletionTokenHash),
+    );
+    if (!validConfirmation) {
+      const token = `alodel_${generateCloudApiKey().secret.slice(CLOUD_API_KEY_PREFIX_TAG.length)}`;
+      const requested = await tx.cloudProject.update({
+        where: { id: project.id },
+        data: {
+          status: "PENDING_DELETION",
+          deletionRequestedAt: new Date(),
+          deletionRequestedBy: actor.id,
+          deletionTokenHash: hashCloudSecret(token),
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actor.id,
+          actorEmail: actor.email,
+          actorRole: actor.role,
+          action: "CLOUD_PROJECT_DELETION_REQUESTED",
+          resourceType: "CloudProject",
+          resourceId: project.id,
+          domain: "cloud-baas",
+          result: "PENDING_CONFIRMATION",
+          metadata: { slug: project.slug, expiresInSeconds: 900 },
+        },
+      });
+      return {
+        deleted: false,
+        deletionRequested: true,
+        id: requested.id,
+        slug: requested.slug,
+        confirmationToken: token,
+        expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      };
     }
 
     await tx.cloudProject.delete({ where: { id: project.id } });
@@ -762,7 +860,7 @@ export async function deleteCloudProject(actor: AuthUser, idOrSlug: string) {
         resourceId: project.id,
         domain: "cloud-baas",
         result: "SUCCESS",
-        metadata: { slug: project.slug },
+        metadata: { slug: project.slug, confirmed: true },
       },
     });
     return { deleted: true, id: project.id, slug: project.slug };
@@ -853,6 +951,212 @@ export async function revokeCloudProjectKey(actor: AuthUser, idOrSlug: string, k
       },
     });
     return presentCloudKey(revoked);
+  });
+}
+
+export async function rotateCloudProjectKey(
+  actor: AuthUser,
+  idOrSlug: string,
+  keyId: string,
+  rawInput: unknown = {},
+) {
+  const input = z
+    .object({
+      name: z.string().trim().min(2).max(80).optional(),
+      scopes: z.array(z.string()).min(1).max(17).optional(),
+      expiresInDays: z.number().int().min(1).max(365).nullable().optional(),
+      reason: z.string().trim().max(240).optional(),
+    })
+    .strict()
+    .parse(rawInput);
+  return db.$transaction(async (tx) => {
+    const project = await resolveProjectOrThrow(tx, idOrSlug);
+    if (!(await canManageCloudProject(tx, actor, project))) {
+      throw apiError("Forbidden to rotate API keys for this project", "FORBIDDEN", undefined, 403);
+    }
+    const oldKey = await tx.cloudProjectKey.findFirst({ where: { id: keyId, projectId: project.id } });
+    if (!oldKey) throw apiError("API key not found in this project", "NOT_FOUND", undefined, 404);
+    if (oldKey.revokedAt) throw apiError("Revoked API keys cannot be rotated", "KEY_REVOKED", undefined, 409);
+    const scopes = input.scopes ? parseCloudScopes(input.scopes) : parseCloudScopes(oldKey.scopes);
+    if (scopes.length === 0) throw apiError("At least one valid scope is required", "VALIDATION_ERROR", undefined, 400);
+    const generated = generateCloudApiKey();
+    const expiresAt = input.expiresInDays === undefined
+      ? oldKey.expiresAt
+      : input.expiresInDays === null
+        ? null
+        : new Date(Date.now() + input.expiresInDays * 86_400_000);
+    const newKey = await tx.cloudProjectKey.create({
+      data: {
+        projectId: project.id,
+        name: input.name ?? `${oldKey.name} (rotated)`,
+        prefix: generated.prefix,
+        keyHash: generated.keyHash,
+        scopes: scopes.join(" "),
+        expiresAt,
+        createdBy: actor.id,
+      },
+    });
+    // There is no grace-period plaintext cache: rotation is immediately
+    // effective and the old bearer is revoked atomically with the new one.
+    await tx.cloudProjectKey.update({ where: { id: oldKey.id }, data: { revokedAt: new Date() } });
+    await tx.cloudKeyRotation.create({
+      data: {
+        projectId: project.id,
+        oldKeyId: oldKey.id,
+        newKeyId: newKey.id,
+        rotatedBy: actor.id,
+        reason: input.reason ?? null,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorUserId: actor.id,
+        actorEmail: actor.email,
+        actorRole: actor.role,
+        action: "CLOUD_KEY_ROTATED",
+        resourceType: "CloudProjectKey",
+        resourceId: newKey.id,
+        domain: "cloud-baas",
+        result: "SUCCESS",
+        metadata: { projectId: project.id, oldKeyId: oldKey.id, oldPrefix: oldKey.prefix, newPrefix: newKey.prefix, scopes },
+      },
+    });
+    return { key: presentCloudKey(newKey), secret: generated.secret, rotatedKeyId: oldKey.id };
+  });
+}
+
+export async function cloudKeyUsageSummary(actor: AuthUser, idOrSlug: string, keyId?: string) {
+  const project = await resolveProjectOrThrow(db, idOrSlug);
+  if (!(await canManageCloudProject(db, actor, project))) throw apiError("Forbidden to view API key usage", "FORBIDDEN", undefined, 403);
+  const where = { projectId: project.id, ...(keyId ? { keyId } : {}) };
+  if (keyId) {
+    const owned = await db.cloudProjectKey.findFirst({ where: { id: keyId, projectId: project.id }, select: { id: true } });
+    if (!owned) throw apiError("API key not found in this project", "NOT_FOUND", undefined, 404);
+  }
+  const [events, total] = await Promise.all([
+    db.cloudKeyUsageEvent.findMany({ where, orderBy: { createdAt: "desc" }, take: 100, select: { id: true, keyId: true, endpoint: true, scopeUsed: true, statusCode: true, createdAt: true } }),
+    db.cloudKeyUsageEvent.count({ where }),
+  ]);
+  return { total, events: events.map((event) => ({ ...event, createdAt: event.createdAt.toISOString() })) };
+}
+
+export async function listCloudProjectMembers(actor: AuthUser, idOrSlug: string) {
+  const project = await resolveProjectOrThrow(db, idOrSlug);
+  if (!(await canViewCloudProject(db, actor, project))) throw apiError("Forbidden to view project members", "FORBIDDEN", undefined, 403);
+  const rows = await db.cloudProjectMember.findMany({ where: { projectId: project.id }, orderBy: [{ role: "asc" }, { createdAt: "asc" }] });
+  return rows.map((row) => ({
+    id: row.id,
+    userId: row.userId,
+    role: row.role,
+    scopes: parseCloudScopes(row.scopes),
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    addedBy: row.addedBy,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  }));
+}
+
+export async function upsertCloudProjectMember(actor: AuthUser, idOrSlug: string, rawInput: unknown) {
+  const input = z.object({
+    userId: z.string().trim().min(1).max(128),
+    role: z.enum(["ADMIN", "DEVELOPER", "VIEWER", "SERVICE"]),
+    scopes: z.array(z.string()).max(17).default([]),
+    expiresInDays: z.number().int().min(1).max(365).nullable().optional(),
+  }).strict().parse(rawInput);
+  const scopes = parseCloudScopes(input.scopes);
+  return db.$transaction(async (tx) => {
+    const project = await resolveProjectOrThrow(tx, idOrSlug);
+    if (!(await canManageCloudProjectMembers(tx, actor, project))) throw apiError("Forbidden to manage project members", "FORBIDDEN", undefined, 403);
+    const user = await tx.user.findUnique({ where: { id: input.userId }, select: { id: true, isActive: true } });
+    if (!user || !user.isActive) throw apiError("Active user not found", "NOT_FOUND", undefined, 404);
+    if (input.role === "SERVICE" && scopes.length === 0) throw apiError("Service members require explicit scopes", "VALIDATION_ERROR", undefined, 400);
+    const row = await tx.cloudProjectMember.upsert({
+      where: { projectId_userId: { projectId: project.id, userId: input.userId } },
+      create: {
+        projectId: project.id,
+        userId: input.userId,
+        role: input.role,
+        scopes: JSON.stringify(scopes),
+        expiresAt: input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null,
+        addedBy: actor.id,
+      },
+      update: {
+        role: input.role,
+        scopes: JSON.stringify(scopes),
+        expiresAt: input.expiresInDays ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null,
+        addedBy: actor.id,
+      },
+    });
+    await tx.auditLog.create({
+      data: { actorUserId: actor.id, actorEmail: actor.email, actorRole: actor.role, action: "CLOUD_PROJECT_MEMBER_UPSERTED", resourceType: "CloudProjectMember", resourceId: row.id, domain: "cloud-baas", result: "SUCCESS", metadata: { projectId: project.id, userId: row.userId, role: row.role, scopes } },
+    });
+    return { id: row.id, userId: row.userId, role: row.role, scopes, expiresAt: row.expiresAt?.toISOString() ?? null };
+  });
+}
+
+export async function removeCloudProjectMember(actor: AuthUser, idOrSlug: string, userId: string) {
+  return db.$transaction(async (tx) => {
+    const project = await resolveProjectOrThrow(tx, idOrSlug);
+    if (!(await canManageCloudProjectMembers(tx, actor, project))) throw apiError("Forbidden to manage project members", "FORBIDDEN", undefined, 403);
+    if (userId === project.ownerId) throw apiError("The project owner binding cannot be removed", "OWNER_BINDING_PROTECTED", undefined, 409);
+    const member = await tx.cloudProjectMember.findUnique({ where: { projectId_userId: { projectId: project.id, userId } } });
+    if (!member) throw apiError("Project member not found", "NOT_FOUND", undefined, 404);
+    await tx.cloudProjectMember.delete({ where: { id: member.id } });
+    await tx.auditLog.create({ data: { actorUserId: actor.id, actorEmail: actor.email, actorRole: actor.role, action: "CLOUD_PROJECT_MEMBER_REMOVED", resourceType: "CloudProjectMember", resourceId: member.id, domain: "cloud-baas", result: "SUCCESS", metadata: { projectId: project.id, userId } } });
+    return { deleted: true, id: member.id };
+  });
+}
+
+export async function listCloudProjectEnvironments(actor: AuthUser, idOrSlug: string) {
+  const project = await resolveProjectOrThrow(db, idOrSlug);
+  if (!(await canViewCloudProject(db, actor, project))) throw apiError("Forbidden to view cloud environments", "FORBIDDEN", undefined, 403);
+  await ensureCloudFoundation(db, project.id, project.ownerId);
+  const rows = await db.cloudEnvironment.findMany({ where: { projectId: project.id }, orderBy: { createdAt: "asc" } });
+  return rows.map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    branchPattern: row.branchPattern,
+    isProtected: row.isProtected,
+    requireApproval: row.requireApproval,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  }));
+}
+
+export async function listCloudProjectSecrets(actor: AuthUser, idOrSlug: string) {
+  const project = await resolveProjectOrThrow(db, idOrSlug);
+  if (!(await canManageCloudProject(db, actor, project))) throw apiError("Forbidden to view cloud secret metadata", "FORBIDDEN", undefined, 403);
+  const rows = await db.cloudSecret.findMany({ where: { projectId: project.id }, orderBy: [{ environmentSlug: "asc" }, { key: "asc" }] });
+  return rows.map(presentCloudSecret);
+}
+
+export async function upsertCloudProjectSecret(actor: AuthUser, idOrSlug: string, rawInput: unknown) {
+  const input = z.object({
+    environment: z.enum(["development", "preview", "production"]),
+    key: z.string().trim().min(1).max(128),
+    value: z.string().max(64_000),
+    isSecret: z.boolean().optional().default(true),
+    accessScope: z.enum(["build_and_runtime", "runtime_only", "functions_only"]).optional(),
+    reason: z.string().trim().max(240).optional(),
+  }).strict().parse(rawInput);
+  return db.$transaction(async (tx) => {
+    const project = await resolveProjectOrThrow(tx, idOrSlug);
+    if (!(await canManageCloudProject(tx, actor, project))) throw apiError("Forbidden to manage cloud secrets", "FORBIDDEN", undefined, 403);
+    const row = await sealCloudSecret(tx, {
+      projectId: project.id,
+      environmentSlug: input.environment,
+      key: input.key,
+      plaintext: input.value,
+      isSecret: input.isSecret,
+      accessScope: input.accessScope,
+      actorId: actor.id,
+      reason: input.reason,
+    });
+    await tx.auditLog.create({
+      data: { actorUserId: actor.id, actorEmail: actor.email, actorRole: actor.role, action: "CLOUD_SECRET_SEALED", resourceType: "CloudSecret", resourceId: row.id, domain: "cloud-baas", result: "SUCCESS", metadata: { projectId: project.id, environment: row.environmentSlug, key: row.key, version: row.currentVersion, accessScope: row.accessScope } },
+    });
+    return presentCloudSecret(row);
   });
 }
 
@@ -970,6 +1274,10 @@ export async function createCloudWebhook(actor: AuthUser, idOrSlug: string, rawI
         events: JSON.stringify(uniqueEvents),
         signingKeyHash,
         signingKeyPrefix,
+        // Outbound dispatch needs the secret later to produce an HMAC. Store a
+        // version-tagged AES-GCM ciphertext, never plaintext; list/detail
+        // projections intentionally omit this field.
+        signingSecretSealed: sealSecretValue(signingSecret),
         tlsVerify: input.tlsVerify,
         createdBy: actor.id,
       },
@@ -1043,6 +1351,7 @@ export async function createCloudFunction(actor: AuthUser, idOrSlug: string, raw
     if (!(await canManageCloudProject(tx, actor, project))) {
       throw apiError("Forbidden to create functions for this project", "FORBIDDEN", undefined, 403);
     }
+    await assertCloudResourceQuota(tx, { projectId: project.id, resource: "functions", actorId: actor.id });
 
     const dup = await tx.cloudProjectFunction.findUnique({
       where: { projectId_slug: { projectId: project.id, slug } },
@@ -1168,9 +1477,19 @@ export async function verifyMachineProjectHealth(
         anyOfScopes: requiredAnyOfScopes,
       });
       if (check.ok) {
-        await db.cloudProjectKey.update({
-          where: { id: row.id },
-          data: { lastUsedAt: new Date() },
+        await db.$transaction(async (tx) => {
+          await tx.cloudProjectKey.update({ where: { id: row.id }, data: { lastUsedAt: new Date() } });
+          // Per-key usage history is intentionally metadata-only: no bearer
+          // credential, request body or IP address is copied into the ledger.
+          await tx.cloudKeyUsageEvent.create({
+            data: {
+              projectId: row.project.id,
+              keyId: row.id,
+              endpoint: "/api/cloud/v1/health",
+              scopeUsed: requiredAnyOfScopes.join("|"),
+              statusCode: 200,
+            },
+          });
         });
         const [site, database, bucket, fnCount] = await Promise.all([
           row.project.linkedWebsiteId

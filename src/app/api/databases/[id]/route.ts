@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requirePermission, ROLES } from '@/lib/auth';
+import { isAdminRole, requirePermission } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
 
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Ownership check: verify the database's website belongs to the requesting user
-    if (user.role !== ROLES.SUPER_ADMIN && dbInst.website.ownerId !== user.id) {
+    if (!isAdminRole(user.role) && dbInst.website.ownerId !== user.id) {
       return NextResponse.json(apiError('Forbidden', 'FORBIDDEN', undefined, 403), { status: 403 });
     }
 
@@ -51,7 +51,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     }
 
     // Ownership check: verify the database's website belongs to the requesting user
-    if (user.role !== ROLES.SUPER_ADMIN && dbInst.website.ownerId !== user.id) {
+    if (!isAdminRole(user.role) && dbInst.website.ownerId !== user.id) {
       return NextResponse.json(apiError('Forbidden', 'FORBIDDEN', undefined, 403), { status: 403 });
     }
 

@@ -203,7 +203,7 @@ function stageBadgeClass(stage: string): string {
   switch (stage) {
     case "production":
       return "bg-rose-500/15 text-rose-700 border-rose-500/30";
-    case "staging":
+    case "preview":
       return "bg-amber-500/15 text-amber-700 border-amber-500/30";
     default:
       return "bg-sky-500/15 text-sky-700 border-sky-500/30";

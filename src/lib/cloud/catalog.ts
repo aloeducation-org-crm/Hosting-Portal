@@ -21,7 +21,7 @@ export const CLOUD_REGIONS = [
 export type CloudRegionId = (typeof CLOUD_REGIONS)[number]["id"];
 export const CLOUD_REGION_IDS = CLOUD_REGIONS.map((r) => r.id);
 
-export const CLOUD_STAGES = ["development", "staging", "production"] as const;
+export const CLOUD_STAGES = ["development", "preview", "production"] as const;
 export type CloudStage = (typeof CLOUD_STAGES)[number];
 
 // ─── Verified Appwrite Sites Framework Adapters (`app/config/frameworks.php`) ─
@@ -349,10 +349,13 @@ export function validateWebhookTargetUrl(rawUrl: string): { ok: true; normalized
 // ─── Cloud Functions Registry (`Modules/Functions`) ───────────────────────────
 
 export const CLOUD_FUNCTION_RUNTIMES = [
-  { id: "node-22", label: "Node.js 22 LTS", defaultEntrypoint: "src/main.ts" },
+  // Executable is intentionally determined at runtime by a live worker probe;
+  // catalogue membership alone never grants an executable sandbox.
+  { id: "node-22", label: "Node.js 22 LTS", defaultEntrypoint: "src/main.js" },
+  { id: "python-3.11", label: "Python 3.11", defaultEntrypoint: "src/main.py" },
+  { id: "python-3.12", label: "Python 3.12", defaultEntrypoint: "src/main.py" },
   { id: "bun-1.4", label: "Bun 1.4", defaultEntrypoint: "src/main.ts" },
   { id: "deno-2.1", label: "Deno 2.1", defaultEntrypoint: "src/main.ts" },
-  { id: "python-3.12", label: "Python 3.12", defaultEntrypoint: "src/main.py" },
   { id: "go-1.23", label: "Go 1.23", defaultEntrypoint: "main.go" },
   { id: "php-8.4", label: "PHP 8.4", defaultEntrypoint: "src/index.php" },
 ] as const;
@@ -367,12 +370,41 @@ export function validateFunctionEntrypoint(entrypoint: string): boolean {
   return trimmed.split("/").every((part) => part !== "" && part !== "." && part !== ".." && !part.startsWith("."));
 }
 
-const CRON_FIELD_PATTERN = /^(\*|(\*\/\d{1,2})|(\d{1,2}(-\d{1,2})?(,\d{1,2}(-\d{1,2})?)*))$/;
+const CRON_BOUNDS: ReadonlyArray<readonly [number, number]> = [
+  [0, 59], // minute
+  [0, 23], // hour
+  [1, 31], // day of month
+  [1, 12], // month
+  [0, 7], // day of week (0/7 Sunday)
+] as const;
+
+/**
+ * Validate a conventional five-field cron expression without evaluating shell
+ * aliases. Supports wildcards, step values, numbers, ranges and comma lists; rejects six
+ * field (seconds) expressions and values outside the field's real bounds.
+ */
+function validCronField(field: string, min: number, max: number): boolean {
+  if (!field || field.length > 120) return false;
+  return field.split(",").every((part) => {
+    const stepParts = part.split("/");
+    if (stepParts.length > 2) return false;
+    const base = stepParts[0] ?? "";
+    const stepText = stepParts[1];
+    if (stepText !== undefined) {
+      if (!/^\d{1,3}$/.test(stepText) || Number(stepText) < 1 || Number(stepText) > max - min + 1) return false;
+    }
+    if (base === "*") return true;
+    const range = /^(\d{1,2})(?:-(\d{1,2}))?$/.exec(base);
+    if (!range) return false;
+    const low = Number(range[1]);
+    const high = range[2] === undefined ? low : Number(range[2]);
+    return Number.isInteger(low) && Number.isInteger(high) && low >= min && high <= max && low <= high;
+  });
+}
 
 export function validateCronSchedule(schedule: string): boolean {
   const parts = schedule.trim().split(/\s+/);
-  if (parts.length !== 5) return false;
-  return parts.every((field) => CRON_FIELD_PATTERN.test(field));
+  return parts.length === 5 && parts.every((field, index) => validCronField(field, ...CRON_BOUNDS[index]!));
 }
 
 // ─── Slug Helper & Request Schemas ────────────────────────────────────────────

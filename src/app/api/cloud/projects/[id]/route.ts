@@ -43,8 +43,23 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const actor = await requireSession(request);
     const { id } = await context.params;
-    const deleted = await deleteCloudProject(actor, id);
-    return NextResponse.json(apiSuccess(deleted, "Cloud Project deleted"), {
+    // First DELETE creates a reversible pending-deletion request. Send
+    // {slug, token} from that response within 15 minutes for final removal.
+    let confirmation: { slug?: string; token?: string } | undefined;
+    const raw = await request.text();
+    if (raw.trim()) {
+      try {
+        const body = JSON.parse(raw) as Record<string, unknown>;
+        confirmation = {
+          slug: typeof body.slug === "string" ? body.slug : undefined,
+          token: typeof body.token === "string" ? body.token : undefined,
+        };
+      } catch {
+        throw new SyntaxError("Invalid JSON request body");
+      }
+    }
+    const deleted = await deleteCloudProject(actor, id, confirmation);
+    return NextResponse.json(apiSuccess(deleted, deleted.deleted ? "Cloud Project deleted" : "Deletion requested; confirm to permanently remove"), {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
