@@ -27,6 +27,22 @@ const nextConfig: NextConfig = {
   // Turbopack, so it is deliberately not set here — a setting that looks like it
   // works is worse than none. The deploy workflow prunes old releases instead.
 
+  // The public storefront (plans, prices, domain sales) is retired: the site now
+  // showcases the projects we run. The pages are kept in the tree so they can be
+  // re-enabled, but every storefront URL redirects to the project that actually
+  // runs that infrastructure.
+  async redirects() {
+    const project = "/projects/hosting-portal";
+    return [
+      { source: "/pricing", destination: "/", permanent: false },
+      { source: "/hosting", destination: project, permanent: false },
+      { source: "/hosting/:path*", destination: project, permanent: false },
+      { source: "/domains", destination: project, permanent: false },
+      { source: "/email", destination: project, permanent: false },
+      { source: "/ssl", destination: project, permanent: false },
+    ];
+  },
+
   reactStrictMode: true,
   poweredByHeader: false,
   allowedDevOrigins: ["*.e2b.app"],

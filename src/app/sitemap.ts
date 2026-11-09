@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { db } from "@/lib/db";
 import { listPublishedIndustries, type IndustryRow } from "@/lib/factory/catalog";
-import { HOSTING_PRODUCTS } from "@/lib/marketing/hosting-catalog";
+import { PROJECTS } from "@/lib/marketing/projects";
 // Registry-driven: admin status/content changes must appear without a rebuild.
 export const dynamic = "force-dynamic";
 
@@ -16,10 +16,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const staticEntries: MetadataRoute.Sitemap = [
     { url: `${BASE_URL}/`, changeFrequency: "weekly", priority: 1 },
-    { url: `${BASE_URL}/hosting`, changeFrequency: "weekly", priority: 0.95 },
-    { url: `${BASE_URL}/pricing`, changeFrequency: "monthly", priority: 0.9 },
-    ...HOSTING_PRODUCTS.map((product) => ({
-      url: `${BASE_URL}${product.href}`,
+    { url: `${BASE_URL}/projects`, changeFrequency: "weekly", priority: 0.95 },
+    ...PROJECTS.map((project) => ({
+      url: `${BASE_URL}/projects/${project.slug}`,
       changeFrequency: "monthly" as const,
       priority: 0.85,
     })),

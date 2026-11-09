@@ -74,7 +74,7 @@ const servicesSections: MegaMenuSection[] = [
     items: [
       { label: 'Vibe code websites', href: '/dashboard/websites/new', icon: Sparkles, badge: 'FREE TRIAL', description: 'Describe what you want, and our AI builder creates it. No technical skills needed.' },
       { label: 'Drag-and-drop website builder', href: '/dashboard/websites/new', icon: Palette, description: 'Build and edit your site with templates' },
-      { label: 'Managed hosting for WordPress', href: '/hosting/wordpress', icon: LayoutGrid, description: 'Power your website with the world\'s leading CMS' },
+      { label: 'Managed hosting for WordPress', href: '/dashboard', icon: LayoutGrid, description: 'Power your website with the world\'s leading CMS' },
       { label: 'Migrate a website', href: '/dashboard', icon: ArrowRightLeft, description: 'Move your site fast and for free' },
     ],
   },
@@ -88,26 +88,26 @@ const servicesSections: MegaMenuSection[] = [
   {
     title: 'HOST AND DEPLOY',
     items: [
-      { label: 'Web hosting', href: '/hosting/shared', icon: Server, description: 'Host any site quickly, easily, and securely' },
-      { label: 'Cloud hosting', href: '/hosting/cloud', icon: CloudCog, description: 'Scale with more power and resources' },
-      { label: 'VPS hosting', href: '/hosting/vps', icon: Zap, description: 'Get full control with AI-managed VPS' },
+      { label: 'Web hosting', href: '/dashboard/websites/new', icon: Server, description: 'Host any site quickly, easily, and securely' },
+      { label: 'Cloud hosting', href: '/dashboard', icon: CloudCog, description: 'Scale with more power and resources' },
+      { label: 'VPS hosting', href: '/dashboard', icon: Zap, description: 'Get full control with AI-managed VPS' },
       { label: 'Web Apps Hosting', href: '/dashboard', icon: MonitorSmartphone, description: 'Deploy and run modern web apps instantly' },
       { label: 'Application catalog', href: '/dashboard', icon: Boxes, description: 'Deploy open-source apps in seconds' },
-      { label: 'Agency hosting', href: '/hosting/reseller', icon: Building2, description: 'Manage multiple sites professionally' },
+      { label: 'Agency hosting', href: '/dashboard', icon: Building2, description: 'Manage multiple sites professionally' },
     ],
   },
   {
     title: 'DOMAINS',
     items: [
-      { label: 'Domain name search', href: '/domains', icon: Search, description: 'Find the perfect domain name' },
-      { label: 'Buy a domain', href: '/domains', icon: Globe, description: 'Register a domain name for your website' },
-      { label: 'Transfer domain', href: '/domains', icon: ArrowRightLeft, description: 'Bring your existing domain to ALO Labs' },
+      { label: 'Domain name search', href: '/dashboard/domains', icon: Search, description: 'Find the perfect domain name' },
+      { label: 'Buy a domain', href: '/dashboard/domains', icon: Globe, description: 'Register a domain name for your website' },
+      { label: 'Transfer domain', href: '/dashboard/domains', icon: ArrowRightLeft, description: 'Bring your existing domain to ALO Labs' },
     ],
   },
   {
     title: 'EMAIL AND MARKETING',
     items: [
-      { label: 'Business email', href: '/email', icon: Mail, description: 'Create professional addresses to build your brand' },
+      { label: 'Business email', href: '/dashboard/email', icon: Mail, description: 'Create professional addresses to build your brand' },
       { label: 'Email marketing', href: '/dashboard/email', icon: Megaphone, description: 'Create and send emails with the AI-powered Reach' },
       { label: 'Google Workspace', href: '/dashboard', icon: MessageSquare, description: 'Transform teamwork and boost productivity' },
     ],
@@ -125,43 +125,6 @@ const servicesSections: MegaMenuSection[] = [
 ];
 
 /* -------------------------------------------------------------------------- */
-/*  Hosting menu data (product catalogue)                                     */
-/* -------------------------------------------------------------------------- */
-
-const hostingSections: MegaMenuSection[] = [
-  {
-    title: 'HOSTING',
-    items: [
-      { label: 'Web hosting', href: '/hosting/shared', icon: Server, description: 'Fast shared hosting with a free domain and free SSL' },
-      { label: 'Managed WordPress', href: '/hosting/wordpress', icon: LayoutGrid, description: 'Staging, Redis and tested plugin updates' },
-      { label: 'VPS hosting', href: '/hosting/vps', icon: Zap, description: 'Root access, dedicated vCPUs and NVMe disks' },
-      { label: 'Cloud hosting', href: '/hosting/cloud', icon: CloudCog, description: 'Managed, isolated resources that autoscale' },
-      { label: 'Dedicated servers', href: '/hosting/dedicated', icon: Server, badge: 'BAREMETAL', description: 'Single-tenant hardware with IPMI access' },
-      { label: 'Reseller hosting', href: '/hosting/reseller', icon: Building2, description: 'White-label cPanel accounts for your clients' },
-    ],
-  },
-  {
-    title: 'PLATFORMS AND ADD-ONS',
-    items: [
-      { label: 'CRM hosting', href: '/hosting/crm', icon: Bot, description: 'SuiteCRM, EspoCRM, Vtiger and Odoo, managed' },
-      { label: 'Website builder', href: '/hosting/website-builder', icon: Palette, description: 'Describe a site, publish it, no code needed' },
-      { label: 'Business email', href: '/email', icon: Mail, description: 'Your domain, with SPF, DKIM and DMARC set up' },
-      { label: 'SSL certificates', href: '/ssl', icon: Shield, description: 'Free DV, plus wildcard and multi-domain TLS' },
-      { label: 'All products', href: '/hosting', icon: Boxes, description: 'Compare every plan side by side' },
-    ],
-  },
-  {
-    title: 'DOMAINS',
-    items: [
-      { label: 'Domain name search', href: '/domains', icon: Search, description: 'Check availability live at the registry' },
-      { label: 'Domain price list', href: '/domains', icon: Globe, description: 'Register, renewal and transfer prices' },
-      { label: 'Transfer a domain', href: '/domains', icon: ArrowRightLeft, description: 'Bring a domain over and extend it a year' },
-      { label: 'Pricing overview', href: '/pricing', icon: Activity, description: 'Every product and term in one table' },
-    ],
-  },
-];
-
-/* -------------------------------------------------------------------------- */
 /*  Explore menu data (matches Hostinger's About + Support)                    */
 /* -------------------------------------------------------------------------- */
 
@@ -169,6 +132,7 @@ const exploreSections: MegaMenuSection[] = [
   {
     title: 'Solutions',
     items: [
+      { label: 'Our projects', href: '/projects', icon: Boxes, description: 'Everything we build, host and run — with live status' },
       { label: 'Industry solutions', href: '/industries', icon: Building2, description: '20 industry software system families, feature by feature' },
       { label: 'Service catalog', href: '/services', icon: Boxes, description: 'What we build and run — deliverables, prerequisites, honest exclusions' },
     ],
@@ -391,14 +355,8 @@ function MobileMenuContent({ onClose }: { onClose: () => void }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-4 space-y-1">
-        <MobileAccordion title="Hosting" sections={hostingSections} onClose={onClose} />
-
-        <a href="/domains" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
-          Domains
-        </a>
-
-        <a href="/pricing" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
-          Pricing
+        <a href="/projects" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
+          Projects
         </a>
 
         <a href="/industries" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
@@ -412,24 +370,19 @@ function MobileMenuContent({ onClose }: { onClose: () => void }) {
         <MobileAccordion title="Services" sections={servicesSections} onClose={onClose} />
         <MobileAccordion title="Explore" sections={exploreSections} onClose={onClose} />
 
-        <a href="/dashboard" onClick={onClose} className="flex items-center gap-2 py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
-          Ecommerce
-          <span className="inline-flex items-center rounded-full bg-[#E8501A] px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">NEW</span>
-        </a>
-
         <a href="/dashboard/agents" onClick={onClose} className="flex items-center gap-2 py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
           <Bot className="size-4" />
           Ask AI
         </a>
 
-        <a href="/" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
+        <a href="/login" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
           Log in
         </a>
       </nav>
 
       <div className="p-4 border-t">
-        <a href="/dashboard" onClick={onClose} className="flex items-center justify-center w-full py-2.5 px-5 text-sm font-semibold text-white bg-[#E8501A] rounded-full hover:bg-[#C73D12] transition-colors">
-          Get Started
+        <a href="/register" onClick={onClose} className="flex items-center justify-center w-full py-2.5 px-5 text-sm font-semibold text-white bg-[#E8501A] rounded-full hover:bg-[#C73D12] transition-colors">
+          Get started
         </a>
       </div>
     </div>
@@ -470,12 +423,12 @@ export default function Header() {
       {/* Top promo banner */}
       <div className="bg-[#E8501A]">
         <div className="mx-auto flex items-center justify-center gap-2 py-2 px-4 text-sm text-white max-w-7xl">
-          <span className="font-medium">Summer sale: up to 75% off hosting — free domain included</span>
+          <span className="font-medium">All projects operational — see what we run</span>
           <a
-            href="/pricing"
+            href="/projects"
             className="inline-flex items-center gap-1 font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity"
           >
-            Claim deal
+            Visit projects
             <ArrowRight className="size-3.5 rotate-[-90deg]" />
           </a>
         </div>
@@ -488,12 +441,8 @@ export default function Header() {
 
           {/* Desktop nav */}
           <nav className="hidden lg:flex items-center gap-1" aria-label="Main navigation">
-            <NavDropdown label="Hosting" sections={hostingSections} columns={3} />
-            <a href="/domains" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
-              Domains
-            </a>
-            <a href="/pricing" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
-              Pricing
+            <a href="/projects" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
+              Projects
             </a>
             <a href="/industries" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
               Industries

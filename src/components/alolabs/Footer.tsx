@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import { PROJECTS } from '@/lib/marketing/projects';
 import {
   Linkedin,
   Facebook,
@@ -23,80 +24,40 @@ interface FooterColumn {
 
 const columns: FooterColumn[] = [
   {
-    title: 'Hosting',
+    title: 'Projects',
     links: [
-      { label: 'Web hosting', href: '/hosting/shared' },
-      { label: 'Hosting for WordPress', href: '/hosting/wordpress' },
-      { label: 'VPS hosting', href: '/hosting/vps' },
-      { label: 'Cloud hosting', href: '/hosting/cloud' },
-      { label: 'Dedicated servers', href: '/hosting/dedicated' },
-      { label: 'Reseller hosting', href: '/hosting/reseller' },
-      { label: 'CRM hosting', href: '/hosting/crm' },
-      { label: 'Website builder', href: '/hosting/website-builder' },
-      { label: 'Self-hosted n8n', href: '/hosting/vps' },
-      { label: 'Hermes Agent VPS', href: '/hosting/vps' },
-      { label: 'Paperclip VPS', href: '/hosting/vps' },
-      { label: 'OpenClaw', href: '/dashboard/agents/openclaw' },
-      { label: 'All hosting products', href: '/hosting' },
+      ...PROJECTS.map((project) => ({ label: project.name, href: `/projects/${project.slug}` })),
+      { label: 'All projects', href: '/projects' },
     ],
   },
   {
-    title: 'Domains',
+    title: 'What we do',
     links: [
-      { label: 'Domain name search', href: '/domains' },
-      { label: 'Buy a domain', href: '/domains' },
-      { label: 'Cheap domain names', href: '/domains' },
-      { label: 'Free domain', href: '/hosting/shared' },
-      { label: 'WHOIS lookup', href: '/domains' },
-      { label: 'Free SSL certificate', href: '/ssl' },
-      { label: 'Domain transfer', href: '/domains' },
-      { label: 'Domain extensions', href: '/domains' },
-      { label: 'Personal domain name', href: '/domains' },
-      { label: 'Premium domains', href: '/domains' },
-    ],
-  },
-  {
-    title: 'Email & Tools',
-    links: [
-      { label: 'Business email', href: '/email' },
-      { label: 'Google Workspace', href: '/email' },
-      { label: 'SSL certificates', href: '/ssl' },
-      { label: 'ALO Builder', href: '/dashboard/websites/new' },
-      { label: 'AI website builder', href: '/hosting/website-builder' },
-      { label: 'Ecommerce website builder', href: '/hosting/website-builder' },
-      { label: 'Migrate to ALO Labs', href: '/support' },
-      { label: 'AI agents', href: '/dashboard/agents' },
-      { label: 'AI automations', href: '/ai/automations' },
+      { label: 'Hosting platform', href: '/projects/hosting-portal' },
+      { label: 'Industry systems', href: '/industries' },
       { label: 'Service catalog', href: '/services' },
-      { label: 'Industry solutions', href: '/industries' },
+      { label: 'AI automations', href: '/projects/ai-automations' },
+      { label: 'CRM', href: '/projects/crm' },
     ],
   },
   {
-    title: 'Company',
+    title: 'Platform',
     links: [
-      { label: 'Pricing', href: '/pricing' },
-      { label: 'Reviews', href: '/#testimonials' },
-      { label: 'Affiliate program', href: '/support' },
-      { label: 'Agency directory', href: '/support' },
-      { label: 'Roadmap', href: '/blog' },
+      { label: 'Team sign-in', href: '/login' },
+      { label: 'Create an account', href: '/register' },
+      { label: 'Dashboard', href: '/dashboard' },
       { label: 'System status', href: '/support' },
-      { label: 'Trust center', href: '/privacy' },
-      { label: 'About ALO Labs', href: '/about' },
-      { label: 'Our technology', href: '/hosting' },
-      { label: 'Blog', href: '/blog' },
-      { label: 'Contact us', href: '/support' },
+      { label: 'Privacy policy', href: '/privacy' },
+      { label: 'Terms of service', href: '/terms' },
     ],
   },
   {
     title: 'Support',
     links: [
-      { label: 'Tutorials', href: '/support' },
-      { label: 'Knowledge base', href: '/support' },
-      { label: 'ALO Academy', href: '/support' },
       { label: 'Contact us', href: '/support' },
+      { label: 'Knowledge base', href: '/support' },
+      { label: 'Tutorials', href: '/support' },
       { label: 'Report abuse', href: '/support' },
-      { label: 'Privacy policy', href: '/privacy' },
-      { label: 'Terms of service', href: '/terms' },
       { label: 'Sitemap', href: '/sitemap.xml' },
     ],
   },
@@ -144,9 +105,8 @@ const socialLinks = [
 const bottomLinks = [
   { label: 'Privacy policy', href: '/privacy' },
   { label: 'Terms of service', href: '/terms' },
-  { label: 'Cookie policy', href: '/cookies' },
+  { label: 'Projects', href: '/projects' },
   { label: 'Industries', href: '/industries' },
-  { label: 'Services', href: '/services' },
   { label: 'Sitemap', href: '/sitemap.xml' },
 ];
 
@@ -161,7 +121,7 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-4 pt-12 pb-8 sm:px-6 lg:px-8">
         <nav
           aria-label="Footer navigation"
-          className="grid grid-cols-2 gap-x-8 gap-y-8 sm:gap-x-6 md:grid-cols-3 lg:grid-cols-5 lg:gap-x-8"
+          className="grid grid-cols-2 gap-x-8 gap-y-8 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-4 lg:gap-x-8"
         >
           {columns.map((col) => (
             <div key={col.title}>

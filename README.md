@@ -33,31 +33,49 @@ Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md),
 
 ---
 
-## Storefront: hosting, domains and email
+## Public site: the projects showcase
 
-The public marketing site is a full hosting storefront. Everything customer-facing
-(plan cards, term switchers, price tables, homepage product grid, `/pricing` tabs,
-mega-menu and sitemap) reads from **one file**:
-`src/lib/marketing/hosting-catalog.ts`.
+The public site is **not a shop**. It lists the projects ALO Labs builds, hosts and
+runs, with live status, and gives the team a sign-in. There are no plans, prices or
+checkout anywhere in the public navigation.
+
+Edit **one file** to change it: `src/lib/marketing/projects.ts`.
 
 | Route | What it is |
 | --- | --- |
-| `/` | Homepage: domain search, product grid, plan cards, why-us, regions, FAQ |
-| `/hosting` | Catalogue hub with a use-case → plan recommendation table |
-| `/hosting/shared`, `/hosting/wordpress`, `/hosting/vps`, `/hosting/cloud`, `/hosting/dedicated`, `/hosting/reseller`, `/hosting/crm`, `/hosting/website-builder` | Product pages: plans, specs, comparison table, regions, FAQ |
-| `/domains` | Domain search + register/renew/transfer price list |
-| `/email`, `/ssl` | Business email and TLS certificate pages |
-| `/pricing` | Every product's plans behind one tab switcher |
+| `/` | Showcase homepage: live projects, platform capabilities, how we run it |
+| `/projects` | Every project with status legend |
+| `/projects/[slug]` | Project detail: what it does, stack, status, action link |
+| `/industries`, `/services` | Existing solution and service catalogues |
+| `/login`, `/register` | Team sign-in and account creation (unchanged) |
 
-Adding or repricing a plan is a single edit in the catalogue — the tests in
-`tests/hosting-catalog.test.ts` enforce unique slugs, monotonic term pricing, the
-plan-card maths and that no FAQ or SEO copy is left as a placeholder.
+A project entry looks like this:
 
-**Domain availability is never guessed.** `GET /api/marketing/domain-check?q=…`
-asks the registry over RDAP and returns `available: null` when the lookup cannot
-be completed (rate limit, network, unknown TLD), and the UI shows "Confirm at
-checkout" instead of claiming a name is free. Set `RDAP_BASE_URL` to point at a
-different RDAP proxy.
+```ts
+{
+  slug: "hosting-portal",
+  name: "ALO Hosting Portal",
+  tagline: "The platform our own sites, domains and mail run on.",
+  status: "live",              // live | beta | internal | archived
+  category: "Platform",
+  url: "https://…",            // omit for internal tools → "Team sign-in"
+  highlights: [...],           // what it does, no invented metrics
+  tags: [...],
+  since: 2024,
+}
+```
+
+Adding, renaming or reordering entries updates the homepage, `/projects`, each
+detail page, the footer links and the sitemap.
+
+### The retired storefront
+
+The hosting storefront (`/pricing`, `/hosting/*`, `/domains`, `/email`, `/ssl`) was
+built earlier and is **kept in the tree but redirected** in `next.config.ts`. To
+bring it back, delete those redirects; the catalogue, plan cards, domain search and
+`GET /api/marketing/domain-check` (registry RDAP, never a guessed availability) are
+all still wired up. `tests/hosting-catalog.test.ts` keeps that catalogue honest
+while it is dormant.
 
 ## ⚠️ Read this first: which directory is the app?
 
