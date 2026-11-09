@@ -132,6 +132,7 @@ const exploreSections: MegaMenuSection[] = [
   {
     title: 'Solutions',
     items: [
+      { label: 'Our projects', href: '/projects', icon: Boxes, description: 'Everything we build, host and run — with live status' },
       { label: 'Industry solutions', href: '/industries', icon: Building2, description: '20 industry software system families, feature by feature' },
       { label: 'Service catalog', href: '/services', icon: Boxes, description: 'What we build and run — deliverables, prerequisites, honest exclusions' },
     ],
@@ -177,9 +178,9 @@ function MegaMenu({
   if (!open) return null;
 
   return (
-    <div className="absolute left-1/2 top-full -translate-x-1/2 pt-3 w-[780px]">
+    <div className="absolute left-0 right-0 top-full z-50 border-t border-gray-100 bg-white shadow-xl">
       <div
-        className="bg-white rounded-xl shadow-lg border border-gray-100 p-6 grid gap-x-8 gap-y-6"
+        className="mx-auto grid max-w-5xl gap-x-10 gap-y-6 px-4 py-6 sm:px-6 lg:px-8"
         style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
       >
         {sections.map((section) => (
@@ -255,7 +256,7 @@ function NavDropdown({
 
   return (
     <div
-      className="relative"
+      className="static"
       onMouseEnter={handleEnter}
       onMouseLeave={handleLeave}
     >
@@ -354,8 +355,8 @@ function MobileMenuContent({ onClose }: { onClose: () => void }) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4 px-4 space-y-1">
-        <a href="/pricing" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
-          Pricing
+        <a href="/projects" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
+          Projects
         </a>
 
         <a href="/industries" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
@@ -369,24 +370,19 @@ function MobileMenuContent({ onClose }: { onClose: () => void }) {
         <MobileAccordion title="Services" sections={servicesSections} onClose={onClose} />
         <MobileAccordion title="Explore" sections={exploreSections} onClose={onClose} />
 
-        <a href="/dashboard" onClick={onClose} className="flex items-center gap-2 py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
-          Ecommerce
-          <span className="inline-flex items-center rounded-full bg-[#E8501A] px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">NEW</span>
-        </a>
-
         <a href="/dashboard/agents" onClick={onClose} className="flex items-center gap-2 py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
           <Bot className="size-4" />
           Ask AI
         </a>
 
-        <a href="/" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
+        <a href="/login" onClick={onClose} className="block py-2.5 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] hover:bg-[#E8501A]/5 rounded-md transition-colors">
           Log in
         </a>
       </nav>
 
       <div className="p-4 border-t">
-        <a href="/dashboard" onClick={onClose} className="flex items-center justify-center w-full py-2.5 px-5 text-sm font-semibold text-white bg-[#E8501A] rounded-full hover:bg-[#C73D12] transition-colors">
-          Get Started
+        <a href="/register" onClick={onClose} className="flex items-center justify-center w-full py-2.5 px-5 text-sm font-semibold text-white bg-[#E8501A] rounded-full hover:bg-[#C73D12] transition-colors">
+          Get started
         </a>
       </div>
     </div>
@@ -427,41 +423,32 @@ export default function Header() {
       {/* Top promo banner */}
       <div className="bg-[#E8501A]">
         <div className="mx-auto flex items-center justify-center gap-2 py-2 px-4 text-sm text-white max-w-7xl">
-          <span className="font-medium">Summer Sale: up to 80% off</span>
+          <span className="font-medium">All projects operational — see what we run</span>
           <a
-            href="/"
+            href="/projects"
             className="inline-flex items-center gap-1 font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity"
           >
-            Claim deal
+            Visit projects
             <ArrowRight className="size-3.5 rotate-[-90deg]" />
           </a>
         </div>
       </div>
 
       {/* Main header bar */}
-      <div className="bg-white border-b border-gray-100">
+      <div className="relative bg-white border-b border-gray-100">
         <div className="mx-auto flex items-center justify-between h-14 px-4 sm:px-6 lg:px-8 max-w-7xl">
           <ALOLogo />
 
           {/* Desktop nav */}
           <nav className="hidden lg:flex items-center gap-1" aria-label="Main navigation">
-            <a href="/pricing" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
-              Pricing
+            <a href="/projects" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
+              Projects
             </a>
             <a href="/industries" className="py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors">
               Industries
             </a>
             <NavDropdown label="Services" sections={servicesSections} columns={3} />
             <NavDropdown label="Explore" sections={exploreSections} columns={3} />
-            <a
-              href="/dashboard"
-              className="relative py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors inline-flex items-center gap-1.5"
-            >
-              Ecommerce
-              <span className="inline-flex items-center rounded-full bg-[#E8501A] px-1.5 py-0.5 text-[9px] font-bold uppercase text-white leading-none">
-                NEW
-              </span>
-            </a>
             <a
               href="/ai/assistant"
               className="inline-flex items-center gap-1.5 py-2 px-3 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors"
@@ -471,7 +458,7 @@ export default function Header() {
             </a>
             <a
               href="/ai/auto-deploy"
-              className="inline-flex items-center gap-1 py-2 px-2 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors"
+              className="hidden xl:inline-flex items-center gap-1 py-2 px-2 text-sm font-medium text-[#1E293B] hover:text-[#E8501A] rounded-md transition-colors"
               title="Bilingual EN / বাংলা Control Plane"
             >
               <Globe2 className="size-4" />

@@ -33,6 +33,50 @@ Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md),
 
 ---
 
+## Public site: the projects showcase
+
+The public site is **not a shop**. It lists the projects ALO Labs builds, hosts and
+runs, with live status, and gives the team a sign-in. There are no plans, prices or
+checkout anywhere in the public navigation.
+
+Edit **one file** to change it: `src/lib/marketing/projects.ts`.
+
+| Route | What it is |
+| --- | --- |
+| `/` | Showcase homepage: live projects, platform capabilities, how we run it |
+| `/projects` | Every project with status legend |
+| `/projects/[slug]` | Project detail: what it does, stack, status, action link |
+| `/industries`, `/services` | Existing solution and service catalogues |
+| `/login`, `/register` | Team sign-in and account creation (unchanged) |
+
+A project entry looks like this:
+
+```ts
+{
+  slug: "hosting-portal",
+  name: "ALO Hosting Portal",
+  tagline: "The platform our own sites, domains and mail run on.",
+  status: "live",              // live | beta | internal | archived
+  category: "Platform",
+  url: "https://…",            // omit for internal tools → "Team sign-in"
+  highlights: [...],           // what it does, no invented metrics
+  tags: [...],
+  since: 2024,
+}
+```
+
+Adding, renaming or reordering entries updates the homepage, `/projects`, each
+detail page, the footer links and the sitemap.
+
+### The retired storefront
+
+The hosting storefront (`/pricing`, `/hosting/*`, `/domains`, `/email`, `/ssl`) was
+built earlier and is **kept in the tree but redirected** in `next.config.ts`. To
+bring it back, delete those redirects; the catalogue, plan cards, domain search and
+`GET /api/marketing/domain-check` (registry RDAP, never a guessed availability) are
+all still wired up. `tests/hosting-catalog.test.ts` keeps that catalogue honest
+while it is dormant.
+
 ## ⚠️ Read this first: which directory is the app?
 
 **The application is the repository root.** `package.json`, `next.config.ts`,

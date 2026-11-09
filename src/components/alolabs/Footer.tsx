@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import { PROJECTS } from '@/lib/marketing/projects';
 import {
   Linkedin,
   Facebook,
@@ -11,94 +12,53 @@ import {
 
 /* ─── data (matches Hostinger footer exactly) ─────────────────────── */
 
+interface FooterLink {
+  label: string;
+  href: string;
+}
+
 interface FooterColumn {
   title: string;
-  links: string[];
+  links: FooterLink[];
 }
 
 const columns: FooterColumn[] = [
   {
-    title: 'Hosting',
+    title: 'Projects',
     links: [
-      'Web hosting',
-      'Hosting for WordPress',
-      'VPS hosting',
-      'Self-hosted n8n',
-      'Business email',
-      'Cloud hosting',
-      'Hosting for WooCommerce',
-      'Hosting for agencies',
-      'Minecraft hosting',
-      'Hermes Agent VPS',
-      'OpenClaw',
-      'Paperclip VPS',
-      'Google Workspace',
+      ...PROJECTS.map((project) => ({ label: project.name, href: `/projects/${project.slug}` })),
+      { label: 'All projects', href: '/projects' },
     ],
   },
   {
-    title: 'Domains',
+    title: 'What we do',
     links: [
-      'Domain name search',
-      'Buy a domain',
-      'Cheap domain names',
-      'Free domain',
-      'WHOIS Lookup',
-      'Free SSL certificate',
-      'Domain transfer',
-      'Domain extensions',
-      'Personal domain name',
-      'Premium domains',
+      { label: 'Hosting platform', href: '/projects/hosting-portal' },
+      { label: 'Industry systems', href: '/industries' },
+      { label: 'Service catalog', href: '/services' },
+      { label: 'AI automations', href: '/projects/ai-automations' },
+      { label: 'CRM', href: '/projects/crm' },
     ],
   },
   {
-    title: 'Website Builder & Tools',
+    title: 'Platform',
     links: [
-      'ALO Builder',
-      'Website Builder',
-      'AI Website Builder',
-      'Ecommerce Website Builder',
-      'Templates',
-      'Domain Name Generator',
-      'Print on Demand',
-      'Link in Bio',
-      'Business Name Generator',
-      'AI Newsletter Generator',
-      'AI Logo Generator',
-      'Migrate to ALO Labs',
-      'ALO API',
-    ],
-  },
-  {
-    title: 'Company',
-    links: [
-      'Pricing',
-      'Reviews',
-      'Affiliate program',
-      'Educational partnership',
-      'Referral program',
-      'Agency directory',
-      'Roadmap',
-      'System status',
-      'Trust center',
-      'Sitemap',
-      'About ALO Labs',
-      'Our technology',
-      'Newsroom',
-      'Career',
-      'Blog',
-      'Student discount',
-      'Sustainability',
-      'Principles',
+      { label: 'Team sign-in', href: '/login' },
+      { label: 'Create an account', href: '/register' },
+      { label: 'Dashboard', href: '/dashboard' },
+      { label: 'System status', href: '/support' },
+      { label: 'Privacy policy', href: '/privacy' },
+      { label: 'Terms of service', href: '/terms' },
     ],
   },
   {
     title: 'Support',
     links: [
-      'Tutorials',
-      'Knowledge Base',
-      'ALO Academy',
-      'Contact us',
-      'Report abuse',
+      { label: 'Contact us', href: '/support' },
+      { label: 'Knowledge base', href: '/support' },
+      { label: 'Tutorials', href: '/support' },
+      { label: 'Report abuse', href: '/support' },
+      { label: 'Sitemap', href: '/sitemap.xml' },
     ],
   },
 ];
@@ -145,10 +105,9 @@ const socialLinks = [
 const bottomLinks = [
   { label: 'Privacy policy', href: '/privacy' },
   { label: 'Terms of service', href: '/terms' },
-  { label: 'Cookie policy', href: '/cookies' },
+  { label: 'Projects', href: '/projects' },
   { label: 'Industries', href: '/industries' },
-  { label: 'Services', href: '/services' },
-  { label: 'Sitemap', href: '/sitemap' },
+  { label: 'Sitemap', href: '/sitemap.xml' },
 ];
 
 export default function Footer() {
@@ -162,7 +121,7 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-4 pt-12 pb-8 sm:px-6 lg:px-8">
         <nav
           aria-label="Footer navigation"
-          className="grid grid-cols-2 gap-x-8 gap-y-8 sm:gap-x-6 md:grid-cols-3 lg:grid-cols-5 lg:gap-x-8"
+          className="grid grid-cols-2 gap-x-8 gap-y-8 sm:gap-x-6 md:grid-cols-4 lg:grid-cols-4 lg:gap-x-8"
         >
           {columns.map((col) => (
             <div key={col.title}>
@@ -171,12 +130,12 @@ export default function Footer() {
               </h3>
               <ul className="space-y-2">
                 {col.links.map((link) => (
-                  <li key={link}>
+                  <li key={`${col.title}-${link.label}`}>
                     <a
-                      href="/"
+                      href={link.href}
                       className="text-sm text-[#9CA3AF] transition-colors duration-150 hover:text-white"
                     >
-                      {link}
+                      {link.label}
                     </a>
                   </li>
                 ))}

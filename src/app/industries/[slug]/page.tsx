@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Header from "@/components/alolabs/Header";
+import Footer from "@/components/alolabs/Footer";
 import { notFound } from "next/navigation";
 import {
   ArrowRight,
@@ -86,7 +88,9 @@ export default async function IndustryLandingPage({ params }: Params) {
   };
 
   return (
-    <main className="min-h-screen bg-white">
+    <div className="flex min-h-screen flex-col bg-white">
+      <Header />
+      <main className="flex-1 bg-white">
       {/* A — Industry hero (distinct per-industry gradient + icon artwork) */}
       <section
         className="relative overflow-hidden text-white"
@@ -423,6 +427,8 @@ export default async function IndustryLandingPage({ params }: Params) {
           />
         </div>
       </section>
-    </main>
+      </main>
+      <Footer />
+    </div>
   );
 }
