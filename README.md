@@ -33,6 +33,32 @@ Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md),
 
 ---
 
+## Storefront: hosting, domains and email
+
+The public marketing site is a full hosting storefront. Everything customer-facing
+(plan cards, term switchers, price tables, homepage product grid, `/pricing` tabs,
+mega-menu and sitemap) reads from **one file**:
+`src/lib/marketing/hosting-catalog.ts`.
+
+| Route | What it is |
+| --- | --- |
+| `/` | Homepage: domain search, product grid, plan cards, why-us, regions, FAQ |
+| `/hosting` | Catalogue hub with a use-case → plan recommendation table |
+| `/hosting/shared`, `/hosting/wordpress`, `/hosting/vps`, `/hosting/cloud`, `/hosting/dedicated`, `/hosting/reseller`, `/hosting/crm`, `/hosting/website-builder` | Product pages: plans, specs, comparison table, regions, FAQ |
+| `/domains` | Domain search + register/renew/transfer price list |
+| `/email`, `/ssl` | Business email and TLS certificate pages |
+| `/pricing` | Every product's plans behind one tab switcher |
+
+Adding or repricing a plan is a single edit in the catalogue — the tests in
+`tests/hosting-catalog.test.ts` enforce unique slugs, monotonic term pricing, the
+plan-card maths and that no FAQ or SEO copy is left as a placeholder.
+
+**Domain availability is never guessed.** `GET /api/marketing/domain-check?q=…`
+asks the registry over RDAP and returns `available: null` when the lookup cannot
+be completed (rate limit, network, unknown TLD), and the UI shows "Confirm at
+checkout" instead of claiming a name is free. Set `RDAP_BASE_URL` to point at a
+different RDAP proxy.
+
 ## ⚠️ Read this first: which directory is the app?
 
 **The application is the repository root.** `package.json`, `next.config.ts`,

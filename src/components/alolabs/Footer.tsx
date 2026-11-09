@@ -11,94 +11,93 @@ import {
 
 /* ─── data (matches Hostinger footer exactly) ─────────────────────── */
 
+interface FooterLink {
+  label: string;
+  href: string;
+}
+
 interface FooterColumn {
   title: string;
-  links: string[];
+  links: FooterLink[];
 }
 
 const columns: FooterColumn[] = [
   {
     title: 'Hosting',
     links: [
-      'Web hosting',
-      'Hosting for WordPress',
-      'VPS hosting',
-      'Self-hosted n8n',
-      'Business email',
-      'Cloud hosting',
-      'Hosting for WooCommerce',
-      'Hosting for agencies',
-      'Minecraft hosting',
-      'Hermes Agent VPS',
-      'OpenClaw',
-      'Paperclip VPS',
-      'Google Workspace',
+      { label: 'Web hosting', href: '/hosting/shared' },
+      { label: 'Hosting for WordPress', href: '/hosting/wordpress' },
+      { label: 'VPS hosting', href: '/hosting/vps' },
+      { label: 'Cloud hosting', href: '/hosting/cloud' },
+      { label: 'Dedicated servers', href: '/hosting/dedicated' },
+      { label: 'Reseller hosting', href: '/hosting/reseller' },
+      { label: 'CRM hosting', href: '/hosting/crm' },
+      { label: 'Website builder', href: '/hosting/website-builder' },
+      { label: 'Self-hosted n8n', href: '/hosting/vps' },
+      { label: 'Hermes Agent VPS', href: '/hosting/vps' },
+      { label: 'Paperclip VPS', href: '/hosting/vps' },
+      { label: 'OpenClaw', href: '/dashboard/agents/openclaw' },
+      { label: 'All hosting products', href: '/hosting' },
     ],
   },
   {
     title: 'Domains',
     links: [
-      'Domain name search',
-      'Buy a domain',
-      'Cheap domain names',
-      'Free domain',
-      'WHOIS Lookup',
-      'Free SSL certificate',
-      'Domain transfer',
-      'Domain extensions',
-      'Personal domain name',
-      'Premium domains',
+      { label: 'Domain name search', href: '/domains' },
+      { label: 'Buy a domain', href: '/domains' },
+      { label: 'Cheap domain names', href: '/domains' },
+      { label: 'Free domain', href: '/hosting/shared' },
+      { label: 'WHOIS lookup', href: '/domains' },
+      { label: 'Free SSL certificate', href: '/ssl' },
+      { label: 'Domain transfer', href: '/domains' },
+      { label: 'Domain extensions', href: '/domains' },
+      { label: 'Personal domain name', href: '/domains' },
+      { label: 'Premium domains', href: '/domains' },
     ],
   },
   {
-    title: 'Website Builder & Tools',
+    title: 'Email & Tools',
     links: [
-      'ALO Builder',
-      'Website Builder',
-      'AI Website Builder',
-      'Ecommerce Website Builder',
-      'Templates',
-      'Domain Name Generator',
-      'Print on Demand',
-      'Link in Bio',
-      'Business Name Generator',
-      'AI Newsletter Generator',
-      'AI Logo Generator',
-      'Migrate to ALO Labs',
-      'ALO API',
+      { label: 'Business email', href: '/email' },
+      { label: 'Google Workspace', href: '/email' },
+      { label: 'SSL certificates', href: '/ssl' },
+      { label: 'ALO Builder', href: '/dashboard/websites/new' },
+      { label: 'AI website builder', href: '/hosting/website-builder' },
+      { label: 'Ecommerce website builder', href: '/hosting/website-builder' },
+      { label: 'Migrate to ALO Labs', href: '/support' },
+      { label: 'AI agents', href: '/dashboard/agents' },
+      { label: 'AI automations', href: '/ai/automations' },
+      { label: 'Service catalog', href: '/services' },
+      { label: 'Industry solutions', href: '/industries' },
     ],
   },
   {
     title: 'Company',
     links: [
-      'Pricing',
-      'Reviews',
-      'Affiliate program',
-      'Educational partnership',
-      'Referral program',
-      'Agency directory',
-      'Roadmap',
-      'System status',
-      'Trust center',
-      'Sitemap',
-      'About ALO Labs',
-      'Our technology',
-      'Newsroom',
-      'Career',
-      'Blog',
-      'Student discount',
-      'Sustainability',
-      'Principles',
+      { label: 'Pricing', href: '/pricing' },
+      { label: 'Reviews', href: '/#testimonials' },
+      { label: 'Affiliate program', href: '/support' },
+      { label: 'Agency directory', href: '/support' },
+      { label: 'Roadmap', href: '/blog' },
+      { label: 'System status', href: '/support' },
+      { label: 'Trust center', href: '/privacy' },
+      { label: 'About ALO Labs', href: '/about' },
+      { label: 'Our technology', href: '/hosting' },
+      { label: 'Blog', href: '/blog' },
+      { label: 'Contact us', href: '/support' },
     ],
   },
   {
     title: 'Support',
     links: [
-      'Tutorials',
-      'Knowledge Base',
-      'ALO Academy',
-      'Contact us',
-      'Report abuse',
+      { label: 'Tutorials', href: '/support' },
+      { label: 'Knowledge base', href: '/support' },
+      { label: 'ALO Academy', href: '/support' },
+      { label: 'Contact us', href: '/support' },
+      { label: 'Report abuse', href: '/support' },
+      { label: 'Privacy policy', href: '/privacy' },
+      { label: 'Terms of service', href: '/terms' },
+      { label: 'Sitemap', href: '/sitemap.xml' },
     ],
   },
 ];
@@ -148,7 +147,7 @@ const bottomLinks = [
   { label: 'Cookie policy', href: '/cookies' },
   { label: 'Industries', href: '/industries' },
   { label: 'Services', href: '/services' },
-  { label: 'Sitemap', href: '/sitemap' },
+  { label: 'Sitemap', href: '/sitemap.xml' },
 ];
 
 export default function Footer() {
@@ -171,12 +170,12 @@ export default function Footer() {
               </h3>
               <ul className="space-y-2">
                 {col.links.map((link) => (
-                  <li key={link}>
+                  <li key={`${col.title}-${link.label}`}>
                     <a
-                      href="/"
+                      href={link.href}
                       className="text-sm text-[#9CA3AF] transition-colors duration-150 hover:text-white"
                     >
-                      {link}
+                      {link.label}
                     </a>
                   </li>
                 ))}

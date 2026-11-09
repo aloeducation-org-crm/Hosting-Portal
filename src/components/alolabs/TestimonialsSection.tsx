@@ -100,7 +100,7 @@ function StarRating({ rating }: { rating: number }) {
 
 export default function TestimonialsSection() {
   return (
-    <section className="w-full bg-white py-16 md:py-24">
+    <section id="testimonials" className="w-full scroll-mt-24 bg-white py-16 md:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         {/* Heading */}
         <div className="mb-10 text-center md:mb-14">

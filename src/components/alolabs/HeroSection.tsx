@@ -1,182 +1,190 @@
-'use client';
+"use client";
 
-import { useState, useRef, type FormEvent } from 'react';
-import { Search, ArrowRight, Shield, Check, X, Loader2 } from 'lucide-react';
+import {
+  ArrowRight,
+  Check,
+  Globe2,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
+import DomainSearch from "@/components/marketing/DomainSearch";
+import { formatUsd, TLD_PRICES } from "@/lib/marketing/hosting-catalog";
 
-interface DomainResult {
-  name: string;
-  available: boolean;
-  price: string;
-  tld: string;
-}
+const tldChips = ["\u002Ecom", "\u002Enet", "\u002Eorg", "\u002Eio", "\u002Edev", "\u002Estore"]
+  .map((tld) => TLD_PRICES.find((entry) => entry.tld === tld))
+  .filter((entry): entry is (typeof TLD_PRICES)[number] => Boolean(entry));
+
+const trustPoints = [
+  "Free SSL on every plan",
+  "Free domain for 1 year",
+  "30-day money-back guarantee",
+  "24/7 engineer support",
+];
 
 export default function HeroSection() {
-  const [domainQuery, setDomainQuery] = useState('');
-  const [results, setResults] = useState<DomainResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [showResults, setShowResults] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const resultsRef = useRef<HTMLDivElement>(null);
-
-  const handleSearch = async (e?: FormEvent) => {
-    if (e) e.preventDefault();
-    const q = domainQuery.trim();
-    if (!q) return;
-
-    setIsSearching(true);
-    setShowResults(true);
-
-    try {
-      const res = await fetch('/api/domains/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
-      });
-
-      if (!res.ok) throw new Error('Live registrar search is not configured. Availability cannot be confirmed.');
-      const data = await res.json();
-      setResults(Array.isArray(data.domains) ? data.domains : []);
-      setSearchError(data.domains?.length ? null : 'No registrar results were returned.');
-    } catch (error) {
-      setResults([]);
-      setSearchError(error instanceof Error ? error.message : 'Domain search failed.');
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
   return (
-    <section className="alo-hero-gradient relative overflow-hidden pb-12 pt-6 md:pb-16 md:pt-8">
-      {/* Decorative purple orb - desktop only */}
+    <section className="relative overflow-hidden bg-gradient-to-b from-[#FFF7ED] via-[#FFFBF7] to-white">
+      {/* Decorative background */}
       <div
-        className="pointer-events-none absolute -right-20 top-8 z-0 hidden h-[500px] w-[500px] rounded-full opacity-15 lg:block"
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-[0.35]"
         style={{
-          background: 'radial-gradient(circle at 40% 40%, #0A5CFF 0%, #E8501A 40%, #3B82F6 70%, transparent 100%)',
-          filter: 'blur(40px)',
+          backgroundImage:
+            "linear-gradient(to right, rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.18) 1px, transparent 1px)",
+          backgroundSize: "56px 56px",
+          maskImage: "radial-gradient(ellipse at top, #000 20%, transparent 70%)",
+          WebkitMaskImage: "radial-gradient(ellipse at top, #000 20%, transparent 70%)",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -right-24 top-0 hidden size-[520px] rounded-full opacity-25 blur-3xl lg:block"
+        style={{
+          background: "radial-gradient(circle at 40% 40%, #0A5CFF 0%, #E8501A 45%, transparent 75%)",
         }}
       />
 
-      <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        {/* Domain Search Bar */}
-        <div className="mx-auto mb-10 max-w-2xl md:mb-14" ref={resultsRef}>
-          <form onSubmit={handleSearch} className="relative">
-            <div className="alo-search-bar flex items-center overflow-hidden rounded-full bg-white shadow-sm">
-              <input
-                ref={inputRef}
-                type="text"
-                value={domainQuery}
-                onChange={(e) => setDomainQuery(e.target.value)}
-                onFocus={() => results.length > 0 && setShowResults(true)}
-                placeholder="Type the domain you want"
-                className="flex-1 bg-transparent px-5 py-3.5 text-sm text-alo-text placeholder:text-alo-text-muted/60 focus:outline-none md:px-6 md:py-4 md:text-base"
-              />
-              <button
-                type="submit"
-                disabled={isSearching}
-                className="flex shrink-0 items-center gap-2 rounded-full bg-alo-orange px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-alo-orange-dark disabled:opacity-60 md:px-7 md:py-3 md:text-base"
-              >
-                {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4 md:h-5 md:w-5" />}
-                <span>{isSearching ? 'Searching...' : 'Search'}</span>
-              </button>
-            </div>
-          </form>
+      <div className="relative mx-auto max-w-7xl px-4 pb-14 pt-10 sm:px-6 lg:px-8 lg:pb-20 lg:pt-14">
+        <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+          {/* Copy + search */}
+          <div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#E8501A] shadow-sm ring-1 ring-[#E8501A]/15">
+              <Sparkles className="size-3" />
+              Summer sale · up to 75% off your first term
+            </span>
 
-          {/* Domain Results Dropdown */}
-          {showResults && searchError && <p role="status" className="mt-2 rounded-xl bg-white p-4 text-sm text-red-700">{searchError}</p>}
-          {showResults && results.length > 0 && (
-            <div className="mt-2 rounded-2xl bg-white shadow-xl border border-gray-100 overflow-hidden max-h-80 overflow-y-auto">
-              {results.slice(0, 6).map((domain) => (
-                <div
-                  key={domain.name}
-                  className="flex items-center justify-between px-5 py-3 hover:bg-[#FFF7ED] transition-colors border-b border-gray-50 last:border-0"
+            <h1 className="mt-5 text-4xl font-extrabold leading-[1.05] tracking-tight text-[#1E293B] sm:text-5xl lg:text-[3.6rem]">
+              Hosting that gets out of
+              <br className="hidden sm:block" /> the way of your <span className="text-[#E8501A]">launch</span>
+            </h1>
+
+            <p className="mt-5 max-w-xl text-sm leading-relaxed text-[#475569] sm:text-lg">
+              Web hosting, VPS, domains, business email and CRM hosting from one account — with the
+              renewal price printed on every plan. Free SSL, free migration and a real engineer on chat
+              at 2am.
+            </p>
+
+            <div className="mt-7 max-w-xl">
+              <DomainSearch />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                From
+              </span>
+              {tldChips.map((chip) => (
+                <a
+                  key={chip.tld}
+                  href="/domains"
+                  className="inline-flex items-baseline gap-1 rounded-full bg-white px-3 py-1 text-xs font-medium text-[#1E293B] ring-1 ring-slate-200 transition-colors hover:ring-[#E8501A]"
                 >
-                  <div className="flex items-center gap-3">
-                    {domain.available ? (
-                      <Check className="h-4 w-4 text-green-500 shrink-0" />
-                    ) : (
-                      <X className="h-4 w-4 text-red-400 shrink-0" />
-                    )}
-                    <span className="text-sm font-medium text-alo-text">{domain.name}</span>
-                    {!domain.available && (
-                      <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-medium">Taken</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {domain.available && (
-                      <>
-                        <span className="text-sm font-bold text-alo-text">{domain.price}/yr</span>
-                        <a
-                          href={`/dashboard/domains?domain=${encodeURIComponent(domain.name)}`}
-                          className="text-xs font-semibold text-white bg-[#E8501A] px-3 py-1 rounded-full hover:bg-[#C73D12] transition-colors"
-                        >
-                          Register Domain
-                        </a>
-                      </>
-                    )}
-                  </div>
-                </div>
+                  <span className="font-bold">{chip.tld}</span>
+                  <span className="text-slate-400">{formatUsd(chip.register)}/yr</span>
+                </a>
               ))}
             </div>
-          )}
 
-          <p className="mt-3 text-center text-xs text-alo-text-muted md:text-sm">
-            Free domain for 1 year included with{' '}
-            <a href="/pricing" className="font-medium text-alo-orange transition-colors hover:underline">
-              yearly plans
-            </a>
-          </p>
-        </div>
-
-        {/* Click outside to close results */}
-        {showResults && (
-          <div
-            className="fixed inset-0 z-[-1]"
-            onClick={() => setShowResults(false)}
-          />
-        )}
-
-        {/* Hero Content */}
-        <div className="mx-auto mb-10 max-w-3xl text-center md:mb-14">
-          <h1 className="mb-4 text-3xl font-extrabold leading-tight tracking-tight text-alo-text sm:text-4xl md:mb-5 md:text-5xl lg:text-[3.5rem]">
-            Your online success starts here
-          </h1>
-          <p className="mx-auto mb-8 max-w-xl text-sm leading-relaxed text-alo-text-muted md:mb-10 md:text-base lg:text-lg">
-            From launching a website to growing your business, ALO Labs&apos;s got you covered.
-          </p>
-          <a
-            href="/dashboard"
-            className="inline-block rounded-full bg-alo-orange px-8 py-3 text-base font-bold text-white shadow-lg shadow-alo-orange/25 transition-all hover:bg-alo-orange-dark hover:shadow-xl hover:shadow-alo-orange/30 md:px-10 md:py-3.5 md:text-lg"
-          >
-            Start now
-          </a>
-          <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-alo-text-muted/70 md:mt-5 md:text-sm">
-            <Shield className="h-3.5 w-3.5" />
-            <span>30-day money-back guarantee</span>
-          </p>
-        </div>
-
-        {/* Feature Cards */}
-        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2 md:gap-6">
-          <div className="group flex cursor-pointer items-start gap-4 rounded-2xl bg-white p-5 shadow-md transition-transform duration-300 hover:-translate-y-1 hover:shadow-lg md:gap-5 md:p-6">
-            <div className="flex-1">
-              <h3 className="mb-1.5 text-base font-bold text-alo-text md:mb-2 md:text-lg">Plans and prices</h3>
-              <p className="mb-3 text-xs leading-relaxed text-alo-text-muted md:mb-4 md:text-sm">Summer Sale: find the right plan and save up to 80%.</p>
-              <p className="text-sm font-bold text-alo-text md:text-base">From $2.99/month</p>
-              <a href="/pricing" className="sr-only">View pricing</a>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <a
+                href="/pricing"
+                className="inline-flex items-center gap-2 rounded-full bg-[#E8501A] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#C73D12]"
+              >
+                See plans and pricing
+                <ArrowRight className="size-4" />
+              </a>
+              <a
+                href="/hosting"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-[#1E293B] transition-colors hover:border-[#E8501A] hover:text-[#E8501A]"
+              >
+                Browse products
+              </a>
             </div>
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-alo-orange/10 text-alo-orange transition-colors group-hover:bg-alo-orange group-hover:text-white">
-              <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-0.5" />
-            </div>
+
+            <ul className="mt-7 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {trustPoints.map((point) => (
+                <li key={point} className="flex items-center gap-2 text-xs text-[#475569] sm:text-sm">
+                  <Check className="size-4 shrink-0 text-green-600" />
+                  {point}
+                </li>
+              ))}
+            </ul>
           </div>
 
-          <div className="group flex cursor-pointer items-start gap-4 rounded-2xl bg-white p-5 shadow-md transition-transform duration-300 hover:-translate-y-1 hover:shadow-lg md:gap-5 md:p-6">
-            <div className="flex-1">
-              <h3 className="mb-1.5 text-base font-bold text-alo-text md:mb-2 md:text-lg">Vibe code websites</h3>
-              <p className="mb-3 text-xs leading-relaxed text-alo-text-muted md:mb-4 md:text-sm">Describe what you want, and our AI builder creates it. No technical skills needed.</p>
-              <p className="text-sm font-bold text-alo-orange md:text-base">Try for free</p>
-              <p className="mt-1 text-xs text-alo-text-muted/60 md:text-sm">No credit card required</p>
-              <a href="/dashboard/websites/new" className="sr-only">Build a website</a>
+          {/* Dashboard preview */}
+          <div className="relative mx-auto w-full max-w-md lg:max-w-none">
+            <div className="absolute -inset-3 -z-10 rounded-[2rem] bg-gradient-to-br from-[#E8501A]/20 via-[#0A5CFF]/10 to-transparent blur-xl" />
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-900/10">
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="flex size-7 items-center justify-center rounded-lg bg-[#E8501A] text-white">
+                    <Globe2 className="size-4" />
+                  </span>
+                  <div>
+                    <p className="text-xs font-bold text-[#1E293B]">yourbrand.com</p>
+                    <p className="text-[10px] text-[#475569]">Premium plan · Singapore</p>
+                  </div>
+                </div>
+                <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                  <span className="size-1.5 rounded-full bg-green-500" />
+                  Live
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 p-4">
+                {[
+                  { label: "Uptime", value: "99.99%", icon: TrendingUp },
+                  { label: "Response", value: "184 ms", icon: Zap },
+                  { label: "SSL", value: "Active", icon: ShieldCheck },
+                ].map(({ label, value, icon: Icon }) => (
+                  <div key={label} className="rounded-xl border border-slate-100 bg-slate-50/60 p-2.5">
+                    <Icon className="size-3.5 text-[#E8501A]" />
+                    <p className="mt-1.5 text-[10px] uppercase tracking-wide text-slate-400">{label}</p>
+                    <p className="text-sm font-bold text-[#1E293B]">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="px-4 pb-4">
+                <div className="flex items-end justify-between">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    Requests · last 24h
+                  </p>
+                  <p className="text-[10px] font-semibold text-green-600">+18%</p>
+                </div>
+                <div className="mt-2 flex h-16 items-end gap-1" aria-hidden="true">
+                  {[38, 52, 44, 61, 55, 72, 66, 84, 71, 92, 80, 64, 74, 58].map((height, index) => (
+                    <div
+                      key={index}
+                      className="flex-1 rounded-t bg-gradient-to-t from-[#E8501A]/30 to-[#E8501A]"
+                      style={{ height: `${height}%` }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <ul className="divide-y divide-slate-100 border-t border-slate-100">
+                {[
+                  { icon: Mail, label: "Business email", value: "5 mailboxes" },
+                  { icon: ShieldCheck, label: "Backups", value: "Daily · verified" },
+                  { icon: Sparkles, label: "Next invoice", value: "$3.99 / mo" },
+                ].map(({ icon: Icon, label, value }) => (
+                  <li key={label} className="flex items-center justify-between px-4 py-2.5">
+                    <span className="flex items-center gap-2 text-xs text-[#475569]">
+                      <Icon className="size-3.5 text-slate-400" />
+                      {label}
+                    </span>
+                    <span className="text-xs font-semibold text-[#1E293B]">{value}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-2 text-[11px] text-[#475569]">
+              <ShieldCheck className="size-3.5 text-green-600" />
+              Live status from the same dashboard you get after checkout
             </div>
           </div>
         </div>

@@ -23,6 +23,8 @@ const STRICT_PUBLIC_PATHS = new Set([
   "/api/auth/mfa-challenge",
   "/api/contact",
   "/api/newsletter",
+  // Public storefront domain availability lookup (registry RDAP, no session needed).
+  "/api/marketing/domain-check",
 ]);
 let lastRateLimitCleanup = 0;
 
@@ -75,6 +77,7 @@ const PUBLIC_API_PATHS = [
   "/api/internal/sites/ssl-status",
   "/api/contact",
   "/api/newsletter",
+  "/api/marketing",
   // GitHub webhooks are authenticated by HMAC-SHA256 signature, not a session.
   "/api/github/webhook",
   // OAuth callback is CSRF-protected by the one-time state cookie.

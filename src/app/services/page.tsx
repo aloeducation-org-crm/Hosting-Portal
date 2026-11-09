@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Header from "@/components/alolabs/Header";
+import Footer from "@/components/alolabs/Footer";
 import { ArrowRight, Package, BadgeDollarSign, ListChecks } from "lucide-react";
 import { db } from "@/lib/db";
 import { listPublishedServices, normalizeDeliverables, normalizeStrings, SERVICE_CATEGORY_LABELS } from "@/lib/factory/catalog";
@@ -33,7 +35,9 @@ export default async function ServicesPage() {
   })).filter((g) => g.items.length > 0);
 
   return (
-    <main className="min-h-screen bg-white">
+    <div className="flex min-h-screen flex-col bg-white">
+      <Header />
+      <main className="flex-1 bg-white">
       {/* Hero */}
       <section className="border-b border-slate-100 bg-gradient-to-b from-slate-50 to-white">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:py-20">
@@ -154,6 +158,8 @@ export default async function ServicesPage() {
           </div>
         </div>
       </section>
-    </main>
+      </main>
+      <Footer />
+    </div>
   );
 }

@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Header from "@/components/alolabs/Header";
+import Footer from "@/components/alolabs/Footer";
 import Link from "next/link";
 import { ArrowRight, Layers } from "lucide-react";
 import { db } from "@/lib/db";
@@ -18,7 +20,9 @@ export default async function IndustriesDirectoryPage() {
   const industries = await listPublishedIndustries(db);
 
   return (
-    <main className="min-h-screen bg-white">
+    <div className="flex min-h-screen flex-col bg-white">
+      <Header />
+      <main className="flex-1 bg-white">
       {/* Hero */}
       <section className="border-b border-slate-100 bg-gradient-to-b from-slate-50 to-white">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:py-20">
@@ -107,6 +111,8 @@ export default async function IndustriesDirectoryPage() {
           </a>
         </div>
       </section>
-    </main>
+      </main>
+      <Footer />
+    </div>
   );
 }
