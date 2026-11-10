@@ -6,6 +6,7 @@ import GitHubProvider from "next-auth/providers/github";
 import { verifyPassword } from "@/lib/password";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import { secureSessionCookiesEnabled } from "@/lib/session-cookie";
 
 declare module "next-auth" {
   interface Session {
@@ -127,6 +128,9 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
     maxAge: 86400,
   },
+  // Keep AuthHandler's cookie convention identical to the custom login/signup
+  // routes and to getToken()'s NEXTAUTH_URL-based default in the edge gate.
+  useSecureCookies: secureSessionCookiesEnabled(),
   pages: {
     signIn: "/login",
     newUser: "/onboarding",

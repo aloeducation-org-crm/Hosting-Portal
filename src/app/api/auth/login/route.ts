@@ -5,6 +5,7 @@ import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { db } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 import { env } from "@/lib/env";
+import { sessionCookieName, sessionCookieOptions } from "@/lib/session-cookie";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -175,12 +176,7 @@ export async function POST(request: NextRequest) {
     };
 
     const response = NextResponse.json(apiSuccess(payload, "Login successful"));
-    response.cookies.set("next-auth.session-token", jwtToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 86400,
-    });
+    response.cookies.set(sessionCookieName(), jwtToken, sessionCookieOptions());
 
     return response;
   } catch (e) {

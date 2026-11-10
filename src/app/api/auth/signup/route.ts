@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { hashPassword } from "@/lib/password";
 import { sendEmail } from "@/lib/smtp";
 import { env } from "@/lib/env";
+import { sessionCookieName, sessionCookieOptions } from "@/lib/session-cookie";
 
 const signupSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -174,12 +175,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
 
-    response.cookies.set("next-auth.session-token", jwtToken, {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 86400,
-    });
+    response.cookies.set(sessionCookieName(), jwtToken, sessionCookieOptions());
 
     return response;
   } catch (e) {
