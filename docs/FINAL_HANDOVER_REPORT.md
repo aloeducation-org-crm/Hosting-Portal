@@ -19,7 +19,7 @@ All requested engineering, UI button wiring, Digital Marketing capabilities, Aut
 | **2. 360° Digital Marketing Command Center** | `src/lib/marketing/suite.ts`, `src/app/api/marketing/route.ts`, `src/components/marketing/DigitalMarketingHub.tsx`, `src/app/dashboard/marketing/page.tsx` + sidebar links in `DashboardShell.tsx` & `AppShell.tsx`. Covers Meta & Google Ads copy, 7-day social media calendars, technical SEO/OpenGraph/Schema.org JSON-LD/robots/sitemap, Email Broadcasts & Newsletter Audience, UTM Attribution Builder, and atomic Lead Capture → CRM Contact + Deal + Newsletter. | `PASS` (Vitest + Live HTTP `200`) |
 | **3. Autonomous Billing & Master Operator AI ("বিল এজেন্ট এআই")** | `src/app/api/ai/operator/route.ts`, `src/components/ai/OperatorConsole.tsx`, `src/app/(dashboard)/ai/operator/page.tsx`, seeded `alo-bill-ops-autopilot` & `alo-digital-marketing-director` in `src/lib/seed-agents.ts` (`17` total DB agents), and extended DAG nodes (`hosting.billingOverview`, `hosting.marketingOverview`) in `tools.ts`, `graph.ts`, `engine.ts`. Supports both NextAuth sessions and headless `Authorization: Bearer <API_KEY>` SHA-256 auth in বাংলা & English. | `PASS` (Vitest + Live HTTP `200`) |
 | **4. Open-Source AI Provider Extensibility** | Preserved existing `src/lib/ai/providers.ts` & `src/lib/ai/client.ts` architecture as-is (`resolveProviders({})` active default `['llm7']`, plus `ollama`, `localai`, `unorouter`, `okrouter`, `gateway`, `groq`, `openrouter`, `gemini`, `deepseek`, `together`). Added admin-only `POST /api/ai/providers` to register, live-probe (`/v1/models`), and remove self-hosted open-source endpoints (`ollama`, `localai`, `vllm`, `litellm`, `openwebui`, `gateway`) encrypted at rest with AES-256-GCM (`src/lib/encryption.ts`) and SSRF-hardened against cloud metadata IPs. | `PASS` (Vitest + Live HTTP `200`) |
-| **5. Zero-Terminal Auto-Deploy & `alo-server-lap` Spec** | `SERVER-SPEC.md` (repo root) + `docs/SERVER-SPEC.md`, `scripts/deploy-new-site.sh` (`bash -n` verified), `src/lib/deploy/server-spec.ts`, `/ai/auto-deploy`, and `db/custom.db` registration (`alo-server-lap` + reserved `ServerPort` `3051`). | `PASS` (`bash -n`, Vitest, Live HTTP `200`) |
+| **5. Zero-Terminal Auto-Deploy & `alo-server-lap` Spec** | `SERVER-SPEC.md` (repo root) + `SERVER-SPEC.md`, `scripts/deploy-new-site.sh` (`bash -n` verified), `src/lib/deploy/server-spec.ts`, `/ai/auto-deploy`, and `db/custom.db` registration (`alo-server-lap` + reserved `ServerPort` `3051`). | `PASS` (`bash -n`, Vitest, Live HTTP `200`) |
 
 ---
 
@@ -81,7 +81,7 @@ Open **Digital Marketing** (`/dashboard/marketing`) from the sidebar to access 5
 
 ## 4. Production Server Handover (`alo-server-lap` @ `103.231.239.79`)
 
-- **Root & Docs Spec**: `SERVER-SPEC.md` and `docs/SERVER-SPEC.md`
+- **Root & Docs Spec**: `SERVER-SPEC.md` and `SERVER-SPEC.md`
 - **Hardened CLI Deploy Script**: `scripts/deploy-new-site.sh`
 - **Protected Control Plane**: `hosting.alolabs.net` → PM2 `alo-hosting` → Port `3051` (hard-guarded by `assertTenantPortAllowed` in both `/api/ai/auto-deploy` and `/api/ai/operator` and inside `scripts/deploy-new-site.sh`).
 - **Tenant Port Range**: `3062..3999` (Reserved ports never assigned to tenant apps: `80, 443, 22, 3000, 3051, 5432, 6379, 7011, 8080`).
@@ -112,7 +112,7 @@ Open **Digital Marketing** (`/dashboard/marketing`) from the sidebar to access 5
 
 ## 6. Complete Documentation Index
 
-- `SERVER-SPEC.md` & `docs/SERVER-SPEC.md` — Share-ready `alo-server-lap` (`103.231.239.79`) specification, port registry, Nginx template, and Shareable Project Brief YAML
+- `SERVER-SPEC.md` & `SERVER-SPEC.md` — Share-ready `alo-server-lap` (`103.231.239.79`) specification, port registry, Nginx template, and Shareable Project Brief YAML
 - `scripts/deploy-new-site.sh` — Hardened zero-collision CLI deployment script (`bash -n` verified)
 - `docs/FINAL_HANDOVER_REPORT.md` — This final 100% project completion & operational handover guide
 - `docs/UNIFIED_PROJECT_BASELINE_AUDIT.md` — Phase One baseline audit

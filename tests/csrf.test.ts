@@ -30,7 +30,7 @@ import * as browserNames from "@/lib/security/csrf.browser";
 const TEST_JWT_SECRET = "j".repeat(64);
 const SESSION_COOKIE = "next-auth.session-token";
 
-let middleware: typeof import("@/middleware").middleware;
+let middleware: typeof import("@/proxy").proxy;
 
 // Set at module scope as well as in beforeAll: `src/lib/security/csrf.ts` reads
 // the secret on each call, but the isolated-database helper and the middleware
@@ -43,7 +43,7 @@ beforeAll(async () => {
   process.env.NEXTAUTH_SECRET = TEST_JWT_SECRET;
   process.env.JWT_SECRET = TEST_JWT_SECRET;
   process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
-  middleware = (await import("@/middleware")).middleware;
+  middleware = (await import("@/proxy")).proxy;
 });
 
 afterEach(() => {

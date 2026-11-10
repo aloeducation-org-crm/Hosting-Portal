@@ -103,13 +103,6 @@ function LoginContent() {
     }
   }
 
-  function fillDemoAccount(demoEmail: string, demoPass: string) {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setFieldErrors({});
-    setError("");
-  }
-
   return (
     <Card className="border-slate-200 shadow-xl shadow-slate-200/50">
       <CardHeader className="space-y-1 text-center pb-4">
@@ -248,37 +241,8 @@ function LoginContent() {
           </Button>
         </form>
 
-        {/* Quick Role Switcher for Demo / Testing */}
-        <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-3 space-y-2">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-            Quick Fill Role Credentials
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => fillDemoAccount("admin@alolabs.net", "admin123")}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-[#E8501A] hover:text-[#E8501A] transition-colors"
-            >
-              Admin
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                fillDemoAccount("reseller@alolabs.net", "reseller123")
-              }
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-[#E8501A] hover:text-[#E8501A] transition-colors"
-            >
-              Reseller
-            </button>
-            <button
-              type="button"
-              onClick={() => fillDemoAccount("client@alolabs.net", "client123")}
-              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:border-[#E8501A] hover:text-[#E8501A] transition-colors"
-            >
-              Client
-            </button>
-          </div>
-        </div>
+        {/* No demo credentials are shipped: production logins must use
+            operator-provisioned accounts only. */}
       </CardContent>
 
       <CardFooter className="flex flex-col gap-2 border-t border-slate-100 pt-4 text-center">

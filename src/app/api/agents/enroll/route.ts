@@ -16,7 +16,7 @@ const schema = z.object({
  *
  * Deliberately NOT the leftmost `x-forwarded-for` value: that header is
  * client-controlled, so a caller could rotate it and get a fresh bucket on every
- * request. `src/middleware.ts` documents the same rule — nginx/Caddy overwrite
+ * request. `src/proxy.ts` documents the same rule — nginx/Caddy overwrite
  * `x-real-ip` from the actual peer, so it is the only forwarding header trusted
  * for a limiting decision here.
  */

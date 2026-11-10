@@ -1,2 +1,2 @@
-import SiteDetailPage from "../page";
-export default SiteDetailPage;
+// The site detail page owns all tabs; keep each URL as a thin alias.
+export { default } from "../page";

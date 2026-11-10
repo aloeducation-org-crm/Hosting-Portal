@@ -54,7 +54,7 @@ sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net
 
 It writes `/etc/alo-hosting/panel.env` (0640 `root:alamin`) with secrets
 generated on the box, creates and schema-verifies `/var/lib/alo-hosting/alo.db`,
-rotates the published `admin123` password (printed once — save it), installs
+rotates the published `[redacted historical default]` password (printed once — save it), installs
 `alo-hosting-panel.service` with the absolute Node path it detected, installs
 `/etc/sudoers.d/alo-hosting-deploy` after `visudo -cf`, and installs
 `/usr/local/sbin/alo-init-db`. Add `--dry-run` first to see the plan.
@@ -148,7 +148,7 @@ sudo install -m 0755 scripts/init-production-db.sh /usr/local/sbin/alo-init-db
 
 The script creates `/var/lib/alo-hosting/alo.db` from the (now schema-correct)
 seed, verifies all 74 tables, **rotates the `admin@alolabs.net` password away
-from the published `admin123`**, disables the two demo accounts, and prints the
+from the published `[redacted historical default]`**, disables the two demo accounts, and prints the
 new credentials once. Put them in a password manager immediately.
 
 ### 1.5 Build and install the service
@@ -413,7 +413,7 @@ Also: `/etc/alo/secrets.env` was created `root:alamin 0600` — with group
   MTA.
 - **SSH on 22 is open to the internet** while `alo-server-kit` intends 2244 +
   Tailscale-only. You already reach the box over Tailscale (`100.94.234.101`).
-  Consider `alo-server-kit/stages/01-security.sh` or at minimum
+  Consider `deploy/server-kit/stages/01-security.sh` or at minimum
   `sudo ufw delete allow 22/tcp && sudo ufw allow from 100.64.0.0/10 to any port 22`.
   Do **not** run the kit's `close-ssh-22.sh` without a working Tailscale session
   open in a second terminal — the box has already dropped off Tailscale twice

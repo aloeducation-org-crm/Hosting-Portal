@@ -72,11 +72,12 @@ action_issue() {
     -d "$domain"
     --non-interactive
     --agree-tos
-    --register-unsafely-without-email
   )
 
   if [[ -n "$email" ]]; then
     certbot_args+=(--email "$email")
+  else
+    certbot_args+=(--register-unsafely-without-email)
   fi
 
   log_info "Requesting certificate for ${domain}..."

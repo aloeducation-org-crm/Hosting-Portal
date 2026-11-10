@@ -28,7 +28,10 @@ validate_record_type() {
 
 validate_name() {
   local n="$1"
-  if [[ ! "$n" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ || "$n" =~ ^\. ]]; then
+  if [[ "$n" == "@" ]]; then
+    return 0
+  fi
+  if [[ ! "$n" =~ ^[a-zA-Z0-9_][a-zA-Z0-9._-]*$ || "$n" == *".."* ]]; then
     echo '{"success":false,"error":"Invalid record name"}'
     exit 1
   fi
@@ -155,8 +158,13 @@ case "$COMMAND" in
     EXPECTED="${4:?Usage: verify <domain> <type> <name> <expected>}"
     validate_domain "$DOMAIN"
     validate_record_type "$TYPE"
+    validate_name "$NAME"
 
-    FQDN="${NAME}.${DOMAIN}"
+    if [[ "$NAME" == "@" ]]; then
+      FQDN="$DOMAIN"
+    else
+      FQDN="${NAME}.${DOMAIN}"
+    fi
     RESOLVED=$(dig +short "$TYPE" "$FQDN" 2>/dev/null | head -1 || echo "")
     MATCHES=false
     if [[ "$RESOLVED" == "$EXPECTED" ]]; then

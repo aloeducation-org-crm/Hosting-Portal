@@ -1,14 +1,14 @@
 # Ecosystem & Repository Integration Analysis (`aloeducation-org-crm/Hosting-Portal`)
 
 > **Date:** 2026-10-26  
-> **Scope:** Technical audit and product-fit assessment of all 52 repositories and platforms supplied for **ALO Labs Hosting Portal** (`hosting.alolabs.net`), **ALO Education CRM** (`aloeducation-org-crm`), and **ALO Server Kit** (`alo-server-kit/`).
+> **Scope:** Technical audit and product-fit assessment of all 52 repositories and platforms supplied for **ALO Labs Hosting Portal** (`hosting.alolabs.net`), **ALO Education CRM** (`aloeducation-org-crm`), and **ALO Server Kit** (`deploy/server-kit/`).
 
 ---
 
 ## Executive Summary
 
 1. **Mandatory Addition Completed — `zai-org/GLM-5` (`glm` provider):**
-   - Registered **`glm`** in `src/lib/ai/providers.ts` (`GLM_API_KEY` or `ZHIPU_API_KEY`, `GLM_BASE_URL`, `AI_MODEL_GLM`, `GLM_REASONING_EFFORT`), wired `reasoning_effort` (`low` | `high` | `max`) in `src/lib/ai/client.ts`, added **`GLM-5 Agentic Engineer`** (`glm5-engineer`) in `src/app/api/agents/seed/route.ts` and `src/lib/seed-agents.ts`, added `glm-5` / `glm-5.3-flash` routes to `alo-server-kit/configs/litellm/config.yaml.tpl`, and verified with unit tests (`tests/ai-extra-providers.test.ts`, `tests/ai-client.test.ts`).
+   - Registered **`glm`** in `src/lib/ai/providers.ts` (`GLM_API_KEY` or `ZHIPU_API_KEY`, `GLM_BASE_URL`, `AI_MODEL_GLM`, `GLM_REASONING_EFFORT`), wired `reasoning_effort` (`low` | `high` | `max`) in `src/lib/ai/client.ts`, added **`GLM-5 Agentic Engineer`** (`glm5-engineer`) in `src/app/api/agents/seed/route.ts` and `src/lib/seed-agents.ts`, added `glm-5` / `glm-5.3-flash` routes to `deploy/server-kit/configs/litellm/config.yaml.tpl`, and verified with unit tests (`tests/ai-extra-providers.test.ts`, `tests/ai-client.test.ts`).
 2. **Highest-ROI Next Additions from Your List:**
    - **Web Scraping for SEO & University Data:** `ioi-labs/molx` (lean 3–7 MB Go Firecrawl alternative, MIT) as an internal microservice for SEO audits, site migration previews, and university course/tuition scraping.
    - **Self-Hosted AI Phone & SIP Call Center for CRM:** `rasonyang/ai-native-callcenter` (Apache-2.0, Go + FreeSWITCH + realtime LLM voice + human SIP handoff) paired with `BelledonneCommunications/linphone-iphone` (as a standalone SIP softphone client only) and `CALLE-AI/awesome-phone-call-agents` safety patterns.
@@ -58,10 +58,10 @@ AI_PROVIDER_ORDER=glm,openrouter,llm7,groq,qwen
 | `https://github.com/zai-org/GLM-5.git` | Apache-2.0 (Open weights + MaaS API) | **INTEGRATED NOW (`glm`)** | Added to `src/lib/ai/providers.ts`, `src/lib/ai/client.ts`, `alo-server-kit` LiteLLM config, `.env.example`, and `glm5-engineer` agent seed. |
 | `https://openrouter.ai` | Commercial API Gateway | **ALREADY INTEGRATED (`openrouter`)** | Single key in `src/lib/ai/providers.ts` providing instant failover across 100+ upstream models (Claude, GPT, Gemini, GLM, Qwen, DeepSeek). |
 | `https://coder.qwen.ai` | DashScope API + CLI Agent | **ADAPTER INTEGRATED (`qwen`)** | `qwen` OpenAI-compatible provider is wired in `src/lib/ai/providers.ts` (`QWEN_API_KEY`, `QWEN_BASE_URL`); `qwen2.5:7b` is pre-configured in `alo-server-kit` Ollama. Use Qwen Coder CLI on developer machines, not inside the Next.js server process. |
-| `https://cline.bot` & `https://github.com/cline/cline.git` | Apache-2.0 (TS IDE/CLI/SDK Agent) | **CONFIGURED IN `alo-server-kit`** | Already wired in `alo-server-kit/stages/05-ai-tools.sh` and `configs/ai-tools/cline.settings.json` against local LiteLLM (`127.0.0.1:4000/v1`). Boosts ALO developer velocity; keep human approval enabled before running autonomous shell commands. |
+| `https://cline.bot` & `https://github.com/cline/cline.git` | Apache-2.0 (TS IDE/CLI/SDK Agent) | **CONFIGURED IN `alo-server-kit`** | Already wired in `deploy/server-kit/stages/05-ai-tools.sh` and `configs/ai-tools/cline.settings.json` against local LiteLLM (`127.0.0.1:4000/v1`). Boosts ALO developer velocity; keep human approval enabled before running autonomous shell commands. |
 | `https://github.com/xAerux/aerus-usage-hud.git` | MIT (JS Windows Desktop App) | **UI/UX REFERENCE** | Windows desktop HUD combining Codex, Claude Code, and local Ollama usage. Do not install on Linux servers, but use its unified multi-provider quota layout to enrich our portal's `token_usage` view (`src/lib/ai/usage.ts` / `AgentsView.tsx`). |
 | `https://github.com/Lin-jun-xiang/docGPT-langchain.git` | MIT (Python Streamlit RAG Demo) | **ARCHITECTURE CONCEPT** | Demo PDF/DOCX/CSV chat app. Do not deploy raw Streamlit to customers; instead, implement document chunking + retrieval natively in Next.js/Prisma so CRM counselors can query visa rules, university brochures, and hosting runbooks via `completeWithAI()`. |
-| `https://github.com/teremterem/claude-code-gpt-5-codex.git` | MIT (Python Local Proxy) | **DEV WORKSTATION ONLY** | Local LiteLLM bridge for running Claude Code CLI against OpenAI models. Useful for individual developers; server-side LiteLLM is already handled cleanly in `alo-server-kit/stages/04-ai-infra.sh`. |
+| `https://github.com/teremterem/claude-code-gpt-5-codex.git` | MIT (Python Local Proxy) | **DEV WORKSTATION ONLY** | Local LiteLLM bridge for running Claude Code CLI against OpenAI models. Useful for individual developers; server-side LiteLLM is already handled cleanly in `deploy/server-kit/stages/04-ai-infra.sh`. |
 | `https://github.com/ramon-victor/freegpt-webui.git` | GPL-3.0 (**Archived**) | **DO NOT USE** | Archived repo relying on brittle keyless scraping/proxies and copyleft GPL-3.0 license. Unsuitable for a commercial MIT hosting panel. |
 | `https://github.com/GetGoAPI/Free-GPT-Grok-Gemini-Claude-API.git` | MIT wrapper (`okrouter.com` reseller) | **DO NOT USE** | Routes prompts and credentials through an unverified third-party proxy/reseller with ToS and data-privacy risk. Use official `glm`, `openrouter`, `llm7`, `groq`, or `qwen` adapters instead. |
 

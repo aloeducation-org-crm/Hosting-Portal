@@ -167,21 +167,21 @@ describe("host helper scripts (alo-deploy-helper, alo-dns-helper, alo-ssl-helper
 
     // Create sandboxed copies of the three helpers pointing at tmpDir so we can
     // exercise real helper logic without root privileges.
-    const deploySrc = await fs.readFile(path.resolve("server-helpers/alo-deploy-helper"), "utf8");
+    const deploySrc = await fs.readFile(path.resolve("helpers/alo-deploy-helper"), "utf8");
     await fs.writeFile(
       path.join(binDir, "alo-deploy-helper"),
       deploySrc.replace('SITE_BASE="/srv/alo-sites"', `SITE_BASE="${sitesDir}"`),
       { mode: 0o755 },
     );
 
-    const dnsSrc = await fs.readFile(path.resolve("server-helpers/alo-dns-helper"), "utf8");
+    const dnsSrc = await fs.readFile(path.resolve("helpers/alo-dns-helper"), "utf8");
     await fs.writeFile(
       path.join(binDir, "alo-dns-helper"),
       dnsSrc.replace('ZONE_DIR="/etc/alo-dns/zones"', `ZONE_DIR="${zonesDir}"`),
       { mode: 0o755 },
     );
 
-    const sslSrc = await fs.readFile(path.resolve("server-helpers/alo-ssl-helper"), "utf8");
+    const sslSrc = await fs.readFile(path.resolve("helpers/alo-ssl-helper"), "utf8");
     await fs.writeFile(
       path.join(binDir, "alo-ssl-helper"),
       sslSrc.replace('CERT_BASE="/etc/letsencrypt/live"', `CERT_BASE="${path.join(tmpDir, "certs")}"`),
@@ -199,7 +199,7 @@ describe("host helper scripts (alo-deploy-helper, alo-dns-helper, alo-ssl-helper
   it("all three helper scripts pass bash syntax validation", () => {
     for (const helper of ["alo-deploy-helper", "alo-dns-helper", "alo-ssl-helper"]) {
       expect(() =>
-        execFileSync("bash", ["-n", path.resolve("server-helpers", helper)], { encoding: "utf8" }),
+        execFileSync("bash", ["-n", path.resolve("helpers", helper)], { encoding: "utf8" }),
       ).not.toThrow();
     }
   });

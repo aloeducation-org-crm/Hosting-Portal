@@ -43,10 +43,7 @@
     "examples",
     "scripts",
     "helpers",
-    "server-helpers",
-    "server-config",
     "deploy",
-    "mini-services",
-    "seed-platform.ts"
+    "docs"
   ]
 }

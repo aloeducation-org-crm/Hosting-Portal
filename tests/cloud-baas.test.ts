@@ -9,8 +9,9 @@ import { encode } from "next-auth/jwt";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createClient } from "@libsql/client";
 import { db } from "@/lib/db";
-import { middleware, isProtectedDashboardPath, config as middlewareConfig } from "@/middleware";
+import { proxy as middleware, isProtectedDashboardPath, config as middlewareConfig } from "@/proxy";
 import { BUILTIN_APPS, ensureBuiltinApps } from "@/lib/app-center";
 import {
   APPWRITE_REA_EVIDENCE_LEDGER,
@@ -297,6 +298,27 @@ describe("Additive migration 20261102120000_cloud_baas_projects & end-to-end Baa
   let orgOwnedByAId = "";
 
   beforeAll(async () => {
+    // The tracked fixture now includes the cloud tables (schema drift was
+    // resolved on 2026-11-09). This suite must still prove the graceful
+    // pre-migration 503 path, so recreate that state in this file's throwaway
+    // copy before exercising the additive migration end-to-end. Foreign keys
+    // are disabled on this separate connection: dropping child tables while the
+    // parent still exists would otherwise leave dangling FK actions in SQLite.
+    const scratch = createClient({ url: isolatedDbUrl });
+    await scratch.execute("PRAGMA foreign_keys = OFF");
+    for (const table of [
+      "cloud_project_functions",
+      "cloud_project_keys",
+      "cloud_project_members",
+      "cloud_project_platforms",
+      "cloud_project_quotas",
+      "cloud_project_webhooks",
+      "cloud_projects",
+    ]) {
+      await scratch.execute(`DROP TABLE IF EXISTS "${table}"`);
+    }
+    scratch.close();
+
     const adminRow = await db.user.findUnique({
       where: { email: "admin@alolabs.net" },
       select: { id: true, email: true, role: { select: { name: true } } },

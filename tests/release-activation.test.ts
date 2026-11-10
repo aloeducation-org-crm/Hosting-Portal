@@ -73,8 +73,8 @@ function makeRepo(): string {
   git("config", "commit.gpgsign", "false");
   fs.writeFileSync(path.join(dir, "package.json"), '{"name":"canonical-root"}\n');
   fs.writeFileSync(path.join(dir, "package-lock.json"), '{"lockfileVersion":3}\n');
-  // The real repository has a tracked alo-hosting-portal/ directory, so Git
-  // descends into it and reports a nested untracked clone by its full path.
+  // Some production hosts still have a leftover alo-hosting-portal/ directory,
+  // so Git descends into it and reports a nested untracked clone by full path.
   fs.mkdirSync(path.join(dir, "alo-hosting-portal"), { recursive: true });
   fs.writeFileSync(path.join(dir, "alo-hosting-portal", ".gitkeep"), "");
   git("add", "-A");

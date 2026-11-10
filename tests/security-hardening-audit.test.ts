@@ -119,8 +119,8 @@ describe("Security Hardening Audit — SSRF, Tenant Isolation, Redaction & Serve
     }
   });
 
-  it("verifies alo-server-kit shell hardening (0600 secrets, no hardcoded /home/z path, dev deps before build)", () => {
-    const kitRoot = path.resolve(process.cwd(), "alo-server-kit");
+  it("verifies deploy/server-kit shell hardening (0600 secrets, no hardcoded /home/z path, dev deps before build)", () => {
+    const kitRoot = path.resolve(process.cwd(), "deploy/server-kit");
     const stage04 = fs.readFileSync(path.join(kitRoot, "stages/04-ai-infra.sh"), "utf8");
     const stage05 = fs.readFileSync(path.join(kitRoot, "stages/05-ai-tools.sh"), "utf8");
     const stage06 = fs.readFileSync(path.join(kitRoot, "stages/06-ops.sh"), "utf8");

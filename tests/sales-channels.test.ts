@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SALES_CHANNELS, buildCampaignLink } from "@/lib/marketing/sales-channels";
-import { isProtectedDashboardPath } from "@/middleware";
+import { isProtectedDashboardPath } from "@/proxy";
 
 describe("sales channels", () => {
   it("protects the workspace and nested paths", () => {

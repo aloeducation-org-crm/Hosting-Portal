@@ -28,7 +28,7 @@ Walked `/home/user/Hosting-Portal` recursively via Python `os.walk` + `git ls-fi
 | Total workspace files (excluding `.git`, `node_modules`, `.next`) | **899** | `889` Git-tracked + `10` untracked working-tree files from verified self-hosted AI agent module |
 | Total workspace directories (excluding `.git`, `node_modules`, `.next`) | **461** | Across 15 top-level directories + repository root |
 | Hidden directories | **1** | `.github` |
-| Hidden files | **10** | `.dockerignore`, `.env.example`, `.gitignore`, `db/.gitkeep`, `alo-hosting-portal/.dockerignore`, `alo-hosting-portal/.env.example`, `alo-hosting-portal/db/.gitkeep`, `alo-hosting-portal/.gitignore`, `alo-hosting-portal/mini-services/.gitkeep`, `alo-server-kit/.gitignore` |
+| Hidden files | **10** | `.dockerignore`, `.env.example`, `.gitignore`, `db/.gitkeep`, `alo-hosting-portal/.dockerignore`, `alo-hosting-portal/.env.example`, `alo-hosting-portal/db/.gitkeep`, `alo-hosting-portal/.gitignore`, `alo-hosting-portal/mini-services/.gitkeep`, `deploy/server-kit/.gitignore` |
 | Empty (`0`-byte) files | **5** | `db/.gitkeep`, `scripts/create-zip.sh`, `alo-hosting-portal/db/.gitkeep`, `alo-hosting-portal/mini-services/.gitkeep`, `alo-hosting-portal/scripts/create-zip.sh` |
 
 ### 1.3 Top-Level Directory Breakdown
@@ -37,7 +37,7 @@ Walked `/home/user/Hosting-Portal` recursively via Python `os.walk` + `git ls-fi
 |---|---:|---|
 | `src/` | `379` | **Canonical** Next.js `16.4.3` App Router portal (`44` UI `page.tsx`, `169` API `route.ts`, `lib/`, `components/`, `middleware.ts`, `instrumentation.ts`) |
 | `alo-hosting-portal/` | `313` | **Legacy / Split-Brain Nested Copy** (`227` `src/` files, `55`-model Prisma schema, `8` divergent `src/` files, `9` legacy tests, `7` syntax-broken helpers) |
-| `alo-server-kit/` | `47` | **Canonical** 7-stage Ubuntu 22.04 server provisioning, LiteLLM/Ollama, backup/restore, and verification kit (`1` script contains hardcoded secrets — see `SEC-01`) |
+| `deploy/server-kit/` | `47` | **Canonical** 7-stage Ubuntu 22.04 server provisioning, LiteLLM/Ollama, backup/restore, and verification kit (`1` script contains hardcoded secrets — see `SEC-01`) |
 | `scripts/` | `40` | Operational, bootstrap, DB-init, deployment, verification, and legacy ZIP/PDF packaging scripts (`1` empty `create-zip.sh`) |
 | `helpers/` | `24` | **Canonical** hardened root-owned privileged bash helpers (`19` `alo-*-helper` + `provision-site.sh` + `ssl-lifecycle.sh` + installers + `sudoers-alo`) |
 | `(root)` | `23` | `package.json`, `package-lock.json`, `next.config.ts`, `tsconfig.json`, `vitest.config.ts`, `Dockerfile`, `Dockerfile.node20`, `docker-compose.yml`, `docker-compose.node20.yml`, `Caddyfile`, `.env.example`, docs |
@@ -86,14 +86,14 @@ Walked `/home/user/Hosting-Portal` recursively via Python `os.walk` + `git ls-fi
     - `UI-02`: `/privacy` linked from `src/components/alolabs/CookieBanner.tsx` -> `404` (no `src/app/privacy/page.tsx`).
     - `UI-03`: `/terms` linked from `src/components/alolabs/AuthModal.tsx` -> `404` (no `src/app/terms/page.tsx`).
 - **Authenticated Dashboard & Site Management (`36`)**: `/dashboard`, `/dashboard/{agents,agents/[slug],audit,billing,crm,domains,domains/[id],email,onboarding,plans,servers,settings,users,websites,websites/new,websites/[id]/edit}`, `/ai/{analytics,assistant,automations,builder,self-hosted}`, `/sites`, `/sites/new`, `/sites/[id]`, `/sites/[id]/{deployments,domains,env,logs,settings}`, `/deployments`, `/databases`, `/storage`, `/billing`, `/settings`, `/onboarding`.
-- **Admin Route Group (`4`)**: `/audit`, `/plans`, `/servers`, `/users` (guarded by `ADMIN_UI_PREFIXES` in `src/middleware.ts`).
+- **Admin Route Group (`4`)**: `/audit`, `/plans`, `/servers`, `/users` (guarded by `ADMIN_UI_PREFIXES` in `src/proxy.ts`).
 - **Missing Frontend-to-Backend API Contracts (`FAIL`)**:
   - `API-MISSING-01`: `src/components/platform/views/ApplicationsView.tsx:158` calls `GET /api/applications/${id}/logs` -> route missing (`404`).
   - `API-MISSING-02`: `src/app/dashboard/email/page.tsx:115` calls `DELETE /api/email/accounts/${id}` -> route missing (`404`).
   - `API-MISSING-03`: `src/components/platform/views/SSLView.tsx:246` calls `PUT /api/ssl/${cert.id}` -> route missing (`404`; only `PUT /api/ssl` with `domainId` existed).
 
 ### 3.2 Canonical Backend API Routes (`169` `route.ts` files)
-- **Middleware Gate**: `src/middleware.ts` enforces NextAuth JWT authentication on all `/api/*` paths except `9` `PUBLIC_API_PATHS` (`/api/auth`, `/api/health`, `/api/pricing`, `/api/deploy/webhook`, `/api/internal/sites/ssl-status`, `/api/contact`, `/api/newsletter`, `/api/github/webhook`, `/api/github/callback`).
+- **Middleware Gate**: `src/proxy.ts` enforces NextAuth JWT authentication on all `/api/*` paths except `9` `PUBLIC_API_PATHS` (`/api/auth`, `/api/health`, `/api/pricing`, `/api/deploy/webhook`, `/api/internal/sites/ssl-status`, `/api/contact`, `/api/newsletter`, `/api/github/webhook`, `/api/github/callback`).
 - **Handler-Level Auth**: `166/169` routes invoke explicit handler auth/signature verification (`requireSession`, `requireAdmin`, `requireSuperAdmin`, `requireRole`, `requirePermission`, `auth()`, HMAC-SHA256, or `timingSafeEqual` token); `3` read-only metadata routes (`/api`, `/api/ai/prompts`, `/api/domains/suggestions`) relied solely on middleware JWT.
 - **Stub / Placeholder / Non-Configured Handlers Audited**:
   - `/api/domains/search`: Explicitly returns `501 REGISTRAR_NOT_CONFIGURED` rather than fabricating availability (honest fail-closed behavior — `PASS`).
@@ -122,14 +122,14 @@ Walked `/home/user/Hosting-Portal` recursively via Python `os.walk` + `git ls-fi
 | `src/lib/env.ts` | Zod-validated runtime config + production unsafe-secret fail-closed check | `isUnsafeDefaultSecret` checks `REPLACE_WITH_OPENSSL_RAND_HEX_32` case-sensitively, missing lowercase `replace-with-*` placeholders in `deploy/env/alo-hosting-panel.env.example` (`CFG-01`). |
 | `.env.example` | Root operator template | Missing `JWT_SECRET`, which is mandatory in `src/lib/env.ts` when `NODE_ENV=production` (`CFG-02`). |
 | `deploy/env/alo-hosting-panel.env.example` | Systemd/Docker panel env template | Missing `APP_ENCRYPTION_KEY` and `INTERNAL_SECRET`, causing `src/lib/env.ts` to exit `1` in production if copied verbatim (`CFG-03`). |
-| `alo-server-kit/scripts/auto-env-fixer.js` | Legacy env generator | **CRITICAL (`SEC-01`)**: Contains hardcoded plaintext credentials (`PG_PASSWORD=[REDACTED]`, `MYSQL_PASSWORD=[REDACTED]`, `LITELLM_MASTER_KEY=[REDACTED]`, `CRON_SECRET=[REDACTED]`), writes to `alo-hosting-portal/.env` with default `0644` permissions, and emits a `postgresql://` `DATABASE_URL` incompatible with the SQLite Prisma schema. |
+| `deploy/server-kit/scripts/auto-env-fixer.js` | Legacy env generator | **CRITICAL (`SEC-01`)**: Contains hardcoded plaintext credentials (`PG_PASSWORD=[REDACTED]`, `MYSQL_PASSWORD=[REDACTED]`, `LITELLM_MASTER_KEY=[REDACTED]`, `CRON_SECRET=[REDACTED]`), writes to `alo-hosting-portal/.env` with default `0644` permissions, and emits a `postgresql://` `DATABASE_URL` incompatible with the SQLite Prisma schema. |
 
 ---
 
 ## 6. Security, RBAC, Tenant Isolation & Infrastructure Audit
 
 ### 6.1 Critical & High Findings
-1. **`SEC-01` (Critical — Hardcoded Secrets in Tracked Script)**: `alo-server-kit/scripts/auto-env-fixer.js` lines `98–124` embed plaintext database passwords, LiteLLM master key, and cron secret.
+1. **`SEC-01` (Critical — Hardcoded Secrets in Tracked Script)**: `deploy/server-kit/scripts/auto-env-fixer.js` lines `98–124` embed plaintext database passwords, LiteLLM master key, and cron secret.
 2. **`SEC-02` (Critical — Unauthenticated `exec()` RCE in Nested Tree)**: `alo-hosting-portal/src/app/api/automation/tool/route.ts` executes shell commands via `child_process.exec` without authentication; `alo-hosting-portal/src/app/api/automation/cron/route.ts` uses hardcoded fallback secret `[REDACTED]`.
 3. **`SEC-03` (Critical — Cross-Tenant IDOR Across Website, File, DNS, SSL, Log, Monitoring & Deployment Routes)**:
    In `prisma/seed.ts`, the `CLIENT` role holds `WEBSITE_READ`, `WEBSITE_UPDATE`, `WEBSITE_DEPLOY`, `WEBSITE_RESTART`, `SSL_MANAGE`, `BACKUP_CREATE`, `BACKUP_READ`, `BACKUP_RESTORE`, `FILE_MANAGE`, and `LOGS_READ`. Unlike `src/app/api/websites/[id]/route.ts` (which checks `website.ownerId !== user.id`), the following canonical routes omitted tenant ownership checks:
@@ -153,9 +153,9 @@ Walked `/home/user/Hosting-Portal` recursively via Python `os.walk` + `git ls-fi
    - `src/app/api/operations/worker/route.ts` accepts `?secret=` in URL query parameters (logged by proxies) and compares `INTERNAL_SECRET` with `===`; `deploy/webhook/route.ts` and `monitoring/collect/route.ts` also use `===`/`!==` instead of `timingSafeEqual` and accept default `INTERNAL_SECRET` in non-production.
    - `src/app/api/security/encrypt/route.ts` derives its AES-256-GCM key from `env.JWT_SECRET` instead of `env.APP_ENCRYPTION_KEY`.
 7. **`SEC-09` (Medium — Middleware Rate-Limit Gaps, Security Headers & `X-Powered-By`)**:
-   - `src/middleware.ts` exempts `/api/auth/*` (except `/api/auth/login`), `/api/contact`, and `/api/newsletter` from rate limiting; omits security headers on `/`, `/login`, `/register`, `/verify-email` and on middleware JSON error responses (`401`/`403`/`429`/`503`); omits `X-Frame-Options`; `next.config.ts` emits `X-Powered-By: Next.js`.
+   - `src/proxy.ts` exempts `/api/auth/*` (except `/api/auth/login`), `/api/contact`, and `/api/newsletter` from rate limiting; omits security headers on `/`, `/login`, `/register`, `/verify-email` and on middleware JSON error responses (`401`/`403`/`429`/`503`); omits `X-Frame-Options`; `next.config.ts` emits `X-Powered-By: Next.js`.
 8. **`SEC-10` (Medium — Shell Syntax Failures & Wildcard Sudoers)**:
-   - `9` shell scripts fail `bash -n` (`server-helpers/alo-domain-helper`, `install-scripts/configure-email.sh`, and `7` scripts in `alo-hosting-portal/server-helpers/`).
+   - `9` shell scripts fail `bash -n` (`server-helpers/alo-domain-helper`, `deploy/server-kit/scripts/configure-email.sh`, and `7` scripts in `alo-hosting-portal/server-helpers/`).
    - `server-config/sudo-policy` contains unsafe trailing-wildcard `systemctl * alo-site-*` rules.
 9. **`SEC-11` (Dependency Advisories — `npm audit`)**:
    - `7` advisories (`2 critical` in devDependency `vitest@3.2.7` / `tinypool`, `4 high` in `zod@4.3.6` and devDependency `prisma@6.19.3` / `@prisma/config` / `deepmerge-ts`, `1 moderate` in `@vitest/mocker`).
@@ -184,7 +184,7 @@ Walked `/home/user/Hosting-Portal` recursively via Python `os.walk` + `git ls-fi
 | Production secret fail-closed startup | `PORT=3499 npm run start` (default secrets) | **PASS** | Refused startup in production mode when `NEXTAUTH_SECRET`, `JWT_SECRET`, `APP_ENCRYPTION_KEY`, `INTERNAL_SECRET` used defaults |
 | Runtime HTTP health (`GET /api/health`) | `curl -i http://127.0.0.1:3499/api/health` | **FAIL** | Returned `HTTP 503` (`databaseStatus: "disconnected"`, `schemaStatus: "unavailable"`) due to `db/custom.db` schema drift + `apiSuccess` envelope bug |
 | Runtime HTTP home (`GET /`) & auth gate (`GET /api/websites`) | `curl -i http://127.0.0.1:3499/` & `/api/websites` | **PASS** (functional) / **FAIL** (headers) | `/` returned `200 OK` (`124,305` bytes), `/api/websites` returned `401 Unauthorized`, but both lacked security headers and `/` exposed `X-Powered-By: Next.js` |
-| Shell script syntax (`bash -n`) | `bash -n` across `107` shell scripts/helpers | **FAIL** | `98` `PASS`, `9` `FAIL` (`server-helpers/alo-domain-helper`, `install-scripts/configure-email.sh`, `7` in `alo-hosting-portal/server-helpers/`) |
+| Shell script syntax (`bash -n`) | `bash -n` across `107` shell scripts/helpers | **FAIL** | `98` `PASS`, `9` `FAIL` (`server-helpers/alo-domain-helper`, `deploy/server-kit/scripts/configure-email.sh`, `7` in `alo-hosting-portal/server-helpers/`) |
 | Dependency vulnerability scan | `npm audit --json` | **FAIL** | `7` vulnerabilities (`2` critical, `4` high, `1` moderate) |
 | Docker daemon build/run inside sandbox | `docker info` / `docker compose config` | **BLOCKED** | Docker daemon not running inside sandbox container; Dockerfiles & Compose manifests audited statically |
 | Live remote host (`hosting.alolabs.net`) SSH / PM2 / Nginx | Remote production host | **BLOCKED** | Sandbox network restricted to allowlisted package/GitHub hosts |

@@ -9,7 +9,7 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { isProtectedDashboardPath, config as middlewareConfig } from "@/middleware";
+import { isProtectedDashboardPath, config as middlewareConfig } from "@/proxy";
 
 describe("dashboard pages (monitoring, backups)", () => {
   it("both routes exist and render their components", () => {

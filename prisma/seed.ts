@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { UserRole } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
 import { createPrismaClient } from "../src/lib/db";
@@ -316,6 +317,12 @@ async function seedRoles() {
 async function seedUsers() {
   console.log("\n👤 Seeding default users (Admin, Reseller, Client)...");
 
+  // Credentials are NEVER hard-coded. Each seed run creates fresh random
+  // passwords; operators get the admin password from
+  // scripts/init-production-db.sh, which writes it to a root-only file.
+  const randomPassword = (envKey: string) =>
+    process.env[envKey] || randomBytes(24).toString("base64url");
+
   const defaultUsers: Array<{
     email: string;
     name: string;
@@ -326,21 +333,21 @@ async function seedUsers() {
     {
       email: "admin@alolabs.net",
       name: "ALO Super Admin",
-      password: "admin123",
+      password: randomPassword("SEED_ADMIN_PASSWORD"),
       roleName: "SUPER_ADMIN",
       companyName: "ALO Labs",
     },
     {
       email: "reseller@alolabs.net",
       name: "ALO Partner Reseller",
-      password: "reseller123",
+      password: randomPassword("SEED_RESELLER_PASSWORD"),
       roleName: "RESELLER",
       companyName: "ALO Partner Agency",
     },
     {
       email: "client@alolabs.net",
       name: "ALO Demo Client",
-      password: "client123",
+      password: randomPassword("SEED_CLIENT_PASSWORD"),
       roleName: "CLIENT",
       companyName: "Acme Cloud Apps",
     },
@@ -379,7 +386,7 @@ async function seedUsers() {
           emailVerified: new Date(),
         },
       });
-      console.log(`   ✅ User created: ${u.email} / ${u.password} (${u.roleName})`);
+      console.log(`   ✅ User created: ${u.email} (${u.roleName}) — random password, not logged`);
     }
   }
 }

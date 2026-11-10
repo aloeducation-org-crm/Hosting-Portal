@@ -17,7 +17,7 @@
  *     (a subdomain or a sibling application), and it cannot be reused as a
  *     session credential.
  *
- * RUNTIME CONSTRAINT: this module is imported by `src/middleware.ts`, which runs
+ * RUNTIME CONSTRAINT: this module is imported by `src/proxy.ts`, which runs
  * in the Edge runtime. `node:crypto` is not available there — an earlier
  * revision imported it and Turbopack reported "Ecmascript file had an error"
  * against the middleware bundle, which would have failed every request at

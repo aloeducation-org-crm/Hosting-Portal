@@ -36,7 +36,7 @@ import {
   isProtectedDashboardPath,
   isAdminPath,
   config as middlewareConfig,
-} from "@/middleware";
+} from "@/proxy";
 
 const TEST_JWT_SECRET = "dev-secret-change-in-production";
 process.env.NEXTAUTH_SECRET = TEST_JWT_SECRET;
@@ -556,7 +556,7 @@ describe("Routing guards", () => {
     const matchers = (middlewareConfig as { matcher: string[] }).matcher;
     expect(matchers).toContain("/dashboard/:path*");
 
-    const source = await fs.readFile(path.join(__dirname, "../src/middleware.ts"), "utf8");
+    const source = await fs.readFile(path.join(__dirname, "../src/proxy.ts"), "utf8");
     const adminApiBlock = source.slice(source.indexOf("ADMIN_API_PREFIXES"), source.indexOf("ADMIN_API_WRITE_PREFIXES"));
     expect(adminApiBlock).toContain('"/api/industries"');
     expect(adminApiBlock).toContain('"/api/services"');

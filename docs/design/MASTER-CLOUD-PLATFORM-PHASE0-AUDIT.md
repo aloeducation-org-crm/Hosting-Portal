@@ -13,7 +13,7 @@ Production Gate: **NO-GO / Manual-Only Release Hold remains active** (`.github/w
 
 ## 2. Reusable Subsystems (Extended Rather Than Duplicated)
 
-1. **Identity & RBAC:** `src/lib/auth.ts`, `src/lib/nextauth.ts`, `src/middleware.ts`, `src/lib/app-center.ts` (`User`, `Role`, `Organization`, `Team`, `Membership`). No second incompatible identity store is introduced.
+1. **Identity & RBAC:** `src/lib/auth.ts`, `src/lib/nextauth.ts`, `src/proxy.ts`, `src/lib/app-center.ts` (`User`, `Role`, `Organization`, `Team`, `Membership`). No second incompatible identity store is introduced.
 2. **Encryption & Redaction:** `src/lib/encryption.ts` (AES-256-GCM), `src/lib/secret-store.ts` (`sealSecretValue` / `openSecretValue` `enc:v1:`), `src/lib/deploy/redact.ts`, and `src/lib/cloud/crypto-auth.ts` (`alok_live_` / `alowh_` SHA-256 constant-time verification).
 3. **Durable Job Orchestrator:** `src/lib/orchestrator/{contracts,orchestrator,workers}.ts` (`operation_jobs` with idempotency keys, conditional `updateMany` claims, expiring leases, per-`lockKey` serialization, exponential retry backoff, `DEAD_LETTER`, and human `WAITING_APPROVAL` gates).
 4. **Host Agent & Allowlist:** `src/lib/agents/{agent,allowlist,http}.ts` and `agent/alo-agent.mjs` (`argv`-only execution, nonce replay protection).

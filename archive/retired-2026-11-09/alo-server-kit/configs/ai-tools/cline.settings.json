@@ -1,0 +1,12 @@
+{
+  "apiProvider": "openai",
+  "openAiBaseUrl": "http://127.0.0.1:4000/v1",
+  "openAiApiKey": "REPLACE_VIA_rotate-litellm-key.sh",
+  "openAiModelId": "qwen2.5:7b",
+  "openAiCustomModelInfo": {
+    "maxTokens": 32768,
+    "contextWindow": 32768,
+    "supportsImages": false,
+    "supportsComputerUse": false
+  }
+}

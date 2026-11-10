@@ -71,7 +71,7 @@ These are listed rather than implied to be covered:
    `vitest.include` is `tests/**`, `lint` is `eslint src/`). Its
    `prisma/schema.prisma` **differs** from the root schema and its `src` diverges
    in **245** places. Content not reviewed. See D-14.
-2. **`alo-server-kit/` (47 files)** — not reviewed beyond inventory.
+2. **`deploy/server-kit/` (47 files)** — not reviewed beyond inventory.
 3. **Behaviour of the 43 shell helpers** — parse-validated only. These execute on
    customer servers with elevated privileges; a behavioural audit is outstanding
    and is the largest remaining gap.

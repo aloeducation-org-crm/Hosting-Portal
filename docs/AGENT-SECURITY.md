@@ -39,13 +39,13 @@ host  → POST /api/agents/enroll              (unauthenticated by design: the t
 - The enrollment endpoint rate-limits per peer IP and is exempt from the session
   guard only because it has its own credential.
 - `/api/agents/enroll` is listed in `HMAC_AUTHENTICATED_API_PATHS` in
-  `src/middleware.ts`; without that, the session guard would 401 it.
+  `src/proxy.ts`; without that, the session guard would 401 it.
 
 **Trusted proxy.** The rate-limit bucket is keyed on `x-real-ip`, which
 nginx/Caddy overwrite from the actual peer — never on the leftmost
 `x-forwarded-for`, which a caller can rotate to get a fresh bucket per request.
 The forwarded chain is still recorded as diagnostic `lastSeenIp`, because that is
-evidence, not an authorization decision. `src/middleware.ts` documents the same
+evidence, not an authorization decision. `src/proxy.ts` documents the same
 rule; the two were inconsistent and the agent route now follows it.
 
 ---

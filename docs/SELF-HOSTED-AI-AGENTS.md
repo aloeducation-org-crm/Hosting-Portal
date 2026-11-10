@@ -181,7 +181,7 @@ Use the **Uninstall** action in `/ai/self-hosted`, or run `sudo /usr/local/sbin/
    - SSRF & IMDS guard (`src/lib/security/url-guard.ts`) blocks `169.254.0.0/16`, `100.100.100.200`, `metadata.google.internal`, `fd00:ec2::254`, and `fe80::/10` across all provider URLs and customer webhooks.
    - Built-in synchronous DAG workflow engine (`src/lib/ai/automation/`) capped at 40 nodes, 120s per step, and 12 AI calls per run, with strict `ownerId` tenant isolation (`createHostingToolsForActor`).
    - Zero-Terminal AI Studio (`/ai/assistant`, `src/lib/ai/deploy-assistant.ts`) with **11 pinned stack presets** (5 web stacks + 6 permissive self-hosted agent stacks) and honest HTTP readiness verification (`CONFIGURED_AWAITING_RELEASE` vs `LIVE_HEALTHY`).
-2. **Private Inference Plane (`alo-server-kit/stages/04-ai-infra.sh` or Dedicated GPU Node)**:
+2. **Private Inference Plane (`deploy/server-kit/stages/04-ai-infra.sh` or Dedicated GPU Node)**:
    - **LiteLLM Proxy (`1.106.4`)** bound to `127.0.0.1:4000` (and LAN/Tailscale-allowlisted `/ai/` behind Basic Auth), issuing virtual keys and routing to local **Ollama** (`127.0.0.1:11434`), **LocalAI** (`127.0.0.1:8080`), **vLLM/SGLang**, or encrypted cloud fallbacks (`GLM-5`, `Groq`).
 3. **High-Risk Execution / Browser Plane (Dedicated Isolated VMs Only)**:
    - Coding agents (**OpenHands**) and headless browser agents (**Browser Use**) MUST NEVER run on shared multi-tenant web/DB hosts or mount host `/var/run/docker.sock`. They require dedicated isolated VMs + Squid SSRF egress proxies.
@@ -263,6 +263,6 @@ NODE_ENV=production npm run build
 curl -H "Cookie: token=<ADMIN_JWT>" https://hosting.alolabs.net/api/ai/status?probe=1
 
 # 3. Verify alo-server-kit shell syntax & host hardening
-for f in alo-server-kit/*.sh alo-server-kit/lib/*.sh alo-server-kit/stages/*.sh; do bash -n "$f"; done
-sudo ./alo-server-kit/verify.sh
+for f in deploy/server-kit/*.sh deploy/server-kit/lib/*.sh deploy/server-kit/stages/*.sh; do bash -n "$f"; done
+sudo ./deploy/server-kit/verify.sh
 ```

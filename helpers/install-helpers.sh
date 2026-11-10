@@ -5,7 +5,7 @@ umask 077
 
 HELPER_SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 HELPER_DST_DIR="/usr/local/sbin"
-SUDOERS_SRC="${HELPER_SRC_DIR}/../server-config/alo-hosting-portal.sudoers"
+SUDOERS_SRC="${HELPER_SRC_DIR}/../deploy/sudoers/alo-hosting-portal"
 SUDOERS_DST="/etc/sudoers.d/alo-helpers"
 
 HELPERS=(

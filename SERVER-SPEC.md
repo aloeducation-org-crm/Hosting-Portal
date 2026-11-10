@@ -105,8 +105,8 @@ Deployment:
 
 ```bash
 mkdir -p ~/server-docs
-cp docs/SERVER-SPEC.md ~/SERVER-SPEC.md
-cp docs/SERVER-SPEC.md ~/server-docs/SERVER-SPEC.md
+cp SERVER-SPEC.md ~/SERVER-SPEC.md
+cp SERVER-SPEC.md ~/server-SERVER-SPEC.md
 cd ~/server-docs
 git init
 git add SERVER-SPEC.md

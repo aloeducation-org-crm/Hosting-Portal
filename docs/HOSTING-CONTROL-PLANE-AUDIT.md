@@ -33,7 +33,7 @@ with live verification explicitly reported as blocked, never simulated.
 | `docs/ROADMAP-STATUS.md` | Honest per-capability PASS/PARTIAL/BLOCKED table for the AI-deploy, monitoring, recovery, marketing and scaling surfaces; orchestrator/agent/topology stage results |
 | `docs/PRODUCTION-READINESS-REPORT.md` | Whole-gate evidence (lint/tsc/vitest/build), release-path blocker (GitHub admin setting), "NOT production-ready" recommendation |
 | `docs/HYBRID-INFRASTRUCTURE-PLAN.md` | Three-host plan, `dataState` honesty model (live/stale/unavailable/revoked), DB placement audit |
-| `docs/SERVER-SPEC.md`, `docs/AGENT-SECURITY.md` | Server specification and agent trust-boundary design |
+| `SERVER-SPEC.md`, `docs/AGENT-SECURITY.md` | Server specification and agent trust-boundary design |
 | `docs/DEPLOYMENT-AND-ROLLBACK.md`, `docs/GIT-AUTODEPLOY.md` | Release path, atomic symlink swap, rollback, CI/CD |
 | `docs/UNIFIED_PROJECT_FINAL_AUDIT.md` and siblings | Prior ecosystem/test-matrix audits |
 | `docs/PRODUCTION-DEPLOYMENT-AUDIT-2026-10-27.md`, `docs/RECOVERY-hosting.alolabs.net.md` | Production deployment + recovery evidence |

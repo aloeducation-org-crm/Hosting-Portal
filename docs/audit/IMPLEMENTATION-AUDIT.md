@@ -73,7 +73,7 @@ exercised · **BROKEN** · **MISSING** · **DEAD** · **BLOCKED** needs infrastr
 | HMAC request signing + nonce replay store | VERIFIED (unit) | `agent.ts`, `AgentNonce @@unique([agentId, nonce])` |
 | Single-use hashed enrolment token | VERIFIED (unit) | `AgentEnrollmentToken.tokenHash @unique` |
 | Command allowlist | VERIFIED (unit) | 31 commands, argv-only, per-command Zod, risk levels, sudo flags, scopes |
-| Bootstrap installer | PARTIAL | `alo-server-kit/`, `agent/alo-agent.mjs`; never run on a host `[BLOCKED]` |
+| Bootstrap installer | PARTIAL | `deploy/server-kit/`, `agent/alo-agent.mjs`; never run on a host `[BLOCKED]` |
 
 ### Infrastructure & monitoring
 

@@ -19,13 +19,17 @@ const nextConfig: NextConfig = {
   // MODULE_NOT_FOUND. Pinning it makes the output location deterministic no
   // matter which directory the build is invoked from.
   outputFileTracingRoot: appRoot,
+  // The immutable no-loss archive is never imported; keep it out of the
+  // standalone bundle so preserving history does not bloat production output.
+  outputFileTracingExcludes: {
+    "*": ["./archive/**"],
+  },
 
-  // Note: `src/lib/helpers.ts` composes helper paths at runtime, so Turbopack
-  // prints "Dynamic filesystem access causes tracing of the whole project" and
-  // copies the full checkout into .next/standalone (~174 MB, of which ~143 MB is
-  // traced node_modules). outputFileTracingExclude does not suppress that under
-  // Turbopack, so it is deliberately not set here — a setting that looks like it
-  // works is worse than none. The deploy workflow prunes old releases instead.
+  // Runtime-composed filesystem paths are annotated with /*turbopackIgnore: true*/
+  // at their call sites (helpers, deploy engine, storage, cloud foundation).
+  // That keeps Turbopack from tracing the whole checkout into .next/standalone.
+  // The production build is verified to emit zero tracing warnings; do not
+  // remove those annotations when editing the affected modules.
 
   // The public storefront (plans, prices, domain sales) is retired: the site now
   // showcases the projects we run. The pages are kept in the tree so they can be
@@ -56,6 +60,15 @@ const nextConfig: NextConfig = {
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
       { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
       { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
+      // Enforced directives that cannot break Next.js hydration: no base-tag
+      // hijacking, no cross-origin form posts, no clickjacking, no plugins.
+      { key: "Content-Security-Policy", value: "base-uri 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'" },
+      // A broader policy is rolled out in report-only mode so operators can see
+      // violations before enforcing script/style/connect restrictions.
+      {
+        key: "Content-Security-Policy-Report-Only",
+        value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: ws: wss:; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'",
+      },
     ];
     return [
       {

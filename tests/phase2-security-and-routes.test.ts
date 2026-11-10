@@ -13,7 +13,7 @@ import {
   verifyInternalSecretValue,
 } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { middleware } from "@/middleware";
+import { proxy as middleware } from "@/proxy";
 
 const TEST_JWT_SECRET = "dev-secret-change-in-production";
 

@@ -29,14 +29,15 @@ function handleErr(e: unknown): NextResponse {
 }
 
 function storageRoot(): string {
-  return path.resolve(process.env.STORAGE_BUCKET_BASE ?? path.join(process.cwd(), ".storage-buckets"));
+  // Operator-configured runtime path; keep it out of build-time file tracing.
+  return path.resolve(/*turbopackIgnore: true*/ process.env.STORAGE_BUCKET_BASE ?? path.join(process.cwd(), ".storage-buckets"));
 }
 
 function safeBucketPath(value: string | null | undefined): string | null {
   if (!value) return null;
   if (!path.isAbsolute(value) || value.includes("\0")) return null;
   const root = storageRoot();
-  const resolved = path.resolve(value);
+  const resolved = path.resolve(/*turbopackIgnore: true*/ value);
   return resolved === root || resolved.startsWith(root + path.sep) ? resolved : null;
 }
 

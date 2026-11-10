@@ -21,7 +21,7 @@ import {
   resetProviderHealth,
 } from "@/lib/ai/client";
 import { findUnsafeProductionSecrets, isUnsafeDefaultSecret } from "@/lib/env";
-import { resolveMiddlewareJwtSecret } from "@/middleware";
+import { resolveMiddlewareJwtSecret } from "@/proxy";
 import {
   normalizeSafePortMapping,
   redactContainerRecord,

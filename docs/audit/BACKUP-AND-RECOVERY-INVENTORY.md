@@ -52,7 +52,7 @@ inventory, `[BLOCKED]` for health — SMART data has not been read.
 
 | Requirement | Why | Current |
 |---|---|---|
-| Encrypted offsite repository (e.g. Restic) | R-3 | **missing** — `alo-server-kit/backup.sh` exists, no Restic integration in the app |
+| Encrypted offsite repository (e.g. Restic) | R-3 | **missing** — `deploy/server-kit/backup.sh` exists, no Restic integration in the app |
 | Restore rehearsal in a disposable environment | R-1 | **never done** |
 | Documented RPO/RTO | planning | not defined |
 | Backup of *configuration*, not only data | SSH, Tailscale, Caddy, PM2, env | unknown |
