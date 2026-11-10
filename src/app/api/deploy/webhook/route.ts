@@ -3,6 +3,10 @@ import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { db } from '@/lib/db';
 import { verifyInternalSecretValue } from '@/lib/auth';
 import { createAuditLog } from '@/lib/audit';
+import { handleGitHubWebhook } from '@/lib/deploy/webhook';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -12,7 +16,36 @@ function handleErr(e: unknown): NextResponse {
   return NextResponse.json(apiError('Internal server error'), { status: 500 });
 }
 
+/**
+ * Retired nested app health probe. Preserved here so existing external monitors
+ * aimed at /api/deploy/webhook keep working.
+ */
+export async function GET() {
+  return NextResponse.json({ success: true, message: 'deploy webhook alive' });
+}
+
 export async function POST(request: NextRequest) {
+  const githubEvent = request.headers.get('x-github-event');
+  const githubSignature = request.headers.get('x-hub-signature-256');
+
+  // Compatibility mode: the retired app accepted GitHub push, workflow_dispatch
+  // and ping events on this exact path with X-Hub-Signature-256. Delegate to the
+  // canonical HMAC/dedupe/queue implementation rather than duplicating it.
+  if (githubEvent || githubSignature) {
+    const raw = await request.text();
+    const result = await handleGitHubWebhook(raw, request.headers);
+    if (githubEvent === 'ping' && result.status === 200) {
+      return NextResponse.json(
+        { success: true, message: 'pong' },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+    return NextResponse.json(result.body, {
+      status: result.status,
+      headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
+    });
+  }
+
   try {
     // Webhook auth via constant-time header secret check (fails closed if secret is unset or weak)
     const configuredSecret = process.env.DEPLOY_WEBHOOK_SECRET ?? process.env.INTERNAL_SECRET;

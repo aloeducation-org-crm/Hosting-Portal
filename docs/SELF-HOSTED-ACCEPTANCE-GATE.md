@@ -163,6 +163,6 @@ Still required before GO:
 - `.github/workflows/ci-cd.yml` now requires an explicit approved `workflow_dispatch` on `main` with a bounded owner ticket before it uploads a deployable artifact, preflights the host or starts the mutating job. A normal merge no longer deploys unattended. This is an additional hold, not a replacement for required reviewers.
 - All 23 PRs are merged and there are no open PRs. The latest `main` CI run passed verification/build; its read-only preflight correctly stopped on two untracked local reference clones. The classifier now validates those exact clones by their own Git remote; all other local changes still fail closed.
 - All owner-supplied external AI references are added as review-only catalogue records. No external tool was installed, executed or enabled; the Wi-Fi credential attack reference is excluded.
-- Full local verification and PR checks are recorded in [`../MERGE-AND-RELEASE-STATUS-2026-11-02.md`](../MERGE-AND-RELEASE-STATUS-2026-11-02.md).
+- Full local verification and PR checks are recorded in [`MERGE-AND-RELEASE-STATUS-2026-11-02.md`](MERGE-AND-RELEASE-STATUS-2026-11-02.md).
 
 **Decision remains NO-GO.** Passing CI and merging code are not release approval. Staging/production lifecycle, rollback/restore, permissions, monitoring, security acceptance and explicit owner approval are still outstanding.

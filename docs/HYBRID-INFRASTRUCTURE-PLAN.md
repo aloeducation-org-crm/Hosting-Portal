@@ -198,7 +198,7 @@ Evidence: `tests/deploy-e2e.test.ts`, `tests/deploy-github-api.test.ts`, and the
 
 ### 3.5 Dashboard
 
-`/infrastructure` (admin-only, enforced in `src/middleware.ts`): topology, agents, replication, queue,
+`/infrastructure` (admin-only, enforced in `src/proxy.ts`): topology, agents, replication, queue,
 allowlist, workloads, backups and data state — one page, assembled only from observed data, with
 empty states that tell you which command to run instead of showing zeros.
 

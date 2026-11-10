@@ -276,8 +276,8 @@ describe("CI/CD workflow controls", () => {
   });
 
   it("validates every shell program in CI, not just the ones named *.sh", () => {
-    // 38 of the shell programs here are the extension-less helpers that agents
-    // execute on customer servers (helpers/alo-*, server-helpers/alo-*). A
+    // The extension-less privileged helpers (`helpers/alo-*`) and the Ubuntu
+    // provisioning stages (`deploy/server-kit/stages/*`) have no .sh suffix. A
     // `-name '*.sh'` filter checks none of them and still reports green, so the
     // gate would pass while the highest-privilege scripts go unvalidated.
     const verifyRuns = (workflow.jobs.verify.steps ?? [])
@@ -290,7 +290,7 @@ describe("CI/CD workflow controls", () => {
     // `-name '*.sh'` filter and would trip a naive whole-step match.
     const findLine = verifyRuns
       .split("\n")
-      .find((line) => line.includes("find scripts helpers server-helpers"));
+      .find((line) => line.includes("find scripts helpers deploy"));
     expect(findLine).toBeTruthy();
     expect(findLine).not.toContain("-name");
     expect(verifyRuns).toMatch(/head -n1 "\$file" \| grep -qE/);
@@ -309,7 +309,7 @@ describe("CI/CD workflow controls", () => {
              bash -n "$file" || exit 1
              count=$((count + 1))
            fi
-         done < <(find scripts helpers server-helpers install-scripts deploy agent -type f -print0 2>/dev/null)
+         done < <(find scripts helpers deploy agent -type f -print0 2>/dev/null)
          echo "$count"`,
         "shell-gate",
         REPO,
@@ -317,7 +317,7 @@ describe("CI/CD workflow controls", () => {
       { encoding: "utf8" },
     ).trim();
     expect(Number(found)).toBeGreaterThanOrEqual(40);
-  });
+  }, 60_000);
 
   it("gates the only mutating job behind the production environment and a global single flight", () => {
     expect(deployJob.environment).toBe("production");

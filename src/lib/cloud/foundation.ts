@@ -40,7 +40,9 @@ export function isCloudMemberRole(value: string): value is CloudMemberRole {
 export function cloudDataRoot(): string {
   const configured = process.env.CLOUD_DATA_DIR?.trim();
   const root = configured || path.join(process.cwd(), ".cloud-data");
-  return path.resolve(root);
+  // The runtime root is operator-supplied and must not make Turbopack trace the
+  // whole checkout into the standalone server output.
+  return path.resolve(/*turbopackIgnore: true*/ root);
 }
 
 export function safeCloudSegment(value: string, fallback = "resource"): string {

@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { db } from "@/lib/db";
-import { isProtectedDashboardPath, isAdminPath, config as middlewareConfig } from "@/middleware";
+import { isProtectedDashboardPath, isAdminPath, config as middlewareConfig } from "@/proxy";
 import {
   BUILTIN_APPS,
   APP_CATEGORIES,

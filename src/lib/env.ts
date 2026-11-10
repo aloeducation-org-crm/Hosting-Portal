@@ -93,6 +93,7 @@ const UNSAFE_SECRET_VALUES = new Set([
   "change-me-in-production",
   "change-me-internal-secret",
   "alo-internal-secret-change-me",
+  "alo-cron-secret",
   "alo-encryption-key-change-in-production-32b",
   "generate-with-openssl-rand-hex-32",
   "replace_with_openssl_rand_hex_32",

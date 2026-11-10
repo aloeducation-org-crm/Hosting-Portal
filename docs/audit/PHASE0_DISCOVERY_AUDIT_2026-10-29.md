@@ -148,7 +148,7 @@ not exercised) · **BROKEN** · **MISSING** · **DUPLICATE** · **DEAD** ·
 | Hostinger adapter (Server C) | **PARTIAL** | `lib/providers/hostinger.ts`, token auth against `developers.hostinger.com`; **no live API call made** — plan tier unknown |
 | cPanel adapter (Server D) | **PARTIAL** | `lib/providers/cpanel.ts`; **no live call** — credentials not available |
 | Provider verification tracking | **VERIFIED** | `lib/providers/registry.ts` records `VerifiedAt`; refuses to claim verification without it |
-| Bootstrap installer | **PARTIAL** | `alo-server-kit/` (setup/verify/status/backup/restore + stages), `agent/alo-agent.mjs`, `agent-bootstrap.test.ts`. **Not run on any host** |
+| Bootstrap installer | **PARTIAL** | `deploy/server-kit/` (setup/verify/status/backup/restore + stages), `agent/alo-agent.mjs`, `agent-bootstrap.test.ts`. **Not run on any host** |
 
 ### Phase 3 — Infrastructure management
 
@@ -188,7 +188,7 @@ not exercised) · **BROKEN** · **MISSING** · **DUPLICATE** · **DEAD** ·
 | Document vault (CRM) | **PARTIAL** | 8 endpoints + 80 conformance tests at `7cf8516`; **not deployed, no credential, pools unprovisioned** |
 | Backups | **PARTIAL** | `Backup`/`BackupManifest`/`RestoreJob`, `api/backups/**` |
 | Restore **testing** | **MISSING** | no restore has been performed anywhere; `restoreVerified` is correctly hard-`false` |
-| Restic / encrypted offsite | **MISSING** | `alo-server-kit/backup.sh` exists; no Restic integration in the app |
+| Restic / encrypted offsite | **MISSING** | `deploy/server-kit/backup.sh` exists; no Restic integration in the app |
 
 ### Phase 7 — High availability
 

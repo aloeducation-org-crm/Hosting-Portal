@@ -1,315 +1,186 @@
-# ALO Labs — Hosting Platform
+# ALO Labs — Hosting Portal
 
-A production web-hosting control panel: Next.js 16 App Router, React 19,
-TypeScript, Tailwind 4, shadcn/ui, Prisma, RBAC, MFA, AI agents, CRM, billing,
-monitoring, SSL lifecycle, site provisioning.
+One project, one application, one deployment path. Next.js 16 App Router, React 19,
+TypeScript, Tailwind 4, shadcn/ui, Prisma 6 (SQLite via libSQL), RBAC, MFA, AI
+agents, CRM, billing, monitoring, SSL lifecycle and site provisioning.
 
-## AI: provider chain + automation server
+> This repository used to contain three overlapping copies of the same product.
+> The duplicate legacy application, duplicate helper trees, duplicate Docker
+> files and duplicate installers were **consolidated in the 2026-11-09
+> unification**. Nothing was silently deleted: all 431 retired paths are
+> preserved verbatim in [`archive/retired-2026-11-09/`](archive/retired-2026-11-09/MANIFEST.md),
+> with a per-file map to the canonical replacement. Unique functionality was
+> merged into the active tree (including the two legacy automation API routes,
+> the file-fallback audit trail and the three drifted privileged helpers).
+> See [`AUDIT-REPORT.md`](AUDIT-REPORT.md) (baseline),
+> [`AUDIT-REPORT-FINAL.md`](AUDIT-REPORT-FINAL.md) (post-fix) and
+> [`docs/UNIFIED_PROJECT_MERGE_MAP.md`](docs/UNIFIED_PROJECT_MERGE_MAP.md).
 
-- **Providers** (`src/lib/ai/providers.ts`): an ordered, OpenAI-compatible chain
-  with failover, bounded retries, SSRF/redirect guards, capability bounds, and a
-  circuit breaker. A free anonymous backend (LLM7.io) works with no key;
-  UnoRouter/Groq/OpenAI/OpenRouter/Qwen/GLM and opt-in local LiteLLM/Ollama/LocalAI
-  are profiles you enable in `.env`. Configure with `AI_PROVIDER_ORDER`, then
-  verify live with `GET /api/ai/status?probe=1` — configuration alone is never
-  reported as health.
-- **Self-Hosted AI Deploy Assistant & Sizing** (`src/lib/ai/self-hosted-agents.ts`,
-  `src/lib/ai/hardware-sizing.ts`, `src/lib/ai/deploy-assistant.ts`): Zod-validated
-  catalog of pinned-tag container presets (`Langflow`, `Flowise`, `Ollama`,
-  `LocalAI`, `Qdrant`, `Open WebUI`), commercial/open-core license gates,
-  GPU/VRAM/KV-cache hardware estimator, and 13-use-case platform decision matrix.
-  UI at `/ai/self-hosted`, API at `/api/ai/deploy-assistant`.
-- **Automations** (`src/lib/ai/automation/`): validated DAGs that mix model calls
-  with tenant-isolated read-only hosting queries (`listSites`, `siteHealth`,
-  `sslExpiring`), executed server-side with per-step logs, dry-run and persisted
-  run history. UI at `/ai/automations`, API under `/api/ai/workflows`.
-- **No demo answers.** The old `agents/:slug/run` and `/api/ai/token` stubs that
-  emitted canned text or fake quotas are removed; without a reachable provider AI
-  routes return `503 AI_NOT_CONFIGURED`.
+## What is where
 
-Read [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md),
-[docs/SELF-HOSTED-AI-AGENTS.md](docs/SELF-HOSTED-AI-AGENTS.md), and
+```
+Hosting-Portal/                         ← THE APP (name: alo-hosting-panel)
+├── package.json / package-lock.json    single dependency set (Node >= 22, CI 22)
+├── next.config.ts                      output: "standalone", security headers, redirects
+├── src/                                576 files: app router, API, components, lib
+│   ├── app/(auth)/                     /login, /register, /verify-email
+│   ├── app/(dashboard)/                admin/dashboard route groups
+│   ├── app/api/                        246 route handlers
+│   └── proxy.ts                        auth, RBAC, CSRF and rate-limit edge gate
+├── prisma/                             schema.prisma (119 models), seed.ts, 15 migrations
+├── db/custom.db                        development fixture (119 tables, random credentials)
+├── public/                             3 static assets
+├── tests/                              61 Vitest suites + isolation harness
+├── helpers/                            19 root-owned privileged helpers + installer
+├── deploy/                             ALL deployment configuration
+│   ├── ubuntu-setup.sh                 single Ubuntu provisioning entrypoint
+│   ├── server-kit/                     8 staged Ubuntu provisioning scripts + configs
+│   ├── systemd/ sudoers/ nginx/        service units, policies, vhost
+│   ├── cloudflared/ env/               tunnel config, production env template
+│   └── README-hosting-engine.md        Docker/standalone notes
+├── scripts/                            deploy pipeline, DB, backup, doctor, verification
+│   └── legacy/compat.sh                 dispatcher for the 25 retired one-off scripts
+├── archive/retired-2026-11-09/         immutable verbatim snapshot of all 431 retired paths
+├── Dockerfile / docker-compose.yml     single container shape
+├── .github/workflows/ci-cd.yml         verify → build → preflight → approved deploy
+└── docs/                               design + historical audit records
+```
+
+**The active tree has no second `package.json`, no second Prisma schema, no
+second app tree.** `deploy/server-kit/demo-app/` is a deliberately tiny
+standalone Next.js example used by the server-kit provisioning rehearsal, not a
+copy of this portal. The `archive/` tree is a non-deployed historical snapshot,
+excluded from build, CI shell gates and `audit:repo` invariants.
+
+## Public site
+
+The public site is a projects showcase, not a shop. Edit
+`src/lib/marketing/projects.ts` to change `/`, `/projects`, project detail pages,
+footer links and the sitemap. The retired storefront (`/pricing`, `/hosting/*`,
+`/domains`, `/email`, `/ssl`) is kept in the tree but redirected in
+`next.config.ts`; its catalogue and `GET /api/marketing/domain-check` (real RDAP)
+remain available.
+
+## AI
+
+Providers (`src/lib/ai/providers.ts`) form an ordered OpenAI-compatible chain
+with failover, bounded retries, SSRF/redirect guards and a circuit breaker.
+`AI_PROVIDER_ORDER` selects profiles; verify live — configuration alone is never
+reported as health — with authenticated `GET /api/ai/status?probe=1`. Without a
+reachable provider, AI routes return `503 AI_NOT_CONFIGURED`; there are no demo
+answers or fake quotas. See [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION.md),
+[docs/SELF-HOSTED-AI-AGENTS.md](docs/SELF-HOSTED-AI-AGENTS.md) and
 [docs/AI-AUTOMATION.md](docs/AI-AUTOMATION.md).
-
----
-
-## Public site: the projects showcase
-
-The public site is **not a shop**. It lists the projects ALO Labs builds, hosts and
-runs, with live status, and gives the team a sign-in. There are no plans, prices or
-checkout anywhere in the public navigation.
-
-Edit **one file** to change it: `src/lib/marketing/projects.ts`.
-
-| Route | What it is |
-| --- | --- |
-| `/` | Showcase homepage: live projects, platform capabilities, how we run it |
-| `/projects` | Every project with status legend |
-| `/projects/[slug]` | Project detail: what it does, stack, status, action link |
-| `/industries`, `/services` | Existing solution and service catalogues |
-| `/login`, `/register` | Team sign-in and account creation (unchanged) |
-
-A project entry looks like this:
-
-```ts
-{
-  slug: "hosting-portal",
-  name: "ALO Hosting Portal",
-  tagline: "The platform our own sites, domains and mail run on.",
-  status: "live",              // live | beta | internal | archived
-  category: "Platform",
-  url: "https://…",            // omit for internal tools → "Team sign-in"
-  highlights: [...],           // what it does, no invented metrics
-  tags: [...],
-  since: 2024,
-}
-```
-
-Adding, renaming or reordering entries updates the homepage, `/projects`, each
-detail page, the footer links and the sitemap.
-
-### The retired storefront
-
-The hosting storefront (`/pricing`, `/hosting/*`, `/domains`, `/email`, `/ssl`) was
-built earlier and is **kept in the tree but redirected** in `next.config.ts`. To
-bring it back, delete those redirects; the catalogue, plan cards, domain search and
-`GET /api/marketing/domain-check` (registry RDAP, never a guessed availability) are
-all still wired up. `tests/hosting-catalog.test.ts` keeps that catalogue honest
-while it is dormant.
-
-## ⚠️ Read this first: which directory is the app?
-
-**The application is the repository root.** `package.json`, `next.config.ts`,
-`prisma/schema.prisma` and `src/` at the top level are the app that CI builds,
-tests and deploys.
-
-```
-Hosting-Portal/                  ← ✅ THE APP (name: alo-hosting-panel)
-├── package.json                 build / start / db:* scripts
-├── next.config.ts               output: "standalone"
-├── prisma/schema.prisma         74 models, provider = sqlite (libSQL adapter)
-├── prisma/seed.ts               roles, permissions, first users
-├── db/custom.db                 seeded SQLite database (see security note)
-├── src/                         323 files — app router, /login, /sites, /servers…
-├── helpers/                     19 privileged shell helpers → /usr/local/sbin
-├── deploy/                      systemd units, nginx + cloudflared templates, sudoers
-├── scripts/                     deploy, doctor, db bootstrap, backup, rollback
-├── .github/workflows/           ci-cd.yml (build) + deploy.yml (self-hosted)
-│
-├── alo-hosting-portal/          ← ❌ LEGACY SNAPSHOT — DO NOT DEPLOY
-└── alo-server-kit/              ← ❌ separate server-provisioning toolkit
-```
-
-`alo-hosting-portal/` is an older 218-file snapshot of the same product that was
-checked in as part of a delivery bundle. It has **55 Prisma models instead of
-74**, an older RBAC enum, **no `/login`, `/register` or `/admin` routes**, and its
-own lockfile. Deploying it produces a panel that builds and returns HTTP 200 on
-`/` but cannot be logged into — every `/dashboard` route 307-redirects to a
-`/login` that does not exist. It is kept only for reference and for
-`scripts/package-production.sh`.
-
-If you are about to `cd alo-hosting-portal`, stop. Run `bash scripts/server-doctor.sh`
-instead — it detects this mistake.
-
----
-
-## Database: SQLite (libSQL), not PostgreSQL
-
-`prisma/schema.prisma` declares `provider = "sqlite"` with
-`generator { engineType = "client" }`, `prisma/migrations/migration_lock.toml` is
-locked to `sqlite`, and `src/lib/db.ts` attaches `@prisma/adapter-libsql`
-whenever `DATABASE_URL` starts with `file:`.
-
-A Prisma client generated for `sqlite` **cannot** open a `postgresql://` URL.
-`.env.example` and `DEPLOY.md` previously advertised PostgreSQL 17; that is
-aspirational and does not match the schema. Moving to PostgreSQL means changing
-the provider, regenerating every migration and re-testing the 74 models — it is
-a project, not a `sed`.
-
-Two rules that follow from this:
-
-1. **Use an absolute database path.** `file:./db/custom.db` is resolved relative
-   to the *process working directory*, so it silently breaks when systemd, PM2 or
-   a CI runner starts the server from anywhere else.
-2. **Keep the live database outside the repository.** `db/custom.db` is tracked by
-   git, so any `git checkout` / `git reset --hard` / fresh clone overwrites it.
-   Production uses `/var/lib/alo-hosting/alo.db` (see below).
-
-### 🔴 The committed database contains a known super-admin password
-
-`db/custom.db` ships with three seeded users whose passwords are in
-`prisma/seed.ts` in plain text:
-
-| email | role | password |
-|---|---|---|
-| `admin@alolabs.net` | `SUPER_ADMIN` | `admin123` |
-| `reseller@alolabs.net` | `RESELLER` | `reseller123` |
-| `client@alolabs.net` | `CLIENT` | `client123` |
-
-Never expose that file as a production database. `scripts/init-production-db.sh`
-copies it to the live path **and** replaces the admin password with a random one
-in the same step.
-
----
 
 ## Local development
 
 ```bash
-npm ci                 # Node >= 20.9
-npm run db:generate    # prisma generate with engine downloads stubbed
-cp .env.example .env   # then edit secrets
-npm run dev            # http://localhost:3101
+npm ci                       # Node >= 22
+npm run db:generate          # Prisma client (engine downloads stubbed)
+cp .env.example .env         # then fill in secrets; see docs/UNIFIED_PROJECT_ENVIRONMENT_VARIABLES.md
+npm run dev                  # http://localhost:3101
 ```
 
-Login with the seeded super-admin above (development only).
+`db/custom.db` is a **development fixture**, not a production database. It has
+all 119 tables and three seeded users whose passwords are randomly generated at
+seed time and never printed. To create a development login you control:
+
+```bash
+SEED_ADMIN_PASSWORD='choose-a-local-password' npm run db:seed
+```
+
+The login page ships **no demo credentials**. Production credentials are created
+by `scripts/init-production-db.sh`, which writes the generated admin password to
+a root-only `0600` file (`ADMIN_CREDENTIAL_FILE`) and never prints it.
+
+## Database
+
+`prisma/schema.prisma` uses `provider = "sqlite"` with `engineType = "client"`;
+`src/lib/db.ts` attaches `@prisma/adapter-libsql` for `file:` URLs. A client
+generated for SQLite cannot open a `postgresql://` URL.
+
+1. **Use an absolute path.** `file:./db/custom.db` resolves from the process
+   working directory and breaks under systemd, PM2 or CI.
+2. **Keep the live DB outside the checkout.** Production uses
+   `/var/lib/alo-hosting/alo.db`.
+3. Migrations are applied additively by
+   `DATABASE_URL="file:/var/lib/alo-hosting/alo.db" node scripts/apply-deploy-schema.mjs`.
+   It refuses relative paths and requires explicit `--allow-rebuild --backup …`
+   for table-rebuild migrations.
 
 ## Build & run (production shape)
 
 ```bash
-npm run build                                   # → .next/standalone/server.js
+npm run build
 cp -r .next/static .next/standalone/.next/static
 cp -r public .next/standalone/public
 PORT=3051 HOSTNAME=127.0.0.1 node .next/standalone/server.js
 ```
 
-`output: "standalone"` and `next start` are mutually exclusive — Next prints
-`"next start" does not work with "output: standalone"` and the standalone server
-is the supported entrypoint. `npm start` already points at it.
+`output: "standalone"` and `next start` are mutually exclusive; `npm start`
+already points at the standalone server. Turbopack file-tracing is scoped so the
+standalone output does not include the whole checkout.
 
-## Git-connected automatic deployment
-
-`POST /api/github/webhook` receives signed GitHub push events and drives a real
-pipeline: exact-SHA checkout → framework detection → isolated build/test →
-immutable release → HTTP health **and** release-marker verification → automatic
-rollback on failure. The dashboard page is `/deployments` (nav: **Deployments**).
+## Verification
 
 ```bash
-DATABASE_URL="file:/var/lib/alo-hosting/alo.db" node scripts/apply-deploy-schema.mjs
-npx vitest run tests/deploy-e2e.test.ts
-node scripts/verify-deploy-http.mjs        # against a running panel
+npm run verify          # lint + typecheck + tests + production build
+npm run audit:repo      # 16 repository invariants (single tree, imports, env, DB parity…)
+npm run config:validate # production env/secret/DB preflight (read-only)
+npm audit               # dependency advisories
+bash scripts/server-doctor.sh
+node scripts/e2e-smoke.mjs http://127.0.0.1:3051   # needs PANEL_PASSWORD
 ```
 
-Setup, GitHub App/OAuth credentials, API map, security model and honest
-limitations: **[docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md)**. Roadmap
-status for all ten platform capabilities: [docs/ROADMAP-STATUS.md](docs/ROADMAP-STATUS.md).
+`npm test` runs 61 Vitest suites. Tests that touch the database use
+`tests/helpers/isolated-db.ts`, which copies the fixture to a temp directory, so
+the tracked database is never mutated by a test run.
 
-## Unified orchestration layer, server agents & hybrid infrastructure
+## Deployment
 
-Built on branch `arena/b2ec9268-hosting-portal`. **Implemented and unit-tested
-here; not yet deployed to any host** — no agent is enrolled, no replica exists,
-no failover or load test has been run. The `/infrastructure` dashboard renders
-that distinction instead of hiding it: every host carries a `dataState` of
-`live`, `stale`, `unavailable` (**"not measured"**, never a fabricated zero) or
-`revoked`.
+| Path | Purpose |
+| --- | --- |
+| `deploy/ubuntu-setup.sh` | **canonical** Ubuntu 22.04/24.04 provisioning (dry-run by default, `--apply` to change the host) |
+| `scripts/bootstrap-server.sh` | panel env, SQLite DB, systemd unit, deploy sudoers |
+| `helpers/install-helpers.sh` | root-owned allowlisted privileged helpers |
+| `.github/workflows/ci-cd.yml` | verified build artifact, read-only preflight, approval-gated production activation with rollback |
+| `Dockerfile` + `docker-compose.yml` | alternative container shape (loopback 8080, non-root, read-only rootfs) |
+| `deploy/nginx/hosting.alolabs.net.conf` | canonical TLS vhost behind Cloudflare Tunnel |
+| `Caddyfile` | development/single-site reverse proxy only |
+| `scripts/backup.sh`, `scripts/db-backup.mjs`, `scripts/restore.sh`, `scripts/rollback.sh` | backups, restore and release rollback |
+| `scripts/deploy-new-site.sh` | per-site provisioning |
+| `scripts/server-doctor.sh` | read-only host health report |
 
-- **Durable job orchestrator** (`src/lib/orchestrator/`): work is a database row,
-  not a promise. Idempotency keys, leases, per-project serialization, retries with
-  exponential backoff, dead-lettering that only a named human can requeue,
-  approval gates for PRIVILEGED/DESTRUCTIVE work, and an audit trail on every
-  transition. Ten specialized workers cover repo discovery, framework detection,
-  build/test, security analysis, release, infrastructure, database ops,
-  domain/TLS, monitoring/recovery and backup/restore. A worker must return
-  `ok` (verified), `unverified`, or `fail` — there is no way to report success
-  that was not observed.
-- **Secure server agent** (`agent/alo-agent.mjs` + `src/lib/agents/`): single-use
-  enrollment tokens (sha256 at rest, 15-minute TTL), HMAC-SHA256 request signing
-  with a ±5-minute replay window and nonce, a nine-command argv allowlist that the
-  agent **re-validates with its own compiled-in copy**, read-only capabilities by
-  default, human approval before any privileged task is claimable, egress
-  redaction of tokens/keys/passwords, and an SSRF guard that only permits
-  loopback and RFC1918 probes. No root shell, no exposed Docker socket, no SSH or
-  database port is reachable from the AI layer.
-- **Database & capacity audit** (`src/lib/infra/db-audit.ts`,
-  `scripts/audit-database.mjs`): turns *observed* facts into verdicts — engine
-  family, `log_bin`/GTID/`server_id`, replica lag, failover readiness, capacity
-  headroom and the placement plan for Hostinger Cloud / Office A / Office B. It
-  reports "not observed" rather than guessing, and it never prints a credential.
+Full runbook: [DEPLOY.md](DEPLOY.md) and
+[docs/DEPLOYMENT-AND-ROLLBACK.md](docs/DEPLOYMENT-AND-ROLLBACK.md).
+Git-connected auto-deploy: [docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md).
+Roadmap honesty: [docs/ROADMAP-STATUS.md](docs/ROADMAP-STATUS.md).
 
-```bash
-node scripts/audit-database.mjs --json           # read-only audit of this host
-npx tsx scripts/orchestrator-worker.ts           # claim & execute queued jobs
-npx vitest run tests/orchestrator.test.ts tests/server-agent.test.ts tests/db-audit.test.ts
-```
+## Security notes
 
-Plan, stage sequence, runbooks and the evidence required before any hardware
-purchase: **[docs/HYBRID-INFRASTRUCTURE-PLAN.md](docs/HYBRID-INFRASTRUCTURE-PLAN.md)**.
+- Production startup fails closed on missing/placeholder `NEXTAUTH_SECRET`,
+  `JWT_SECRET`, `APP_ENCRYPTION_KEY` and `INTERNAL_SECRET`.
+- `src/proxy.ts` enforces authentication, RBAC, CSRF (double-submit cookie),
+  strict auth/AI rate limits and security headers on error responses.
+- `next.config.ts` sets `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, HSTS, an enforced minimal CSP and a
+  report-only broader CSP.
+- Helpers run through `execFile` with exact allowlisted sudoers rules; no
+  `exec()`/`eval()` in canonical `src/`.
+- No credentials, live `.env` or production database are committed. Historical
+  published seed passwords are retained **only** inside
+  `scripts/init-production-db.sh` so legacy databases can be detected and
+  rotated.
 
-## Deploying
+## Honest status
 
-Canonical production path is systemd + nginx + Cloudflare Tunnel, with templates
-in `deploy/`. The one-time bootstrap below prepares the host; after that, deploys
-are driven by the dashboard's Git-connected deployment engine or the CI pipeline.
-Use `bash scripts/server-doctor.sh` for a read-only audit before changing a live
-server. Do not manually copy a legacy PM2/PostgreSQL recipe onto this SQLite build.
+Verified locally: install, lint, typecheck, tests, production build, 16-point
+repository audit, dependency audit, static import/link/env parity, Prisma/SQLite
+parity and a live standalone HTTP probe.
 
-After the one-time server bootstrap below, a push to `main` runs the single
-`.github/workflows/ci-cd.yml` pipeline: CI checks the repository root, builds a
-standalone artifact on GitHub-hosted runners, then activates that immutable
-release on the production self-hosted runner. It swaps the `current` symlink,
-restarts systemd, verifies database/schema health and `/login`, and restores the
-previous release automatically if verification fails. The obsolete SSH-based
-duplicate workflow has been removed; no GitHub SSH private-key secrets are
-needed.
-
-One-time server setup (run from the repository root on the production host):
-
-```bash
-npm ci
-sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net
-```
-
-Register the GitHub Actions runner on that same host with labels
-`self-hosted`, `linux`, and `production`, running as the same account that owns
-`~/alo-hosting` (normally `alamin`). The bootstrap installs the service, secrets,
-external SQLite database, and narrowly scoped sudoers policy. Then merge changes
-to `main`; CI deploys them without an SSH action or a manual `git pull`/PM2
-restart. Do not copy the commands from the legacy `alo-hosting-portal/` subtree.
-
-Full procedure, request path and troubleshooting: `DEPLOY.md` and
-`docs/RECOVERY-hosting.alolabs.net.md`.
-
-## Repository scripts
-
-| Script | Purpose |
-|---|---|
-| `scripts/server-doctor.sh` | Non-destructive audit of app → nginx → tunnel → DNS → cert → DB |
-| `scripts/init-production-db.sh` | One-time DB bootstrap outside the repo + admin password rotation |
-| `scripts/deploy-alo-portal.sh` | Full 7-phase bare-metal provisioning (`/opt/alo-hosting-portal`, Caddy) |
-| `scripts/healthcheck.sh` | Manual HTTP liveness probe |
-| `scripts/deploy-production.sh` | Atomic production release activation, health verification and rollback |
-| `scripts/backup.sh` / `scripts/restore.sh` / `scripts/rollback.sh` | Data and release rollback |
-| `scripts/orchestrator-worker.ts` | Claims and executes durable orchestrator jobs (leases, retries, approval gates) |
-| `scripts/audit-database.mjs` | Read-only database/replication/capacity audit of one host; never prints a credential |
-
-## CI
-
-`.github/workflows/ci-cd.yml` runs lint, typecheck and tests on every branch
-push and on PRs targeting `main` or `develop`, builds the canonical root app, and checks
-`.next/standalone/server.js`. `npm ci --include=dev` ensures type definitions are
-installed even if the runner has production-only npm settings. `NODE_ENV=production`
-is scoped to the build step only; it is not set during dependency installation.
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | Next.js 16, React 19, TypeScript, Tailwind 4, shadcn/ui, Framer Motion |
-| Backend | Next.js route handlers + server actions, Node.js 20 LTS |
-| Database | SQLite via libSQL driver adapter, Prisma 6.19 (`engineType = "client"`) |
-| Auth | NextAuth 4, JWT, RBAC (7 roles / 30 permissions), bcrypt, MFA (TOTP) |
-| Cache | Redis (ioredis, optional) |
-| Logging | Pino |
-| Edge | nginx + Let's Encrypt behind a Cloudflare Tunnel (or Caddy) |
-| Process | systemd unit (PM2 works but loses state across daemon restarts) |
-
-## Licence
-
-MIT.
-
-
-## Additional Architecture & Audit References
-
-- [`docs/ZERO-TERMINAL-AI-DEPLOY.md`](docs/ZERO-TERMINAL-AI-DEPLOY.md) — Zero-Terminal Stack Preset Blueprinting & Managed VPS Panel Parity
-- [`docs/SELF-HOSTED-AI-AGENTS.md`](docs/SELF-HOSTED-AI-AGENTS.md) — Revalidated 26-Platform Self-Hosted AI Agent Catalog, License Triage & VRAM Sizing
-- [`docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md`](docs/ECOSYSTEM-INTEGRATION-ANALYSIS.md) — Ecosystem & GLM-5 (`zai-org/GLM-5`) Integration Analysis
-- [`docs/HYBRID-INFRASTRUCTURE-PLAN.md`](docs/HYBRID-INFRASTRUCTURE-PLAN.md) — Hostinger Cloud + Office A + Office B: measured facts, stage sequence, failover/restore drills, hardware triggers
+**Not verifiable from a source checkout:** real Ubuntu provisioning, UFW,
+systemd/PM2 activation, nginx/Caddy runtime, Certbot issuance and renewal,
+Cloudflare Tunnel, DNS/registrar and mail delivery, Docker daemon builds, the
+self-hosted GitHub Actions runner and live external AI providers. Those are
+configuration-complete but **operationally unverified**; see the "Not verified"
+section of [AUDIT-REPORT-FINAL.md](AUDIT-REPORT-FINAL.md).

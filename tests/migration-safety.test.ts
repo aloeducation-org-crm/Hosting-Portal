@@ -141,7 +141,7 @@ afterAll(async () => {
 /**
  * Every case spawns a real child process (module load + libsql open ≈ 0.2 s),
  * so each test gets a longer budget than the default 5 s. Raising the global
- * timeout in vitest.config.ts would hide genuinely slow tests elsewhere.
+ * timeout in vitest.config.mts would hide genuinely slow tests elsewhere.
  */
 const T = 120_000;
 

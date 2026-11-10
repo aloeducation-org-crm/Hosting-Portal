@@ -1,406 +1,200 @@
-# ALO Labs — Production Deployment Guide
+# Deployment runbook — ALO Hosting Portal
 
-Complete guide to deploy ALO Labs Hosting Platform on Ubuntu 22.04 / 24.04 LTS.
+**Canonical application: the repository root.** There is exactly one
+`package.json`, one `prisma/schema.prisma` (SQLite, 119 models), one `src/`
+tree, one `helpers/` tree and one `deploy/` tree. The legacy snapshot,
+duplicate helper/config/installer trees and duplicate Docker files were removed
+on 2026-11-09; see [AUDIT-REPORT.md](AUDIT-REPORT.md).
 
-> ## ⚠️ Read before deploying
->
-> **The application is the repository ROOT.** `alo-hosting-portal/` is a legacy
-> snapshot (55 Prisma models, no `/login` route) — deploying it produces a panel
-> that returns 200 on `/` and cannot be logged into. See `README.md`.
->
-> **The database is SQLite via the libSQL adapter**, not PostgreSQL.
-> `prisma/schema.prisma` is `provider = "sqlite"` and
-> `prisma/migrations/migration_lock.toml` is locked to `sqlite`, so a
-> `postgresql://` URL cannot be opened by the generated client. The PostgreSQL
-> instructions further down this file are retained for the Caddy/`/opt` variant
-> of `scripts/deploy-alo-portal.sh` and require a provider migration first.
->
-> **The live database must be an absolute path outside the repository**
-> (`file:/var/lib/alo-hosting/alo.db`). A relative `file:` URL resolves against
-> the process working directory, and `db/custom.db` is tracked by git — so a
-> checkout replaces production data with the committed snapshot.
->
-> Current production (`hosting.alolabs.net` on `alo-server-lap`) uses nginx +
-> Let's Encrypt behind a Cloudflare Tunnel, systemd, and the self-hosted Actions
-> runner. Templates: `deploy/systemd/`, `deploy/nginx/`, `deploy/cloudflared/`,
-> `deploy/sudoers/`. Workflow: `.github/workflows/ci-cd.yml` (one CI/build/deploy pipeline).
-> Recovery runbook: **`docs/RECOVERY-hosting.alolabs.net.md`**.
-> Audit the whole chain at any time with `bash scripts/server-doctor.sh`.
->
-> **First-time server setup is one command.** The Deploy workflow refuses to swap
-> a release until `/etc/alo-hosting/panel.env`, the database, the systemd unit
-> and its sudoers entry exist. Create all four with:
->
-> ```bash
-> cd ~/projects/Hosting-Portal && git pull && npm ci
-> sudo bash scripts/bootstrap-server.sh --domain hosting.alolabs.net
-> ```
->
-> It generates the secrets on the box, verifies the schema, rotates the published
-> seed password and prints it once. Add `--dry-run` to preview. The manual
-> equivalent is runbook §1.2–§1.5.
+> This document describes configuration that exists in the repository. Running
+> it requires a real Ubuntu 22.04/24.04 host, DNS control, a certificate and an
+> authorized operator. **None of the host-level operations below have been
+> executed or verified inside the development sandbox.**
 
-## Architecture (current production)
+---
 
-```
-Internet
-    ↓
-Cloudflare edge (SSL mode: Full)
-    ↓
-Cloudflare Tunnel — cloudflared, ingress: https://127.0.0.1:443
-    ↓
-nginx 443 (Let's Encrypt, certbot.timer) ── 80 → 443 redirect
-    ↓
-127.0.0.1:3051  Next.js standalone (systemd: alo-hosting-panel)
-    ↓
-SQLite /var/lib/alo-hosting/alo.db  +  Redis 127.0.0.1:6379 (optional)
-```
+## 1. Choose a deployment shape
 
-The tunnel **must** terminate on 443. If its ingress points at
-`http://localhost:80`, nginx answers with the certbot 301 → `https://…`, the
-browser re-enters the same tunnel, and the loop returns HTTP 530 publicly while
-`curl http://127.0.0.1:3051` on the server looks perfectly healthy.
+| Shape | Entry point | Use when |
+| --- | --- | --- |
+| **Ubuntu host (canonical)** | `sudo bash deploy/ubuntu-setup.sh --domain hosting.alolabs.net --apply` | Production single host behind nginx + Cloudflare Tunnel |
+| Git-connected release | `.github/workflows/ci-cd.yml` (approved `workflow_dispatch` on `main`) | All subsequent production releases |
+| Container (alternative) | `docker compose up -d --build` | Local/staging isolated runtime |
 
-## Architecture (Caddy / `/opt` variant)
+`deploy/ubuntu-setup.sh` is dry-run by default. It chains, in order:
 
-```
-Internet
-    ↓
-Public IP (103.231.239.79)
-    ↓
-Caddy (Reverse Proxy + Auto SSL)
-    ↓
-127.0.0.1:$PORT  (default 3101)
-    ↓
-Next.js (Standalone)
-    ↓
-SQLite (libSQL adapter) + Redis 7
-```
+1. `deploy/server-kit/setup.sh` — 8 idempotent Ubuntu stages (preflight,
+   security/UFW/SSH, web app + Node + PM2, databases, AI infra, AI tools, ops,
+   file sync). Requires `deploy/server-kit/config.env` (copy `config.env.example`,
+   `chmod 0600`, replace every `CHANGE_ME` value; `lib/common.sh` refuses
+   placeholder LiteLLM keys).
+2. `scripts/bootstrap-server.sh --domain …` — `/etc/alo-hosting/panel.env`
+   (generated secrets), `/var/lib/alo-hosting/alo.db`, the
+   `alo-hosting-panel` systemd unit and `/etc/sudoers.d/alo-hosting-deploy`.
+3. `helpers/install-helpers.sh` — installs the 19 root-owned `alo-*-helper`
+   programs into `/usr/local/sbin` and the `alo-helpers` sudoers policy from
+   `deploy/sudoers/alo-hosting-portal`.
+4. `scripts/server-doctor.sh` — read-only verification of the result.
 
-Provisioned by `sudo bash scripts/deploy-alo-portal.sh` (7 phases, app user
-`alo-panel`, app dir `/opt/alo-hosting-portal`, 19 privileged helpers in
-`/usr/local/sbin`).
+Use `--skip-host-stages` to re-bootstrap only the panel on an already
+provisioned host. `--nginx` installs the TLS vhost (only after a certificate
+exists). Never run the installer on an existing production host without a
+maintenance window, a verified backup and a tested SSH session on the new port.
 
-## Server Requirements
+---
 
-- **OS**: Ubuntu 24.04 LTS
-- **CPU**: 2+ cores
-- **RAM**: 4GB+ (8GB recommended)
-- **Disk**: 50GB+ SSD
-- **Node.js**: 22 LTS
-- **PostgreSQL**: 17
-- **Redis**: 7 (optional, for caching)
-- **Domain**: Point your domain to the server IP
+## 2. Environment
 
-## Step 1: Server Setup
+Copy [.env.example](.env.example) (or
+[deploy/env/alo-hosting-panel.env.example](deploy/env/alo-hosting-panel.env.example))
+to `/etc/alo-hosting/panel.env`, protect it `root:alo-panel 0640`, and fill in:
+
+| Variable | Requirement |
+| --- | --- |
+| `DATABASE_URL` | absolute `file:/var/lib/alo-hosting/alo.db` |
+| `NEXTAUTH_URL`, `NEXT_PUBLIC_APP_URL` | public HTTPS origin |
+| `NEXTAUTH_SECRET`, `JWT_SECRET`, `APP_ENCRYPTION_KEY`, `INTERNAL_SECRET` | unique `openssl rand -hex 32` values; startup fails closed on placeholders |
+| `CSRF_SECRET`, `CRON_SECRET`, `DEPLOY_WEBHOOK_SECRET`, `CRM_INTEGRATION_SIGNING_KEY` | unique `openssl rand -hex 32` values |
+| `ALO_HELPER_DIR`, `ALO_SITES_DIR`, `ALO_BACKUP_DIR` | absolute host paths |
+| `CLOUD_DATA_DIR`, `STORAGE_BUCKET_BASE` | absolute writable paths (required for a read-only container rootfs) |
+
+`npm run config:validate` performs the read-only preflight. The full contract is
+in [docs/UNIFIED_PROJECT_ENVIRONMENT_VARIABLES.md](docs/UNIFIED_PROJECT_ENVIRONMENT_VARIABLES.md)
+and [docs/PRODUCTION-CONFIG-VALIDATION.md](docs/PRODUCTION-CONFIG-VALIDATION.md).
+
+**Database provider:** SQLite via `@prisma/adapter-libsql`. A PostgreSQL URL is
+not supported by this schema; switching providers is a migration project, not a
+configuration flag. Apply additive migrations with:
 
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install essential tools
-sudo apt install -y curl wget git build-essential ufw
-
-# Install Node.js 20 LTS
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Verify installations
-node --version  # v22.x
-npm --version   # 10.x
-
-# Install PostgreSQL 17
-sudo apt install -y postgresql-17 postgresql-client-17
-
-# Install Redis (optional)
-sudo apt install -y redis-server
+DATABASE_URL="file:/var/lib/alo-hosting/alo.db" node scripts/apply-deploy-schema.mjs --check
+DATABASE_URL="file:/var/lib/alo-hosting/alo.db" node scripts/apply-deploy-schema.mjs
 ```
 
-## Step 2: PostgreSQL Setup
+`scripts/init-production-db.sh` bootstraps a fresh DB and writes a generated
+super-admin password to `ADMIN_CREDENTIAL_FILE` (root-only `0600`). No default
+password exists anywhere in the application.
+
+---
+
+## 3. Build and run
 
 ```bash
-# Switch to postgres user
-sudo -u postgres psql
-
-# Create database and user
-CREATE USER alolabs WITH PASSWORD 'your_secure_password';
-CREATE DATABASE alolabs OWNER alolabs;
-GRANT ALL PRIVILEGES ON DATABASE alolabs TO alolabs;
-\q
-
-# Test connection
-psql -h localhost -U alolabs -d alolabs
-```
-
-## Step 3: Deploy Application
-
-```bash
-# Create application user
-sudo useradd -m -s /bin/bash aloedu
-sudo usermod -aG sudo aloedu
-
-# Create application directory
-sudo mkdir -p /opt/app
-sudo chown aloedu:aloedu /opt/app
-
-# Clone and install (as aloedu)
-sudo su - aloedu
-cd /opt/app
-
-# Clone your repository or copy project files
-git clone <your-repo-url> .
-# OR: scp -r ./project/* aloedu@server:/opt/app/
-
-# Install dependencies
 npm ci
-
-# Setup environment
-cp .env.example .env
-nano .env  # Edit with production values
-```
-
-Edit `.env` with production values:
-```
-NODE_ENV=production
-# The panel port is env-driven. 3101 is the default; use whatever your
-# Caddy upstream / firewall expect (e.g. 3051).
-PORT=3101
-HOSTNAME=127.0.0.1
-APP_NAME=ALO Labs
-APP_URL=https://hosting.alolabs.net
-DATABASE_URL=postgresql://alolabs:your_secure_password@localhost:5432/alolabs
-JWT_SECRET=<generate with: node -e "console.log(require('crypto').randomBytes(64).toString('hex'))">
-NEXTAUTH_SECRET=<generate same way>
-NEXTAUTH_URL=https://hosting.alolabs.net
-```
-
-## Step 4: Database Migration
-
-```bash
-cd /opt/app
-
-# Generate Prisma client
-npx prisma generate
-
-# Run migrations
-npx prisma migrate deploy
-
-# Seed initial data
-npx prisma db seed
-```
-
-## Step 5: Build Application
-
-```bash
+npm run db:generate
 npm run build
+cp -r .next/static .next/standalone/.next/static
+cp -r public .next/standalone/public
+PORT=3051 HOSTNAME=127.0.0.1 node .next/standalone/server.js
 ```
 
-## Step 6: Systemd Service
+`next.config.ts` uses `output: "standalone"`; `next start` is not supported.
+The systemd unit `deploy/systemd/alo-hosting-panel.service` launches the
+standalone server on loopback `3051` with `EnvironmentFile=/etc/alo-hosting/panel.env`.
+`scripts/resolve-start-entry.mjs` resolves the exact entrypoint used by the
+release pipeline; never publish a shell pipeline as a PM2 start command.
+
+---
+
+## 4. Reverse proxy, TLS and tunnel
+
+- Canonical production proxy: `deploy/nginx/hosting.alolabs.net.conf` (ACME
+  challenge on 80, 301 to 443, TLS vhost proxying to `127.0.0.1:3051`, 50 MB
+  body limit, WebSocket upgrade, security headers).
+- Certificates: `sudo certbot --nginx -d hosting.alolabs.net`; the config already
+  references `/etc/letsencrypt/live/hosting.alolabs.net/*`. Renewal is handled by
+  certbot's timer, with `/api/ssl/*` and `helpers/ssl-lifecycle.sh` for inventory
+  and application-level checks.
+- Cloudflare Tunnel: `deploy/cloudflared/config.yml` must terminate on
+  `https://127.0.0.1:443`; pointing it at port 80 creates a redirect loop.
+- `Caddyfile` is a development/single-site reverse proxy on port 81, not the
+  production shape.
+
+Validate on the host with `nginx -t`, `sudo visudo -cf /etc/sudoers.d/…` and
+`bash scripts/server-doctor.sh`.
+
+---
+
+## 5. Git-connected releases
+
+`POST /api/github/webhook` receives signed push events and drives exact-SHA
+checkout → framework detection → isolated build/test → immutable release →
+HTTP health and release-marker verification → automatic rollback on failure.
+The dashboard page is `/deployments`.
+
+Production activation is **not** automatic on a push to `main`: it requires an
+explicit approved `workflow_dispatch` with `release_approval=APPROVED` and a
+`release_ticket`. The workflow verifies the artifact digest, re-checks the head
+of `main` after acquiring the deploy slot, refuses stale/backwards releases
+unless an attributed rollback is authorized, and restores on failure.
 
 ```bash
-# Copy service file
-sudo cp scripts/alolabs.service /etc/systemd/system/
-
-# Enable and start
-sudo systemctl daemon-reload
-sudo systemctl enable alolabs
-sudo systemctl start alolabs
-
-# Check status
-sudo systemctl status alolabs
-
-# View logs
-sudo journalctl -u alolabs -f
+DATABASE_URL="file:/var/lib/alo-hosting/alo.db" node scripts/apply-deploy-schema.mjs
+npx vitest run tests/deploy-e2e.test.ts
+node scripts/verify-deploy-http.mjs        # against a running panel
 ```
 
-## Step 7: Caddy Reverse Proxy
+See [docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md) and
+[docs/DEPLOYMENT-AND-ROLLBACK.md](docs/DEPLOYMENT-AND-ROLLBACK.md).
+
+---
+
+## 6. Container shape (alternative)
 
 ```bash
-# Install Caddy
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
-
-# Configure Caddy
-sudo nano /etc/caddy/Caddyfile
+docker compose up -d --build
+curl -s http://127.0.0.1:8080/api/health
 ```
 
-Add to Caddyfile. `{$PORT:3101}` reads the PORT environment variable of the
-Caddy service, falling back to 3101 — so the port is defined in exactly one place:
-```
-hosting.alolabs.net {
-    reverse_proxy 127.0.0.1:{$PORT:3101}
-}
-```
+`Dockerfile` builds on Node 22 Alpine, runs as UID 1001 with a read-only rootfs,
+drops all capabilities, limits memory/PIDs and exposes a Node-based healthcheck.
+`docker-compose.yml` initialises the SQLite volume with `prisma db push` and
+`scripts/bootstrap-super-admin.ts` before starting the panel. No Docker daemon
+is available in the development sandbox, so this shape is **configuration-only,
+not runtime-verified** here.
 
-If Caddy runs without PORT in its environment, set it in the unit
-(`systemctl edit caddy` → `Environment=PORT=3101`).
+---
+
+## 7. Backups, monitoring, logging
+
+| Concern | Implementation |
+| --- | --- |
+| DB backup / restore | `scripts/db-backup.mjs`, `scripts/db-restore.mjs`, `scripts/backup.sh`, `scripts/restore.sh` |
+| Server-kit configs | `deploy/server-kit/backup.sh`, `deploy/server-kit/restore.sh` |
+| Site backup / restore | `helpers/alo-site-backup`, `helpers/alo-site-restore`, `/api/backups` |
+| Release rollback | `scripts/rollback.sh`, `scripts/deploy-release.sh` (automatic on failed verification) |
+| Health / metrics | `/api/health`, `/api/monitoring/{check,collect,metrics}`, `scripts/healthcheck.sh`, `scripts/server-doctor.sh` |
+| Logs | pino structured logs (`src/lib/logger.ts`), `/api/logs`, audit-log models/routes, systemd journal, nginx access/error logs |
+| Ubuntu audit | `deploy/server-kit/verify.sh`, `deploy/server-kit/status.sh` |
+
+Rehearse backup → restore and release → rollback in staging before production
+cutover. `tests/backup-restore.test.ts` covers the local logic only.
+
+---
+
+## 8. Post-deploy verification (operator checklist)
 
 ```bash
-# Reload Caddy
-sudo systemctl reload caddy
+npm run verify                 # on CI, before any release
+npm run audit:repo
+npm run config:validate
+bash scripts/server-doctor.sh
+curl -fsS https://hosting.alolabs.net/api/health
+node scripts/e2e-smoke.mjs https://hosting.alolabs.net   # PANEL_PASSWORD required
 ```
 
-Caddy will automatically obtain and renew SSL certificates via Let's Encrypt.
+Then confirm: HSTS + CSP headers present, `/login` returns 200, an
+unauthenticated `/api/sites` returns 401, a real login returns a session,
+`/deployments` reports the running commit, and backups contain a restorable
+SQLite file (`PRAGMA integrity_check` = `ok`).
 
-## Step 8: Firewall
+---
 
-```bash
-sudo ufw allow 22/tcp     # SSH
-sudo ufw allow 80/tcp     # HTTP
-sudo ufw allow 443/tcp    # HTTPS
-sudo ufw enable
-```
+## 9. Explicitly not verified here
 
-## Docker Deployment (Alternative)
-
-```bash
-# Copy project to server
-cd /opt/app
-
-# Configure .env
-cp .env.example .env
-nano .env
-
-# Start all services
-docker compose up -d
-
-# Check logs
-docker compose logs -f app
-```
-
-## Backup & Restore
-
-The database is SQLite (`prisma/schema.prisma` declares `provider = "sqlite"`,
-`src/lib/db.ts` selects the libsql adapter for `file:` URLs). The scripts below take
-a **consistent, verified** snapshot with `VACUUM INTO`, check `PRAGMA
-integrity_check` and the presence of the tables the application needs, and keep the
-file owner-only. A backup is never reported as valid just because a file exists.
-
-### Manual Backup
-```bash
-# DATABASE_URL must be an absolute file: path (as in /etc/alo-hosting/panel.env)
-./scripts/backup.sh /home/alamin/backups
-# Prove the snapshot is restorable:
-./scripts/backup.sh --verify /home/alamin/backups/hosting-<timestamp>.db
-```
-
-### Restore drill (safe — production is not touched)
-```bash
-./scripts/restore.sh /home/alamin/backups/hosting-<timestamp>.db --target /tmp/drill.db
-```
-
-### Promoted Restore (deliberate)
-```bash
-pm2 stop alo-hosting-portal
-./scripts/restore.sh /home/alamin/backups/hosting-<timestamp>.db --yes
-pm2 restart alo-hosting-portal
-curl -s http://127.0.0.1:3051/api/health | jq '.data.release'
-```
-
-`--yes` takes and verifies a fresh snapshot of the current database first, so a
-restore cannot destroy the last good copy.
-
-### Automated Backup (Cron)
-```bash
-# Daily 02:00 backup of the SQLite database, verified, into the backup directory
-crontab -e
-# Add: 0 2 * * * /home/alamin/Hosting-Portal/scripts/backup.sh /home/alamin/backups >> /var/log/alolabs-backup.log 2>&1
-```
-
-Full recovery procedure, including the drill record and the rebuild-migration
-rules: `docs/DATABASE-RECOVERY-RUNBOOK.md`.
-
-## Health Monitoring
-
-```bash
-# Manual health check
-./scripts/healthcheck.sh http://127.0.0.1:${PORT:-3101}/api
-
-# API health endpoint
-curl http://127.0.0.1:${PORT:-3101}/api
-```
-
-## CI/CD with GitHub Actions
-
-The workflow lives at `.github/workflows/ci-cd.yml` and covers **verification only**:
-
-1. **Lint, typecheck & test** — `npm ci` → `npm run lint` → `npm run typecheck` → `npm test`
-2. **Build** — `npm ci` → `npm run db:generate` → `npm run build` → asserts `.next/standalone/server.js` exists
-
-### A note on `NODE_ENV` in CI
-
-Do **not** set `NODE_ENV=production` at the workflow or job level. `npm ci` honours it
-and silently skips `devDependencies`, so `eslint`, `typescript` and `tailwindcss` are
-never installed — `npm run lint` then fails with exit code `127` (`eslint: not found`).
-That is exactly what made runs #1–#7 red. Production values belong on the server.
-
-### Deploying (manual)
-
-Deployment is deliberately not automated, so a push to `main` can never restart
-production unattended. Ship with the deploy script:
-
-```bash
-# On the server
-sudo bash scripts/deploy-alo-portal.sh
-
-# Or from your machine, over SSH
-bash scripts/deploy-alo-portal.sh --target alamin@100.94.234.101
-
-# Preview without changing anything
-bash scripts/deploy-alo-portal.sh --dry-run
-```
-
-The script reads `PORT` from the environment (default `3101`), writes it into
-`.env.production`, the generated systemd unit and the generated Caddyfile, so the
-port stays consistent end to end:
-
-```bash
-PORT=3051 sudo bash scripts/deploy-alo-portal.sh
-```
-
-After deploying, verify:
-
-```bash
-./scripts/healthcheck.sh    # uses $PORT, default 3101
-./scripts/verify.sh         # full post-deploy verification
-```
-
-## Troubleshooting
-
-### Application won't start
-```bash
-sudo journalctl -u alolabs -n 50
-```
-
-### Database connection errors
-```bash
-# Check PostgreSQL is running
-sudo systemctl status postgresql
-
-# Test connection
-psql -h localhost -U alolabs -d alolabs -c "SELECT 1"
-```
-
-### Permission denied
-```bash
-sudo chown -R aloedu:aloedu /opt/app
-```
-
-### Clear Node.js cache
-```bash
-rm -rf .next
-npm run build
-sudo systemctl restart alolabs
-```
-
-## IP Architecture (Never Expose Node.js Directly)
-
-```
-Internet → Public IP (103.231.239.79) → Caddy → 127.0.0.1:$PORT → Next.js
-```
-
-Node.js MUST always run behind Caddy. Never expose the panel port directly to the
-internet — bind it to 127.0.0.1 and let Caddy terminate TLS.
+Ubuntu package installation, UFW rules, SSH port migration, systemd/PM2 process
+supervision, nginx/Caddy runtime, Certbot issuance/renewal, Cloudflare Tunnel,
+DNS/registrar changes, Postfix/Dovecot mail, Docker image builds, the
+self-hosted GitHub Actions runner, live external AI providers and long-running
+memory/soak behaviour. Their configuration is present and syntax-checked; their
+operation must be proven on a disposable staging host by an authorized operator.

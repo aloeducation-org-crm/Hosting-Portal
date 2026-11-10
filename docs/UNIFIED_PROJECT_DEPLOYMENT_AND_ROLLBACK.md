@@ -13,7 +13,7 @@
 2. **Environment File (`/etc/alo-hosting-panel/alo-hosting-panel.env` or `/opt/alo-hosting/.env`)**:
    - Copy `deploy/env/alo-hosting-panel.env.example`, set ownership `root:alo-panel` and permissions `0640` (or `alo-panel:alo-panel` `0600`), and populate unique `openssl rand -hex 32` values for `NEXTAUTH_SECRET`, `JWT_SECRET`, `APP_ENCRYPTION_KEY`, `INTERNAL_SECRET`, and `DEPLOY_WEBHOOK_SECRET`.
    - Set an **absolute** SQLite URL: `DATABASE_URL="file:/var/lib/alo-hosting-panel/custom.db"`.
-   - Rotate any credentials on hosts that previously ran legacy `alo-server-kit/scripts/auto-env-fixer.js` (`SEC-01`).
+   - Rotate any credentials on hosts that previously ran legacy `deploy/server-kit/scripts/auto-env-fixer.js` (`SEC-01`).
 3. **Privileged Helpers & Sudoers Installation**:
    - Back up any existing helpers to `/var/backups/alo/` (`install -d -m 0700 -o root -g root /var/backups/alo`), copying `/usr/local/sbin/alo-docker-helper` to `/var/backups/alo/alo-docker-helper.bak` if present.
    - Install `helpers/alo-*-helper`, `helpers/provision-site.sh`, and `helpers/ssl-lifecycle.sh` to `/usr/local/sbin/` with `chown root:root` and `chmod 0750`, verify every helper with `bash -n`, and install `deploy/sudoers/alo-hosting-portal` to `/etc/sudoers.d/alo-hosting-portal` (`chmod 0440`, validated via `visudo -cf`).

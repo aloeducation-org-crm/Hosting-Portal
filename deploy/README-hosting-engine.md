@@ -2,17 +2,17 @@
 
 This repository now contains the implementation and deployment artifacts; no privileged host changes are made by a checkout, build, or test run. Install scripts and units only when you intentionally deploy them on a Linux host.
 
-## Node 20 isolated stack
+## Container stack (single canonical image)
 
-`Dockerfile.node20` and `docker-compose.node20.yml` build and run the app on Node 20, expose it on loopback TCP/8080, and use a persistent SQLite volume. Prepare a real (untracked) env file with production secrets, then run:
+`Dockerfile` and `docker-compose.yml` build and run the app on Node 22 (matching CI), expose it on loopback TCP/8080, and use a persistent SQLite volume. The `.node20` duplicates were retired in the 2026-11-09 unification. For a full Ubuntu host, `deploy/ubuntu-setup.sh` is the single supported entrypoint. Prepare a real (untracked) env file with production secrets, then run:
 
 ```sh
 cp deploy/env/alo-hosting-panel.env.example deploy/env/alo-hosting-panel.env
 # Edit the file: set unique NEXTAUTH_SECRET, JWT_SECRET, and SSL_STATUS_HOOK_TOKEN values.
-docker compose -f docker-compose.node20.yml up -d --build
+docker compose -f docker-compose.yml up -d --build
 ```
 
-The one-shot `db-init` service applies `prisma/schema.prisma` with `prisma db push --skip-generate`, sets the data volume owner to the runtime UID, and creates an initial SUPER_ADMIN with a cryptographically random 32-character password. It never uses `--accept-data-loss` or publishes a default password. The credential file is stored mode 0600 at `/var/lib/alo-hosting/admin-credentials`; retrieve it as the host operator with `docker compose -f docker-compose.node20.yml run --rm --no-deps --entrypoint cat db-init /var/lib/alo-hosting/admin-credentials`, then move the password to an approved password manager and remove the file after confirming login.
+The one-shot `db-init` service applies `prisma/schema.prisma` with `prisma db push --skip-generate`, sets the data volume owner to the runtime UID, and creates an initial SUPER_ADMIN with a cryptographically random 32-character password. It never uses `--accept-data-loss` or publishes a default password. The credential file is stored mode 0600 at `/var/lib/alo-hosting/admin-credentials`; retrieve it as the host operator with `docker compose -f docker-compose.yml run --rm --no-deps --entrypoint cat db-init /var/lib/alo-hosting/admin-credentials`, then move the password to an approved password manager and remove the file after confirming login.
 
 ## Host installation (Nginx + systemd)
 
@@ -32,4 +32,4 @@ A process exception is recovered by systemd's `Restart=always` policy; systemd k
 
 ## Security and cross-origin policy
 
-The middleware uses an exact allowlist from `CORS_ALLOWED_ORIGINS`; it does not reflect arbitrary origins or allow `*` with credentials. Same-origin requests work when the list is empty. `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` are configurable through environment variables. The private SSL callback uses constant-time bearer-token comparison and should not be exposed through a public proxy route except as a normal secret-protected API endpoint.
+The edge proxy (`src/proxy.ts`) uses an exact allowlist from `CORS_ALLOWED_ORIGINS`; it does not reflect arbitrary origins or allow `*` with credentials. Same-origin requests work when the list is empty. `Cross-Origin-Opener-Policy` and `Cross-Origin-Resource-Policy` are configurable through environment variables. The private SSL callback uses constant-time bearer-token comparison and should not be exposed through a public proxy route except as a normal secret-protected API endpoint.

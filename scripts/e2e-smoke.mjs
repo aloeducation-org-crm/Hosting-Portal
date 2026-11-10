@@ -7,6 +7,26 @@
  * Exit 0 = all checks passed; exit 1 = failures (printed as JSON).
  */
 const base = (process.argv[2] || "http://127.0.0.1:3100").replace(/\/$/, "");
+const fs = await import("node:fs");
+
+// Credentials come from the operator, never from source control. The bootstrap
+// script writes ADMIN_EMAIL/ADMIN_PASSWORD to a root-only 0600 file.
+function credentials() {
+  let email = process.env.PANEL_EMAIL || process.env.ADMIN_EMAIL || "admin@alolabs.net";
+  let password = process.env.PANEL_PASSWORD || process.env.ADMIN_PASSWORD || "";
+  if (!password && process.env.ADMIN_CREDENTIAL_FILE) {
+    for (const line of fs.readFileSync(process.env.ADMIN_CREDENTIAL_FILE, "utf8").split("\n")) {
+      const m = line.match(/^ADMIN_(EMAIL|PASSWORD)=(.*)$/);
+      if (m) { if (m[1] === "EMAIL") email = m[2]; else password = m[2]; }
+    }
+  }
+  return { email, password };
+}
+const creds = credentials();
+if (!creds.password) {
+  console.error("PANEL_PASSWORD (or ADMIN_CREDENTIAL_FILE) is required; no default password exists.");
+  process.exit(2);
+}
 
 const checks = [];
 function record(name, ok, detail) {
@@ -54,8 +74,8 @@ async function post(path, body, cookie) {
 let session = null;
 {
   const { res, json } = await post("/api/auth/login", {
-    email: "admin@alolabs.net",
-    password: "admin123",
+    email: creds.email,
+    password: creds.password,
   });
   const c =
     extractCookie(res, "next-auth.session-token") ||
@@ -67,7 +87,7 @@ let session = null;
   } catch {
     /* ignore */
   }
-  record("login admin@alolabs.net", !!session, `status=${res.status} ${code}`);
+  record(`login ${creds.email}`, !!session, `status=${res.status} ${code}`);
 }
 
 // 3) Dashboard pages behind auth

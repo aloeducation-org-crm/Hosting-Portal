@@ -9,7 +9,7 @@ import type { AuthUser } from "@/lib/auth";
 import { capabilityRequestSchema, createCapabilityRequest, reviewCapabilityRequest, capabilityRequestPresentation } from "@/lib/ai/capability-requests";
 import { readCapabilityJson } from "@/lib/ai/capability-http";
 import { GET, POST } from "@/app/api/ai/capability-requests/route";
-import { canAccessRoute, isProtectedDashboardPath } from "@/middleware";
+import { canAccessRoute, isProtectedDashboardPath } from "@/proxy";
 import { PATCH } from "@/app/api/ai/capability-requests/[id]/route";
 
 let admin: AuthUser; let reviewer: AuthUser; let client: AuthUser; let projectId: string;

@@ -130,12 +130,12 @@ if [[ -f "$REPO/src/app/(auth)/login/page.tsx" ]]; then
   pass "repo root is the canonical app (/login route present)"
 else
   fail "no src/app/(auth)/login/page.tsx under $REPO — this is not the deployable app"
-  fix "cd to the repository ROOT, not alo-hosting-portal/"
+  fix "cd to the repository ROOT (the canonical app lives there)"
 fi
 
-if [[ "$(basename "$REPO")" == "alo-hosting-portal" ]]; then
-  fail "you are inside alo-hosting-portal/ — the LEGACY snapshot (55 models, no /login)"
-  fix "cd $(dirname "$REPO")   # the repository root is the app"
+if [[ -d "$REPO/alo-hosting-portal" ]]; then
+  fail "a retired alo-hosting-portal/ legacy snapshot is present in this checkout"
+  fix "use the repository root only; the duplicate app tree was removed on 2026-11-09"
 fi
 
 if [[ -f "$REPO/package.json" ]]; then

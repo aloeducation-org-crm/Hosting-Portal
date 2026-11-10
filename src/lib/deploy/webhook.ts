@@ -28,10 +28,15 @@ interface ParsedPush {
   installationId: string | null;
 }
 
-function parsePush(payload: any): ParsedPush | null {
+function parsePush(payload: any, event: string): ParsedPush | null {
   if (!payload || typeof payload !== "object") return null;
-  const ref = payload.ref;
-  const sha = payload.after;
+  const isWorkflowDispatch = event === "workflow_dispatch";
+  const ref = isWorkflowDispatch
+    ? `refs/heads/${String(payload.ref ?? payload.repository?.default_branch ?? "main").replace(/^refs\/heads\//, "")}`
+    : payload.ref;
+  const sha = isWorkflowDispatch
+    ? payload.inputs?.commit ?? payload.inputs?.sha ?? payload.after
+    : payload.after;
   const fullName = payload.repository?.full_name;
   if (typeof ref !== "string" || !ref.startsWith("refs/heads/")) return null;
   if (typeof sha !== "string" || !/^[0-9a-f]{40}$/.test(sha)) return null;
@@ -41,12 +46,20 @@ function parsePush(payload: any): ParsedPush | null {
   } catch {
     return null;
   }
+  const message = isWorkflowDispatch
+    ? String(payload.inputs?.message ?? "GitHub workflow dispatch")
+    : String(payload.head_commit?.message ?? "");
   return {
     repository,
     branch: ref.slice("refs/heads/".length),
     sha,
-    message: (String(payload.head_commit?.message ?? "").split("\n")[0] ?? "").slice(0, 500),
-    author: String(payload.head_commit?.author?.name ?? payload.pusher?.name ?? "unknown").slice(0, 200),
+    message: (message.split("\n")[0] ?? "").slice(0, 500),
+    author: String(
+      payload.head_commit?.author?.name ??
+        payload.pusher?.name ??
+        payload.sender?.login ??
+        "unknown",
+    ).slice(0, 200),
     deleted: Boolean(payload.deleted),
     installationId: payload.installation?.id != null ? String(payload.installation.id) : null,
   };
@@ -66,7 +79,14 @@ export async function handleGitHubWebhook(rawBody: string, headers: Headers): Pr
   const event = headers.get("x-github-event") ?? "unknown";
   const deliveryId = headers.get("x-github-delivery");
   const signature = headers.get("x-hub-signature-256");
-  const secret = process.env.GITHUB_WEBHOOK_SECRET || "";
+  // GITHUB_WEBHOOK_SECRET is canonical. The two fallbacks preserve the retired
+  // /api/deploy/webhook contract, which accepted CRON_SECRET, and let an operator
+  // use the same strong secret as the manual webhook. All candidates fail closed.
+  const secret =
+    process.env.GITHUB_WEBHOOK_SECRET?.trim() ||
+    process.env.DEPLOY_WEBHOOK_SECRET?.trim() ||
+    process.env.CRON_SECRET?.trim() ||
+    "";
   const payloadSha = crypto.createHash("sha256").update(rawBody).digest("hex");
   const common = { event, deliveryId: deliveryId ?? undefined };
 
@@ -74,7 +94,7 @@ export async function handleGitHubWebhook(rawBody: string, headers: Headers): Pr
     return { status: 400, body: { result: "rejected", reason: "missing or invalid X-GitHub-Delivery" } };
   }
   if (!secret) {
-    return { status: 503, body: { result: "failed", reason: "GITHUB_WEBHOOK_SECRET is not configured" } };
+    return { status: 503, body: { result: "failed", reason: "GitHub webhook secret is not configured" } };
   }
   // An App-level secret verifies all deliveries. For OAuth-created repository
   // hooks a project may have its own encrypted secret; the untrusted payload is
@@ -144,12 +164,12 @@ export async function handleGitHubWebhook(rawBody: string, headers: Headers): Pr
     await update({ result: "ignored", reason: "preview deployments are not enabled for this installation" });
     return { status: 200, body: { ...common, result: "ignored", reason: "preview deployments not enabled", signatureValid: true } };
   }
-  if (event !== "push") {
+  if (event !== "push" && event !== "workflow_dispatch") {
     await update({ result: "ignored", reason: `unhandled event ${event}` });
     return { status: 200, body: { ...common, result: "ignored", reason: `unhandled event ${event}`, signatureValid: true } };
   }
 
-  const push = parsePush(payload);
+  const push = parsePush(payload, event);
   if (!push) {
     await update({ result: "rejected", reason: "malformed push payload" });
     return { status: 400, body: { ...common, result: "rejected", reason: "malformed push payload", signatureValid: true } };

@@ -50,8 +50,8 @@ export function evaluateUbuntuCisBaseline(
   // CIS 5.3 / Sudoers wildcard restriction
   const sudoersCandidates = [
     path.join(appRoot, "deploy/sudoers/alo-hosting-portal"),
-    path.join(appRoot, "helpers/sudoers-alo"),
-    path.join(appRoot, "server-config/sudo-policy"),
+    path.join(appRoot, "deploy/sudoers/alo-hosting-portal"),
+    path.join(appRoot, "deploy/sudoers/alo-hosting-portal"),
   ];
   let sudoersWildcardFound = false;
   let sudoersChecked = 0;

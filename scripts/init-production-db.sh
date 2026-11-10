@@ -197,8 +197,9 @@ if [[ -n "$missing" ]]; then
 fi
 
 # ── 4. Rotate the seeded credentials ────────────────────────────────────────
-# prisma/seed.ts publishes admin123 / reseller123 / client123 in a public repo.
-# Any of them left in a production database is an instant SUPER_ADMIN takeover.
+# Older releases published fixed seed passwords. Any of them left in a
+# production database is an instant SUPER_ADMIN takeover, so they are detected
+# and rotated; current seeds always generate random passwords.
 #
 # But rotating on EVERY run is its own footgun: this script is called by the
 # deploy workflow, so an unconditional rotation would invalidate the operator's
@@ -224,8 +225,8 @@ const app = process.env.MODULES_DIR;
 const bcrypt = require(path.join(app, "node_modules", "bcryptjs"));
 const { createClient } = require(path.join(app, "node_modules", "@libsql", "client"));
 
-// Passwords published in prisma/seed.ts. If any of them still verifies, the
-// database is a seed snapshot and must be hardened regardless of HARDEN mode.
+// Historical published seed passwords from older releases. If any still
+// verifies, the database is a legacy snapshot and must be hardened in any mode.
 const PUBLISHED = {
   "admin@alolabs.net": "admin123",
   "reseller@alolabs.net": "reseller123",

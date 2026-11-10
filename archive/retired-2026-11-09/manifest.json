@@ -1,0 +1,3019 @@
+{
+  "Dockerfile.node20": {
+    "archived_at": "archive/retired-2026-11-09/Dockerfile.node20",
+    "bytes": 1179,
+    "canonical": "Dockerfile",
+    "canonical_exists": null,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/.env.example": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/.env.example",
+    "bytes": 1263,
+    "canonical": ".env.example",
+    "canonical_exists": null,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/.gitignore": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/.gitignore",
+    "bytes": 688,
+    "canonical": ".gitignore",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/Caddyfile": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/Caddyfile",
+    "bytes": 493,
+    "canonical": "Caddyfile",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/DEPLOY.md": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/DEPLOY.md",
+    "bytes": 5712,
+    "canonical": "DEPLOY.md",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/Dockerfile": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/Dockerfile",
+    "bytes": 935,
+    "canonical": "Dockerfile",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/README.md": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/README.md",
+    "bytes": 9811,
+    "canonical": "README.md",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/bun.lock": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/bun.lock",
+    "bytes": 196386,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/components.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/components.json",
+    "bytes": 430,
+    "canonical": "components.json",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/db/.gitkeep": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/db/.gitkeep",
+    "bytes": 0,
+    "canonical": "db/.gitkeep",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/db/custom.db": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/db/custom.db",
+    "bytes": 1167360,
+    "canonical": "db/custom.db",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/deploy/sudoers/alo-hosting-portal": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/deploy/sudoers/alo-hosting-portal",
+    "bytes": 1006,
+    "canonical": "deploy/sudoers/alo-hosting-portal",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/deploy/systemd/alo-server-hosting.service": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/deploy/systemd/alo-server-hosting.service",
+    "bytes": 681,
+    "canonical": "deploy/systemd/alo-server-hosting.service",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/docker-compose.yml": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/docker-compose.yml",
+    "bytes": 1098,
+    "canonical": "docker-compose.yml",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/eslint.config.mjs": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/eslint.config.mjs",
+    "bytes": 1632,
+    "canonical": "eslint.config.mjs",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/examples/websocket/frontend.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/examples/websocket/frontend.tsx",
+    "bytes": 6310,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/examples/websocket/server.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/examples/websocket/server.ts",
+    "bytes": 3536,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-database-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-database-helper",
+    "bytes": 10924,
+    "canonical": "helpers/alo-database-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-domain-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-domain-helper",
+    "bytes": 7595,
+    "canonical": "helpers/alo-domain-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-file-manager-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-file-manager-helper",
+    "bytes": 15941,
+    "canonical": "helpers/alo-file-manager-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-health-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-health-helper",
+    "bytes": 6423,
+    "canonical": "helpers/alo-health-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-hosting-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-hosting-helper",
+    "bytes": 11346,
+    "canonical": "helpers/alo-hosting-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-log-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-log-helper",
+    "bytes": 7895,
+    "canonical": "helpers/alo-log-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-node-app-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-node-app-helper",
+    "bytes": 8845,
+    "canonical": "helpers/alo-node-app-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/helpers/alo-site-restore": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/helpers/alo-site-restore",
+    "bytes": 10659,
+    "canonical": "helpers/alo-site-restore",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/install-scripts/install.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/install-scripts/install.sh",
+    "bytes": 4458,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/install-scripts/rollback.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/install-scripts/rollback.sh",
+    "bytes": 1154,
+    "canonical": "scripts/rollback.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/install-scripts/update.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/install-scripts/update.sh",
+    "bytes": 1573,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/mini-services/.gitkeep": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/mini-services/.gitkeep",
+    "bytes": 0,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/next.config.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/next.config.ts",
+    "bytes": 324,
+    "canonical": "next.config.ts",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/package-lock.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/package-lock.json",
+    "bytes": 412687,
+    "canonical": "package-lock.json",
+    "canonical_exists": null,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/package.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/package.json",
+    "bytes": 2987,
+    "canonical": "package.json",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/postcss.config.mjs": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/postcss.config.mjs",
+    "bytes": 81,
+    "canonical": "postcss.config.mjs",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/prisma/migrations/0_init/migration.sql": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/prisma/migrations/0_init/migration.sql",
+    "bytes": 11102,
+    "canonical": "prisma/migrations/0_init/migration.sql",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/prisma/migrations/20260721052322_init/migration.sql": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/prisma/migrations/20260721052322_init/migration.sql",
+    "bytes": 30,
+    "canonical": "prisma/migrations/20260721052322_init/migration.sql",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/prisma/migrations/migration_lock.toml": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/prisma/migrations/migration_lock.toml",
+    "bytes": 124,
+    "canonical": "prisma/migrations/migration_lock.toml",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/prisma/schema.prisma": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/prisma/schema.prisma",
+    "bytes": 42386,
+    "canonical": "prisma/schema.prisma",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/prisma/seed.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/prisma/seed.ts",
+    "bytes": 15882,
+    "canonical": "prisma/seed.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/public/logo.svg": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/public/logo.svg",
+    "bytes": 1065,
+    "canonical": "public/logo.svg",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/public/robots.txt": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/public/robots.txt",
+    "bytes": 160,
+    "canonical": "public/robots.txt",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/alolabs.service": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/alolabs.service",
+    "bytes": 333,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/backup.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/backup.sh",
+    "bytes": 674,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/create-final-zip.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/create-final-zip.sh",
+    "bytes": 3725,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/create-production-zip.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/create-production-zip.sh",
+    "bytes": 1256,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/create-zip.mjs": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/create-zip.mjs",
+    "bytes": 1929,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/create-zip.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/create-zip.py",
+    "bytes": 1392,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/create-zip.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/create-zip.sh",
+    "bytes": 427,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/fix-brand-colors.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/fix-brand-colors.py",
+    "bytes": 2920,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/fix-colors.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/fix-colors.py",
+    "bytes": 2450,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/fix-lint.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/fix-lint.py",
+    "bytes": 5863,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deploy-guide-v2.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deploy-guide-v2.py",
+    "bytes": 101185,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deploy-guide.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deploy-guide.py",
+    "bytes": 94997,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deploy-package-p2.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deploy-package-p2.py",
+    "bytes": 38264,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deploy-package-p3.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deploy-package-p3.py",
+    "bytes": 25654,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deploy-package-p4.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deploy-package-p4.py",
+    "bytes": 37518,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deploy-package.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deploy-package.py",
+    "bytes": 24060,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-deployment-pdf.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-deployment-pdf.py",
+    "bytes": 44291,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-dev-guide.js": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-dev-guide.js",
+    "bytes": 48493,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/generate-guideline-pdf.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/generate-guideline-pdf.py",
+    "bytes": 38549,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/healthcheck.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/healthcheck.sh",
+    "bytes": 414,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/package-production.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/package-production.sh",
+    "bytes": 2549,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/restore.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/restore.sh",
+    "bytes": 814,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/scripts/write_kit.py": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/scripts/write_kit.py",
+    "bytes": 48845,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/seed-platform.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/seed-platform.ts",
+    "bytes": 41649,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-config/alo-hosting-portal.sudoers": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-config/alo-hosting-portal.sudoers",
+    "bytes": 2093,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-config/alo-server-hosting.service": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-config/alo-server-hosting.service",
+    "bytes": 668,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-cron-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-cron-helper",
+    "bytes": 9286,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-database-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-database-helper",
+    "bytes": 11115,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-deploy-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-deploy-helper",
+    "bytes": 9349,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-dns-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-dns-helper",
+    "bytes": 9163,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-docker-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-docker-helper",
+    "bytes": 10583,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-domain-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-domain-helper",
+    "bytes": 7595,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-email-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-email-helper",
+    "bytes": 9532,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-encryption-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-encryption-helper",
+    "bytes": 14352,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-file-manager-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-file-manager-helper",
+    "bytes": 15947,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-firewall-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-firewall-helper",
+    "bytes": 6608,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-health-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-health-helper",
+    "bytes": 7962,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-hosting-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-hosting-helper",
+    "bytes": 11352,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-log-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-log-helper",
+    "bytes": 8150,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-node-app-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-node-app-helper",
+    "bytes": 8851,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-site-backup": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-site-backup",
+    "bytes": 8433,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-site-lifecycle": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-site-lifecycle",
+    "bytes": 8776,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-site-restore": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-site-restore",
+    "bytes": 11512,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-ssh-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-ssh-helper",
+    "bytes": 7821,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/server-helpers/alo-ssl-helper": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/server-helpers/alo-ssl-helper",
+    "bytes": 9275,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/agents/[slug]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/agents/[slug]/route.ts",
+    "bytes": 1462,
+    "canonical": "src/app/api/agents/[slug]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/agents/[slug]/run/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/agents/[slug]/run/route.ts",
+    "bytes": 22495,
+    "canonical": "src/app/api/agents/[slug]/run/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/agents/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/agents/route.ts",
+    "bytes": 1507,
+    "canonical": "src/app/api/agents/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/agents/runs/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/agents/runs/route.ts",
+    "bytes": 1378,
+    "canonical": "src/app/api/agents/runs/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/agents/seed/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/agents/seed/route.ts",
+    "bytes": 11723,
+    "canonical": "src/app/api/agents/seed/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ai/chat/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ai/chat/route.ts",
+    "bytes": 3094,
+    "canonical": "src/app/api/ai/chat/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ai/prompts/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ai/prompts/route.ts",
+    "bytes": 1413,
+    "canonical": "src/app/api/ai/prompts/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ai/token/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ai/token/route.ts",
+    "bytes": 585,
+    "canonical": "src/app/api/ai/token/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ai/website/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ai/website/route.ts",
+    "bytes": 4016,
+    "canonical": "src/app/api/ai/website/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/alerts/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/alerts/route.ts",
+    "bytes": 4352,
+    "canonical": "src/app/api/alerts/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/alerts/rules/[id]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/alerts/rules/[id]/route.ts",
+    "bytes": 3425,
+    "canonical": "src/app/api/alerts/rules/[id]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/alerts/rules/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/alerts/rules/route.ts",
+    "bytes": 3195,
+    "canonical": "src/app/api/alerts/rules/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/applications/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/applications/route.ts",
+    "bytes": 1996,
+    "canonical": "src/app/api/applications/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/audit-logs/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/audit-logs/route.ts",
+    "bytes": 1988,
+    "canonical": "src/app/api/audit-logs/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/auth/[...nextauth]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/[...nextauth]/route.ts",
+    "bytes": 164,
+    "canonical": "src/app/api/auth/[...nextauth]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/auth/login/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/login/route.ts",
+    "bytes": 2556,
+    "canonical": "src/app/api/auth/login/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/auth/mfa-challenge/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/mfa-challenge/route.ts",
+    "bytes": 2886,
+    "canonical": "src/app/api/auth/mfa-challenge/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/auth/providers/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/providers/route.ts",
+    "bytes": 558,
+    "canonical": "src/app/api/auth/providers/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/auth/register/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/register/route.ts",
+    "bytes": 1846,
+    "canonical": "src/app/api/auth/register/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/app/api/auth/session/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/session/route.ts",
+    "bytes": 1312,
+    "canonical": "src/app/api/auth/session/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/auth/signup/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/auth/signup/route.ts",
+    "bytes": 2251,
+    "canonical": "src/app/api/auth/signup/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/automation/cron/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/automation/cron/route.ts",
+    "bytes": 1120,
+    "canonical": "src/app/api/automation/cron/route.ts",
+    "canonical_exists": false,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/app/api/automation/tool/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/automation/tool/route.ts",
+    "bytes": 2475,
+    "canonical": "src/app/api/automation/tool/route.ts",
+    "canonical_exists": false,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/app/api/backups/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/backups/route.ts",
+    "bytes": 941,
+    "canonical": "src/app/api/backups/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/billing/invoices/generate/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/billing/invoices/generate/route.ts",
+    "bytes": 3550,
+    "canonical": "src/app/api/billing/invoices/generate/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/billing/usage/aggregate/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/billing/usage/aggregate/route.ts",
+    "bytes": 4370,
+    "canonical": "src/app/api/billing/usage/aggregate/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/billing/usage/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/billing/usage/route.ts",
+    "bytes": 4205,
+    "canonical": "src/app/api/billing/usage/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ci/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ci/route.ts",
+    "bytes": 1862,
+    "canonical": "src/app/api/ci/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/containers/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/containers/route.ts",
+    "bytes": 6267,
+    "canonical": "src/app/api/containers/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/crm/activities/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/crm/activities/route.ts",
+    "bytes": 2044,
+    "canonical": "src/app/api/crm/activities/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/crm/contacts/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/crm/contacts/route.ts",
+    "bytes": 2269,
+    "canonical": "src/app/api/crm/contacts/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/crm/deals/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/crm/deals/route.ts",
+    "bytes": 2029,
+    "canonical": "src/app/api/crm/deals/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/crm/pipelines/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/crm/pipelines/route.ts",
+    "bytes": 1798,
+    "canonical": "src/app/api/crm/pipelines/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/cron/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/cron/route.ts",
+    "bytes": 9371,
+    "canonical": "src/app/api/cron/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/dashboard/activity/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/dashboard/activity/route.ts",
+    "bytes": 536,
+    "canonical": "src/app/api/dashboard/activity/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/dashboard/stats/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/dashboard/stats/route.ts",
+    "bytes": 2237,
+    "canonical": "src/app/api/dashboard/stats/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/databases/[id]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/databases/[id]/route.ts",
+    "bytes": 3307,
+    "canonical": "src/app/api/databases/[id]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/databases/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/databases/route.ts",
+    "bytes": 4394,
+    "canonical": "src/app/api/databases/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/deploy/webhook/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/deploy/webhook/route.ts",
+    "bytes": 4789,
+    "canonical": "src/app/api/deploy/webhook/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/domains/[id]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/domains/[id]/route.ts",
+    "bytes": 4344,
+    "canonical": "src/app/api/domains/[id]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/domains/mine/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/domains/mine/route.ts",
+    "bytes": 914,
+    "canonical": "src/app/api/domains/mine/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/domains/purchase/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/domains/purchase/route.ts",
+    "bytes": 2288,
+    "canonical": "src/app/api/domains/purchase/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/domains/search/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/domains/search/route.ts",
+    "bytes": 2055,
+    "canonical": "src/app/api/domains/search/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/domains/suggestions/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/domains/suggestions/route.ts",
+    "bytes": 855,
+    "canonical": "src/app/api/domains/suggestions/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/email/accounts/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/email/accounts/route.ts",
+    "bytes": 6545,
+    "canonical": "src/app/api/email/accounts/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/email/campaigns/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/email/campaigns/route.ts",
+    "bytes": 2037,
+    "canonical": "src/app/api/email/campaigns/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/email/dns-records/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/email/dns-records/route.ts",
+    "bytes": 2526,
+    "canonical": "src/app/api/email/dns-records/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/email/send/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/email/send/route.ts",
+    "bytes": 1890,
+    "canonical": "src/app/api/email/send/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/email/verify/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/email/verify/route.ts",
+    "bytes": 3138,
+    "canonical": "src/app/api/email/verify/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/file-manager/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/file-manager/route.ts",
+    "bytes": 7416,
+    "canonical": "src/app/api/file-manager/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/health/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/health/route.ts",
+    "bytes": 915,
+    "canonical": "src/app/api/health/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/invoices/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/invoices/route.ts",
+    "bytes": 3520,
+    "canonical": "src/app/api/invoices/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/monitoring/check/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/monitoring/check/route.ts",
+    "bytes": 6697,
+    "canonical": "src/app/api/monitoring/check/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/monitoring/collect/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/monitoring/collect/route.ts",
+    "bytes": 4673,
+    "canonical": "src/app/api/monitoring/collect/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/monitoring/metrics/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/monitoring/metrics/route.ts",
+    "bytes": 2411,
+    "canonical": "src/app/api/monitoring/metrics/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/network/dns/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/network/dns/route.ts",
+    "bytes": 2588,
+    "canonical": "src/app/api/network/dns/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/network/load/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/network/load/route.ts",
+    "bytes": 1460,
+    "canonical": "src/app/api/network/load/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/orders/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/orders/route.ts",
+    "bytes": 2776,
+    "canonical": "src/app/api/orders/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/pricing/plans/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/pricing/plans/route.ts",
+    "bytes": 654,
+    "canonical": "src/app/api/pricing/plans/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/roles/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/roles/route.ts",
+    "bytes": 3039,
+    "canonical": "src/app/api/roles/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/audit-export/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/audit-export/route.ts",
+    "bytes": 3804,
+    "canonical": "src/app/api/security/audit-export/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/audit-logs/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/audit-logs/route.ts",
+    "bytes": 2281,
+    "canonical": "src/app/api/security/audit-logs/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/encrypt/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/encrypt/route.ts",
+    "bytes": 3443,
+    "canonical": "src/app/api/security/encrypt/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/firewall/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/firewall/route.ts",
+    "bytes": 3110,
+    "canonical": "src/app/api/security/firewall/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/lockout/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/lockout/route.ts",
+    "bytes": 3243,
+    "canonical": "src/app/api/security/lockout/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/rate-limits/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/rate-limits/route.ts",
+    "bytes": 969,
+    "canonical": "src/app/api/security/rate-limits/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/sessions/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/sessions/route.ts",
+    "bytes": 4306,
+    "canonical": "src/app/api/security/sessions/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/security/ssh/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/security/ssh/route.ts",
+    "bytes": 866,
+    "canonical": "src/app/api/security/ssh/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/servers/health/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/servers/health/route.ts",
+    "bytes": 3979,
+    "canonical": "src/app/api/servers/health/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/servers/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/servers/route.ts",
+    "bytes": 1241,
+    "canonical": "src/app/api/servers/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/settings/api/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/settings/api/route.ts",
+    "bytes": 3468,
+    "canonical": "src/app/api/settings/api/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ssl/check/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ssl/check/route.ts",
+    "bytes": 3294,
+    "canonical": "src/app/api/ssl/check/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ssl/expiring/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ssl/expiring/route.ts",
+    "bytes": 1659,
+    "canonical": "src/app/api/ssl/expiring/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ssl/renew/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ssl/renew/route.ts",
+    "bytes": 2693,
+    "canonical": "src/app/api/ssl/renew/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/ssl/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/ssl/route.ts",
+    "bytes": 6480,
+    "canonical": "src/app/api/ssl/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/sso/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/sso/route.ts",
+    "bytes": 3123,
+    "canonical": "src/app/api/sso/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/storage/buckets/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/storage/buckets/route.ts",
+    "bytes": 2004,
+    "canonical": "src/app/api/storage/buckets/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/subscriptions/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/subscriptions/route.ts",
+    "bytes": 911,
+    "canonical": "src/app/api/subscriptions/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/user/mfa/backup-codes/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/user/mfa/backup-codes/route.ts",
+    "bytes": 2503,
+    "canonical": "src/app/api/user/mfa/backup-codes/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/user/mfa/disable/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/user/mfa/disable/route.ts",
+    "bytes": 2971,
+    "canonical": "src/app/api/user/mfa/disable/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/user/mfa/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/user/mfa/route.ts",
+    "bytes": 2841,
+    "canonical": "src/app/api/user/mfa/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/user/mfa/verify/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/user/mfa/verify/route.ts",
+    "bytes": 1787,
+    "canonical": "src/app/api/user/mfa/verify/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/user/password/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/user/password/route.ts",
+    "bytes": 3190,
+    "canonical": "src/app/api/user/password/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/user/profile/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/user/profile/route.ts",
+    "bytes": 2208,
+    "canonical": "src/app/api/user/profile/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/users/[id]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/users/[id]/route.ts",
+    "bytes": 3954,
+    "canonical": "src/app/api/users/[id]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/users/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/users/route.ts",
+    "bytes": 3267,
+    "canonical": "src/app/api/users/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/[id]/backups/[backupId]/restore/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/[id]/backups/[backupId]/restore/route.ts",
+    "bytes": 2228,
+    "canonical": "src/app/api/websites/[id]/backups/[backupId]/restore/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/[id]/backups/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/[id]/backups/route.ts",
+    "bytes": 2843,
+    "canonical": "src/app/api/websites/[id]/backups/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/[id]/restart/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/[id]/restart/route.ts",
+    "bytes": 1692,
+    "canonical": "src/app/api/websites/[id]/restart/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/[id]/resume/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/[id]/resume/route.ts",
+    "bytes": 1796,
+    "canonical": "src/app/api/websites/[id]/resume/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/[id]/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/[id]/route.ts",
+    "bytes": 4603,
+    "canonical": "src/app/api/websites/[id]/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/[id]/suspend/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/[id]/suspend/route.ts",
+    "bytes": 1805,
+    "canonical": "src/app/api/websites/[id]/suspend/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/api/websites/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/api/websites/route.ts",
+    "bytes": 4464,
+    "canonical": "src/app/api/websites/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/agents/[slug]/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/agents/[slug]/page.tsx",
+    "bytes": 21094,
+    "canonical": "src/app/dashboard/agents/[slug]/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/agents/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/agents/page.tsx",
+    "bytes": 10674,
+    "canonical": "src/app/dashboard/agents/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/billing/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/billing/page.tsx",
+    "bytes": 25409,
+    "canonical": "src/app/dashboard/billing/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/crm/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/crm/page.tsx",
+    "bytes": 3548,
+    "canonical": "src/app/dashboard/crm/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/domains/[id]/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/domains/[id]/page.tsx",
+    "bytes": 45009,
+    "canonical": "src/app/dashboard/domains/[id]/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/domains/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/domains/page.tsx",
+    "bytes": 21127,
+    "canonical": "src/app/dashboard/domains/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/email/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/email/page.tsx",
+    "bytes": 11305,
+    "canonical": "src/app/dashboard/email/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/layout.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/layout.tsx",
+    "bytes": 10436,
+    "canonical": "src/app/dashboard/layout.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/page.tsx",
+    "bytes": 11572,
+    "canonical": "src/app/dashboard/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/settings/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/settings/page.tsx",
+    "bytes": 19584,
+    "canonical": "src/app/dashboard/settings/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/webchat/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/webchat/page.tsx",
+    "bytes": 7002,
+    "canonical": "src/app/dashboard/webchat/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/app/dashboard/websites/[id]/edit/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/websites/[id]/edit/page.tsx",
+    "bytes": 14215,
+    "canonical": "src/app/dashboard/websites/[id]/edit/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/websites/new/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/websites/new/page.tsx",
+    "bytes": 21736,
+    "canonical": "src/app/dashboard/websites/new/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/dashboard/websites/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/dashboard/websites/page.tsx",
+    "bytes": 13974,
+    "canonical": "src/app/dashboard/websites/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/globals.css": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/globals.css",
+    "bytes": 6368,
+    "canonical": "src/app/globals.css",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/layout.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/layout.tsx",
+    "bytes": 1570,
+    "canonical": "src/app/layout.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/login/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/login/page.tsx",
+    "bytes": 4707,
+    "canonical": "src/app/(auth)/login/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/app/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/page.tsx",
+    "bytes": 1656,
+    "canonical": "src/app/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/app/register/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/app/register/page.tsx",
+    "bytes": 6173,
+    "canonical": "src/app/(auth)/register/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/components/alolabs/AIChatWidget.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/AIChatWidget.tsx",
+    "bytes": 20035,
+    "canonical": "src/components/alolabs/AIChatWidget.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/AIToolsSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/AIToolsSection.tsx",
+    "bytes": 5725,
+    "canonical": "src/components/alolabs/AIToolsSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/AuthModal.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/AuthModal.tsx",
+    "bytes": 17641,
+    "canonical": "src/components/alolabs/AuthModal.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/AuthProvider.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/AuthProvider.tsx",
+    "bytes": 1428,
+    "canonical": "src/components/alolabs/AuthProvider.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/BrandLogos.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/BrandLogos.tsx",
+    "bytes": 967,
+    "canonical": "src/components/alolabs/BrandLogos.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/BuildLaunchSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/BuildLaunchSection.tsx",
+    "bytes": 5110,
+    "canonical": "src/components/alolabs/BuildLaunchSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/CookieBanner.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/CookieBanner.tsx",
+    "bytes": 2482,
+    "canonical": "src/components/alolabs/CookieBanner.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/EmailSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/EmailSection.tsx",
+    "bytes": 7131,
+    "canonical": "src/components/alolabs/EmailSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/Footer.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/Footer.tsx",
+    "bytes": 8787,
+    "canonical": "src/components/alolabs/Footer.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/Header.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/Header.tsx",
+    "bytes": 20998,
+    "canonical": "src/components/alolabs/Header.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/HeroSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/HeroSection.tsx",
+    "bytes": 9138,
+    "canonical": "src/components/alolabs/HeroSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/PowerControlSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/PowerControlSection.tsx",
+    "bytes": 6832,
+    "canonical": "src/components/alolabs/PowerControlSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/PricingSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/PricingSection.tsx",
+    "bytes": 8720,
+    "canonical": "src/components/alolabs/PricingSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/ShowcaseSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/ShowcaseSection.tsx",
+    "bytes": 5183,
+    "canonical": "src/components/alolabs/ShowcaseSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/StatsSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/StatsSection.tsx",
+    "bytes": 1463,
+    "canonical": "src/components/alolabs/StatsSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/alolabs/TestimonialsSection.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/alolabs/TestimonialsSection.tsx",
+    "bytes": 6838,
+    "canonical": "src/components/alolabs/TestimonialsSection.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/dashboard/CrmDialog.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/dashboard/CrmDialog.tsx",
+    "bytes": 4657,
+    "canonical": "src/components/dashboard/CrmDialog.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/dashboard/crm/ActivitiesTab.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/dashboard/crm/ActivitiesTab.tsx",
+    "bytes": 13872,
+    "canonical": "src/components/dashboard/crm/ActivitiesTab.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/dashboard/crm/ContactsTab.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/dashboard/crm/ContactsTab.tsx",
+    "bytes": 24994,
+    "canonical": "src/components/dashboard/crm/ContactsTab.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/dashboard/crm/PipelineTab.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/dashboard/crm/PipelineTab.tsx",
+    "bytes": 15519,
+    "canonical": "src/components/dashboard/crm/PipelineTab.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/ALOLogo.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/ALOLogo.tsx",
+    "bytes": 2968,
+    "canonical": "src/components/platform/ALOLogo.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/AppShell.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/AppShell.tsx",
+    "bytes": 11807,
+    "canonical": "src/components/platform/AppShell.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/AuthScreen.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/AuthScreen.tsx",
+    "bytes": 7779,
+    "canonical": "src/components/platform/AuthScreen.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/AgentsView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/AgentsView.tsx",
+    "bytes": 35309,
+    "canonical": "src/components/platform/views/AgentsView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/ApplicationsView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/ApplicationsView.tsx",
+    "bytes": 19724,
+    "canonical": "src/components/platform/views/ApplicationsView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/BackupsView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/BackupsView.tsx",
+    "bytes": 15646,
+    "canonical": "src/components/platform/views/BackupsView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/BillingView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/BillingView.tsx",
+    "bytes": 21092,
+    "canonical": "src/components/platform/views/BillingView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/CICDView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/CICDView.tsx",
+    "bytes": 15210,
+    "canonical": "src/components/platform/views/CICDView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/CRMView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/CRMView.tsx",
+    "bytes": 33571,
+    "canonical": "src/components/platform/views/CRMView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/ContainersView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/ContainersView.tsx",
+    "bytes": 15227,
+    "canonical": "src/components/platform/views/ContainersView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/DashboardView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/DashboardView.tsx",
+    "bytes": 14028,
+    "canonical": "src/components/platform/views/DashboardView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/DatabasesView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/DatabasesView.tsx",
+    "bytes": 23369,
+    "canonical": "src/components/platform/views/DatabasesView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/DomainsView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/DomainsView.tsx",
+    "bytes": 18441,
+    "canonical": "src/components/platform/views/DomainsView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/EmailView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/EmailView.tsx",
+    "bytes": 18397,
+    "canonical": "src/components/platform/views/EmailView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/LogsView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/LogsView.tsx",
+    "bytes": 11187,
+    "canonical": "src/components/platform/views/LogsView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/MonitoringView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/MonitoringView.tsx",
+    "bytes": 12398,
+    "canonical": "src/components/platform/views/MonitoringView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/NetworkView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/NetworkView.tsx",
+    "bytes": 21117,
+    "canonical": "src/components/platform/views/NetworkView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/SSLView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/SSLView.tsx",
+    "bytes": 13057,
+    "canonical": "src/components/platform/views/SSLView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/SecurityView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/SecurityView.tsx",
+    "bytes": 22500,
+    "canonical": "src/components/platform/views/SecurityView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/ServersView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/ServersView.tsx",
+    "bytes": 23085,
+    "canonical": "src/components/platform/views/ServersView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/SettingsView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/SettingsView.tsx",
+    "bytes": 34820,
+    "canonical": "src/components/platform/views/SettingsView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/StorageView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/StorageView.tsx",
+    "bytes": 12176,
+    "canonical": "src/components/platform/views/StorageView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/platform/views/WebsitesView.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/platform/views/WebsitesView.tsx",
+    "bytes": 15191,
+    "canonical": "src/components/platform/views/WebsitesView.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/accordion.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/accordion.tsx",
+    "bytes": 2053,
+    "canonical": "src/components/ui/accordion.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/alert-dialog.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/alert-dialog.tsx",
+    "bytes": 3864,
+    "canonical": "src/components/ui/alert-dialog.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/alert.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/alert.tsx",
+    "bytes": 1614,
+    "canonical": "src/components/ui/alert.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/aspect-ratio.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/aspect-ratio.tsx",
+    "bytes": 280,
+    "canonical": "src/components/ui/aspect-ratio.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/avatar.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/avatar.tsx",
+    "bytes": 1097,
+    "canonical": "src/components/ui/avatar.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/badge.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/badge.tsx",
+    "bytes": 1631,
+    "canonical": "src/components/ui/badge.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/breadcrumb.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/breadcrumb.tsx",
+    "bytes": 2357,
+    "canonical": "src/components/ui/breadcrumb.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/button.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/button.tsx",
+    "bytes": 2123,
+    "canonical": "src/components/ui/button.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/calendar.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/calendar.tsx",
+    "bytes": 7660,
+    "canonical": "src/components/ui/calendar.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/card.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/card.tsx",
+    "bytes": 1989,
+    "canonical": "src/components/ui/card.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/carousel.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/carousel.tsx",
+    "bytes": 5483,
+    "canonical": "src/components/ui/carousel.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/chart.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/chart.tsx",
+    "bytes": 9781,
+    "canonical": "src/components/ui/chart.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/checkbox.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/checkbox.tsx",
+    "bytes": 1226,
+    "canonical": "src/components/ui/checkbox.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/collapsible.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/collapsible.tsx",
+    "bytes": 800,
+    "canonical": "src/components/ui/collapsible.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/command.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/command.tsx",
+    "bytes": 4818,
+    "canonical": "src/components/ui/command.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/context-menu.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/context-menu.tsx",
+    "bytes": 8222,
+    "canonical": "src/components/ui/context-menu.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/dialog.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/dialog.tsx",
+    "bytes": 3982,
+    "canonical": "src/components/ui/dialog.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/drawer.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/drawer.tsx",
+    "bytes": 4255,
+    "canonical": "src/components/ui/drawer.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/dropdown-menu.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/dropdown-menu.tsx",
+    "bytes": 8284,
+    "canonical": "src/components/ui/dropdown-menu.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/form.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/form.tsx",
+    "bytes": 3759,
+    "canonical": "src/components/ui/form.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/hover-card.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/hover-card.tsx",
+    "bytes": 1532,
+    "canonical": "src/components/ui/hover-card.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/input-otp.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/input-otp.tsx",
+    "bytes": 2254,
+    "canonical": "src/components/ui/input-otp.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/input.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/input.tsx",
+    "bytes": 967,
+    "canonical": "src/components/ui/input.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/label.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/label.tsx",
+    "bytes": 611,
+    "canonical": "src/components/ui/label.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/menubar.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/menubar.tsx",
+    "bytes": 8394,
+    "canonical": "src/components/ui/menubar.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/navigation-menu.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/navigation-menu.tsx",
+    "bytes": 6664,
+    "canonical": "src/components/ui/navigation-menu.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/pagination.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/pagination.tsx",
+    "bytes": 2712,
+    "canonical": "src/components/ui/pagination.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/popover.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/popover.tsx",
+    "bytes": 1635,
+    "canonical": "src/components/ui/popover.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/progress.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/progress.tsx",
+    "bytes": 740,
+    "canonical": "src/components/ui/progress.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/radio-group.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/radio-group.tsx",
+    "bytes": 1466,
+    "canonical": "src/components/ui/radio-group.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/resizable.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/resizable.tsx",
+    "bytes": 2028,
+    "canonical": "src/components/ui/resizable.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/scroll-area.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/scroll-area.tsx",
+    "bytes": 1645,
+    "canonical": "src/components/ui/scroll-area.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/select.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/select.tsx",
+    "bytes": 6253,
+    "canonical": "src/components/ui/select.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/separator.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/separator.tsx",
+    "bytes": 699,
+    "canonical": "src/components/ui/separator.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/sheet.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/sheet.tsx",
+    "bytes": 4090,
+    "canonical": "src/components/ui/sheet.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/sidebar.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/sidebar.tsx",
+    "bytes": 21633,
+    "canonical": "src/components/ui/sidebar.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/skeleton.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/skeleton.tsx",
+    "bytes": 276,
+    "canonical": "src/components/ui/skeleton.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/slider.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/slider.tsx",
+    "bytes": 2001,
+    "canonical": "src/components/ui/slider.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/sonner.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/sonner.tsx",
+    "bytes": 564,
+    "canonical": "src/components/ui/sonner.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/switch.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/switch.tsx",
+    "bytes": 1177,
+    "canonical": "src/components/ui/switch.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/table.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/table.tsx",
+    "bytes": 2448,
+    "canonical": "src/components/ui/table.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/tabs.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/tabs.tsx",
+    "bytes": 1969,
+    "canonical": "src/components/ui/tabs.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/textarea.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/textarea.tsx",
+    "bytes": 759,
+    "canonical": "src/components/ui/textarea.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/toast.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/toast.tsx",
+    "bytes": 4829,
+    "canonical": "src/components/ui/toast.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/toaster.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/toaster.tsx",
+    "bytes": 785,
+    "canonical": "src/components/ui/toaster.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/toggle-group.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/toggle-group.tsx",
+    "bytes": 1925,
+    "canonical": "src/components/ui/toggle-group.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/toggle.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/toggle.tsx",
+    "bytes": 1570,
+    "canonical": "src/components/ui/toggle.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/components/ui/tooltip.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/components/ui/tooltip.tsx",
+    "bytes": 1891,
+    "canonical": "src/components/ui/tooltip.tsx",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/hooks/use-mobile.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/hooks/use-mobile.ts",
+    "bytes": 499,
+    "canonical": "src/hooks/use-mobile.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/hooks/use-toast.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/hooks/use-toast.ts",
+    "bytes": 3917,
+    "canonical": "src/hooks/use-toast.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/audit.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/audit.ts",
+    "bytes": 1160,
+    "canonical": "src/lib/audit.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/auth.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/auth.ts",
+    "bytes": 3750,
+    "canonical": "src/lib/auth.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/automation/audit.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/automation/audit.ts",
+    "bytes": 1506,
+    "canonical": "src/lib/automation/audit.ts",
+    "canonical_exists": false,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/lib/db.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/db.ts",
+    "bytes": 364,
+    "canonical": "src/lib/db.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/deploy/detector.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/deploy/detector.ts",
+    "bytes": 7333,
+    "canonical": "src/lib/deploy/detector.ts",
+    "canonical_exists": false,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/lib/deploy/orchestrator.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/deploy/orchestrator.ts",
+    "bytes": 7386,
+    "canonical": "src/lib/deploy/orchestrator.ts",
+    "canonical_exists": false,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/lib/env.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/env.ts",
+    "bytes": 3844,
+    "canonical": "src/lib/env.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/helpers.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/helpers.ts",
+    "bytes": 2896,
+    "canonical": "src/lib/helpers.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/logger.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/logger.ts",
+    "bytes": 448,
+    "canonical": "src/lib/logger.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/nextauth.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/nextauth.ts",
+    "bytes": 3424,
+    "canonical": "src/lib/nextauth.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/password.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/password.ts",
+    "bytes": 301,
+    "canonical": "src/lib/password.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/prisma.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/prisma.ts",
+    "bytes": 284,
+    "canonical": "src/lib/prisma.ts",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-hosting-portal/src/lib/redis.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/redis.ts",
+    "bytes": 1347,
+    "canonical": "src/lib/redis.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/response.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/response.ts",
+    "bytes": 1036,
+    "canonical": "src/lib/response.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/security.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/security.ts",
+    "bytes": 1709,
+    "canonical": "src/lib/security.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/seed-agents.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/seed-agents.ts",
+    "bytes": 12209,
+    "canonical": "src/lib/seed-agents.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/smtp.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/smtp.ts",
+    "bytes": 7289,
+    "canonical": "src/lib/smtp.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/storage.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/storage.ts",
+    "bytes": 2859,
+    "canonical": "src/lib/storage.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/lib/utils.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/lib/utils.ts",
+    "bytes": 166,
+    "canonical": "src/lib/utils.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/middleware.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/middleware.ts",
+    "bytes": 3068,
+    "canonical": "src/proxy.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/stores/authStore.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/stores/authStore.ts",
+    "bytes": 3564,
+    "canonical": "src/stores/authStore.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/src/stores/usePlatformStore.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/src/stores/usePlatformStore.ts",
+    "bytes": 3037,
+    "canonical": "src/stores/usePlatformStore.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tailwind.config.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tailwind.config.ts",
+    "bytes": 2617,
+    "canonical": "tailwind.config.ts",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/api-routes.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/api-routes.test.ts",
+    "bytes": 9766,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/auth.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/auth.test.ts",
+    "bytes": 7690,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/constants.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/constants.test.ts",
+    "bytes": 710,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/cron.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/cron.test.ts",
+    "bytes": 8733,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/health.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/health.test.ts",
+    "bytes": 948,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/helpers.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/helpers.test.ts",
+    "bytes": 1713,
+    "canonical": "tests/helpers.test.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/lib.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/lib.test.ts",
+    "bytes": 10427,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/response.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/response.test.ts",
+    "bytes": 2279,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/security.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/security.test.ts",
+    "bytes": 2412,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tests/utils.test.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tests/utils.test.ts",
+    "bytes": 1700,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/tsconfig.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/tsconfig.json",
+    "bytes": 993,
+    "canonical": "tsconfig.json",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/vitest.config.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/vitest.config.ts",
+    "bytes": 280,
+    "canonical": "vitest.config.mts",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-hosting-portal/worklog.md": {
+    "archived_at": "archive/retired-2026-11-09/alo-hosting-portal/worklog.md",
+    "bytes": 3128,
+    "canonical": "superseded by canonical module or archived-only historical asset",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/.gitignore": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/.gitignore",
+    "bytes": 170,
+    "canonical": "deploy/server-kit/.gitignore",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/README.md": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/README.md",
+    "bytes": 9931,
+    "canonical": "deploy/server-kit/README.md",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/backup.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/backup.sh",
+    "bytes": 791,
+    "canonical": "deploy/server-kit/backup.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/config.env.example": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/config.env.example",
+    "bytes": 1941,
+    "canonical": "deploy/server-kit/config.env.example",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/ai-tools/aider.alo.yml": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/ai-tools/aider.alo.yml",
+    "bytes": 211,
+    "canonical": "deploy/server-kit/configs/ai-tools/aider.alo.yml",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/ai-tools/cline.settings.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/ai-tools/cline.settings.json",
+    "bytes": 313,
+    "canonical": "deploy/server-kit/configs/ai-tools/cline.settings.json",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/ai-tools/continue.config.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/ai-tools/continue.config.json",
+    "bytes": 783,
+    "canonical": "deploy/server-kit/configs/ai-tools/continue.config.json",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/alo-db-backup.cron": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/alo-db-backup.cron",
+    "bytes": 84,
+    "canonical": "deploy/server-kit/configs/alo-db-backup.cron",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/alo-healthcheck.cron": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/alo-healthcheck.cron",
+    "bytes": 89,
+    "canonical": "deploy/server-kit/configs/alo-healthcheck.cron",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/github-actions/deploy.yml": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/github-actions/deploy.yml",
+    "bytes": 1064,
+    "canonical": "deploy/server-kit/configs/github-actions/deploy.yml",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/litellm/config.yaml.tpl": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/litellm/config.yaml.tpl",
+    "bytes": 2304,
+    "canonical": "deploy/server-kit/configs/litellm/config.yaml.tpl",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/nginx/default-site.conf.tpl": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/nginx/default-site.conf.tpl",
+    "bytes": 1000,
+    "canonical": "deploy/server-kit/configs/nginx/default-site.conf.tpl",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/nginx/snippets/alo-litellm.conf": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/nginx/snippets/alo-litellm.conf",
+    "bytes": 443,
+    "canonical": "deploy/server-kit/configs/nginx/snippets/alo-litellm.conf",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/nginx/snippets/alo-netdata.conf": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/nginx/snippets/alo-netdata.conf",
+    "bytes": 428,
+    "canonical": "deploy/server-kit/configs/nginx/snippets/alo-netdata.conf",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/nginx/snippets/alo-security.conf": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/nginx/snippets/alo-security.conf",
+    "bytes": 779,
+    "canonical": "deploy/server-kit/configs/nginx/snippets/alo-security.conf",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/nginx/snippets/alo-syncthing.conf": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/nginx/snippets/alo-syncthing.conf",
+    "bytes": 520,
+    "canonical": "deploy/server-kit/configs/nginx/snippets/alo-syncthing.conf",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/pm2/ecosystem.config.cjs": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/pm2/ecosystem.config.cjs",
+    "bytes": 387,
+    "canonical": "deploy/server-kit/configs/pm2/ecosystem.config.cjs",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/systemd/litellm.service.tpl": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/systemd/litellm.service.tpl",
+    "bytes": 489,
+    "canonical": "deploy/server-kit/configs/systemd/litellm.service.tpl",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/systemd/ollama.service.tpl": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/systemd/ollama.service.tpl",
+    "bytes": 531,
+    "canonical": "deploy/server-kit/configs/systemd/ollama.service.tpl",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/systemd/open-webui.service.tpl": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/systemd/open-webui.service.tpl",
+    "bytes": 610,
+    "canonical": "deploy/server-kit/configs/systemd/open-webui.service.tpl",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/configs/systemd/pm2.service.tpl": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/configs/systemd/pm2.service.tpl",
+    "bytes": 400,
+    "canonical": "deploy/server-kit/configs/systemd/pm2.service.tpl",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/README.md": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/README.md",
+    "bytes": 370,
+    "canonical": "deploy/server-kit/demo-app/README.md",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/next.config.js": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/next.config.js",
+    "bytes": 300,
+    "canonical": "deploy/server-kit/demo-app/next.config.js",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/package.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/package.json",
+    "bytes": 465,
+    "canonical": "deploy/server-kit/demo-app/package.json",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/src/app/globals.css": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/src/app/globals.css",
+    "bytes": 895,
+    "canonical": "deploy/server-kit/demo-app/src/app/globals.css",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/src/app/healthz/route.ts": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/src/app/healthz/route.ts",
+    "bytes": 352,
+    "canonical": "deploy/server-kit/demo-app/src/app/healthz/route.ts",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/src/app/layout.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/src/app/layout.tsx",
+    "bytes": 322,
+    "canonical": "deploy/server-kit/demo-app/src/app/layout.tsx",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/src/app/page.tsx": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/src/app/page.tsx",
+    "bytes": 1076,
+    "canonical": "deploy/server-kit/demo-app/src/app/page.tsx",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/demo-app/tsconfig.json": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/demo-app/tsconfig.json",
+    "bytes": 567,
+    "canonical": "deploy/server-kit/demo-app/tsconfig.json",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/lib/common.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/lib/common.sh",
+    "bytes": 3575,
+    "canonical": "deploy/server-kit/lib/common.sh",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/restore.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/restore.sh",
+    "bytes": 982,
+    "canonical": "deploy/server-kit/restore.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/scripts/auto-env-fixer.js": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/scripts/auto-env-fixer.js",
+    "bytes": 5015,
+    "canonical": "deploy/server-kit/scripts/auto-env-fixer.js",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "alo-server-kit/scripts/close-ssh-22.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/scripts/close-ssh-22.sh",
+    "bytes": 837,
+    "canonical": "deploy/server-kit/scripts/close-ssh-22.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/scripts/ollama-add-model.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/scripts/ollama-add-model.sh",
+    "bytes": 1097,
+    "canonical": "deploy/server-kit/scripts/ollama-add-model.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/scripts/rotate-litellm-key.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/scripts/rotate-litellm-key.sh",
+    "bytes": 1354,
+    "canonical": "deploy/server-kit/scripts/rotate-litellm-key.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/scripts/ssh-key.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/scripts/ssh-key.sh",
+    "bytes": 894,
+    "canonical": "deploy/server-kit/scripts/ssh-key.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/setup.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/setup.sh",
+    "bytes": 2774,
+    "canonical": "deploy/server-kit/setup.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/00-preflight.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/00-preflight.sh",
+    "bytes": 2382,
+    "canonical": "deploy/server-kit/stages/00-preflight.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/01-security.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/01-security.sh",
+    "bytes": 3705,
+    "canonical": "deploy/server-kit/stages/01-security.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/02-webapp.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/02-webapp.sh",
+    "bytes": 6193,
+    "canonical": "deploy/server-kit/stages/02-webapp.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/03-databases.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/03-databases.sh",
+    "bytes": 5893,
+    "canonical": "deploy/server-kit/stages/03-databases.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/04-ai-infra.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/04-ai-infra.sh",
+    "bytes": 7213,
+    "canonical": "deploy/server-kit/stages/04-ai-infra.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/05-ai-tools.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/05-ai-tools.sh",
+    "bytes": 3186,
+    "canonical": "deploy/server-kit/stages/05-ai-tools.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/06-ops.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/06-ops.sh",
+    "bytes": 4473,
+    "canonical": "deploy/server-kit/stages/06-ops.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/stages/07-filesync.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/stages/07-filesync.sh",
+    "bytes": 4801,
+    "canonical": "deploy/server-kit/stages/07-filesync.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/status.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/status.sh",
+    "bytes": 1286,
+    "canonical": "deploy/server-kit/status.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "alo-server-kit/verify.sh": {
+    "archived_at": "archive/retired-2026-11-09/alo-server-kit/verify.sh",
+    "bytes": 6021,
+    "canonical": "deploy/server-kit/verify.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "docker-compose.node20.yml": {
+    "archived_at": "archive/retired-2026-11-09/docker-compose.node20.yml",
+    "bytes": 1617,
+    "canonical": "docker-compose.yml",
+    "canonical_exists": null,
+    "mode": "0o100644"
+  },
+  "docs/SERVER-SPEC.md": {
+    "archived_at": "archive/retired-2026-11-09/docs/SERVER-SPEC.md",
+    "bytes": 5109,
+    "canonical": "SERVER-SPEC.md",
+    "canonical_exists": null,
+    "mode": "0o100644"
+  },
+  "helpers/sudoers-alo": {
+    "archived_at": "archive/retired-2026-11-09/helpers/sudoers-alo",
+    "bytes": 1874,
+    "canonical": "deploy/sudoers/alo-hosting-portal",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "install-scripts/configure-email.sh": {
+    "archived_at": "archive/retired-2026-11-09/install-scripts/configure-email.sh",
+    "bytes": 22362,
+    "canonical": "deploy/server-kit/scripts/configure-email.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "install-scripts/install.sh": {
+    "archived_at": "archive/retired-2026-11-09/install-scripts/install.sh",
+    "bytes": 4545,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "install-scripts/rollback.sh": {
+    "archived_at": "archive/retired-2026-11-09/install-scripts/rollback.sh",
+    "bytes": 1154,
+    "canonical": "scripts/rollback.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "install-scripts/update.sh": {
+    "archived_at": "archive/retired-2026-11-09/install-scripts/update.sh",
+    "bytes": 1573,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/alolabs.service": {
+    "archived_at": "archive/retired-2026-11-09/scripts/alolabs.service",
+    "bytes": 1158,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/create-final-zip.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/create-final-zip.sh",
+    "bytes": 3725,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/create-full-zip.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/create-full-zip.py",
+    "bytes": 4519,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/create-production-zip.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/create-production-zip.sh",
+    "bytes": 1256,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/create-zip.mjs": {
+    "archived_at": "archive/retired-2026-11-09/scripts/create-zip.mjs",
+    "bytes": 1929,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/create-zip.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/create-zip.py",
+    "bytes": 1392,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/create-zip.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/create-zip.sh",
+    "bytes": 427,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/deploy-alo-portal.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/deploy-alo-portal.sh",
+    "bytes": 73649,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/fix-brand-colors.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/fix-brand-colors.py",
+    "bytes": 2920,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/fix-colors.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/fix-colors.py",
+    "bytes": 2450,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/fix-lint.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/fix-lint.py",
+    "bytes": 5863,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/gen.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/gen.py",
+    "bytes": 61,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deploy-guide-v2.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deploy-guide-v2.py",
+    "bytes": 102133,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deploy-guide.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deploy-guide.py",
+    "bytes": 94997,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deploy-package-p2.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deploy-package-p2.py",
+    "bytes": 38264,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deploy-package-p3.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deploy-package-p3.py",
+    "bytes": 25654,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deploy-package-p4.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deploy-package-p4.py",
+    "bytes": 37518,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deploy-package.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deploy-package.py",
+    "bytes": 24060,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-deployment-pdf.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-deployment-pdf.py",
+    "bytes": 44291,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-dev-guide.js": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-dev-guide.js",
+    "bytes": 48493,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/generate-guideline-pdf.py": {
+    "archived_at": "archive/retired-2026-11-09/scripts/generate-guideline-pdf.py",
+    "bytes": 38549,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/install-alo-portal.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/install-alo-portal.sh",
+    "bytes": 34492,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/install.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/install.sh",
+    "bytes": 2155,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/package-production.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/package-production.sh",
+    "bytes": 2549,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "scripts/update.sh": {
+    "archived_at": "archive/retired-2026-11-09/scripts/update.sh",
+    "bytes": 1858,
+    "canonical": "scripts/legacy/compat.sh",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-config/alo-hosting-portal.sudoers": {
+    "archived_at": "archive/retired-2026-11-09/server-config/alo-hosting-portal.sudoers",
+    "bytes": 1874,
+    "canonical": "deploy/sudoers/alo-hosting-portal",
+    "canonical_exists": true,
+    "mode": "0o100644"
+  },
+  "server-config/alo-server-hosting.service": {
+    "archived_at": "archive/retired-2026-11-09/server-config/alo-server-hosting.service",
+    "bytes": 858,
+    "canonical": "deploy/systemd/alo-server-hosting.service",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-config/application.service": {
+    "archived_at": "archive/retired-2026-11-09/server-config/application.service",
+    "bytes": 807,
+    "canonical": "deploy/systemd/alo-hosting-panel.service",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-config/reverse-proxy.conf": {
+    "archived_at": "archive/retired-2026-11-09/server-config/reverse-proxy.conf",
+    "bytes": 139,
+    "canonical": "deploy/nginx/hosting.alolabs.net.conf",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-config/sudo-policy": {
+    "archived_at": "archive/retired-2026-11-09/server-config/sudo-policy",
+    "bytes": 1874,
+    "canonical": "deploy/sudoers/alo-hosting-portal",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-cron-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-cron-helper",
+    "bytes": 9286,
+    "canonical": "helpers/alo-cron-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-database-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-database-helper",
+    "bytes": 11115,
+    "canonical": "helpers/alo-database-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-deploy-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-deploy-helper",
+    "bytes": 10131,
+    "canonical": "helpers/alo-deploy-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-dns-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-dns-helper",
+    "bytes": 9313,
+    "canonical": "helpers/alo-dns-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-docker-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-docker-helper",
+    "bytes": 10583,
+    "canonical": "helpers/alo-docker-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-domain-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-domain-helper",
+    "bytes": 7595,
+    "canonical": "helpers/alo-domain-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-email-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-email-helper",
+    "bytes": 9532,
+    "canonical": "helpers/alo-email-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-encryption-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-encryption-helper",
+    "bytes": 14352,
+    "canonical": "helpers/alo-encryption-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-file-manager-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-file-manager-helper",
+    "bytes": 15947,
+    "canonical": "helpers/alo-file-manager-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-firewall-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-firewall-helper",
+    "bytes": 6608,
+    "canonical": "helpers/alo-firewall-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-health-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-health-helper",
+    "bytes": 7962,
+    "canonical": "helpers/alo-health-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-hosting-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-hosting-helper",
+    "bytes": 11352,
+    "canonical": "helpers/alo-hosting-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-log-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-log-helper",
+    "bytes": 8150,
+    "canonical": "helpers/alo-log-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-node-app-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-node-app-helper",
+    "bytes": 8851,
+    "canonical": "helpers/alo-node-app-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-site-backup": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-site-backup",
+    "bytes": 8433,
+    "canonical": "helpers/alo-site-backup",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-site-lifecycle": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-site-lifecycle",
+    "bytes": 8776,
+    "canonical": "helpers/alo-site-lifecycle",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-site-restore": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-site-restore",
+    "bytes": 11512,
+    "canonical": "helpers/alo-site-restore",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-ssh-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-ssh-helper",
+    "bytes": 7821,
+    "canonical": "helpers/alo-ssh-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "server-helpers/alo-ssl-helper": {
+    "archived_at": "archive/retired-2026-11-09/server-helpers/alo-ssl-helper",
+    "bytes": 9298,
+    "canonical": "helpers/alo-ssl-helper",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "src/middleware.ts": {
+    "archived_at": "archive/retired-2026-11-09/src/middleware.ts",
+    "bytes": 17142,
+    "canonical": "src/proxy.ts",
+    "canonical_exists": true,
+    "mode": "0o100755"
+  },
+  "vitest.config.ts": {
+    "archived_at": "archive/retired-2026-11-09/vitest.config.ts",
+    "bytes": 308,
+    "canonical": "vitest.config.mts",
+    "canonical_exists": null,
+    "mode": "0o100755"
+  }
+}

@@ -122,9 +122,9 @@ jobs:
       - name: Validate all shell scripts parse
         run: |
           set -Eeuo pipefail
-          # Matched by shebang as well as by extension: 38 of the shell programs
-          # in this repository are the extension-less helpers (`helpers/alo-*`,
-          # `server-helpers/alo-*`) that the agents execute on customer servers.
+          # Matched by shebang as well as by extension: the extension-less
+          # privileged helpers (`helpers/alo-*`) and the Ubuntu provisioning
+          # stages (`deploy/server-kit/stages/*`) have no .sh suffix.
           # A `-name '*.sh'` filter silently checks none of them, so the gate
           # reports green while the highest-privilege scripts go unvalidated.
           failed=0
@@ -138,7 +138,7 @@ jobs:
                 failed=1
               fi
             fi
-          done < <(find scripts helpers server-helpers install-scripts deploy agent -type f -print0 2>/dev/null)
+          done < <(find scripts helpers deploy agent -type f -print0 2>/dev/null)
           echo "validated ${checked} shell programs"
           # A gate that silently matched nothing would also be green.
           [ "$checked" -ge 40 ] || { echo "::error::only ${checked} shell programs were found; the syntax gate is not covering the repository"; exit 1; }

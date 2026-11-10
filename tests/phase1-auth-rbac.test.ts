@@ -16,7 +16,7 @@ import {
   isAdminPath,
   isProtectedDashboardPath,
   canAccessRoute,
-} from "../src/middleware";
+} from "../src/proxy";
 
 describe("Phase 1: RBAC & Role Hierarchy", () => {
   it("defines ADMIN, RESELLER, CLIENT and enterprise roles with expected hierarchy", () => {

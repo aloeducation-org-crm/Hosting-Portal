@@ -13,7 +13,7 @@ When `NODE_ENV=production` (outside `next build`), `src/lib/env.ts` inspects fou
 
 | Variable | Required in Prod | Purpose | Generation Command |
 |---|:---:|---|---|
-| `NEXTAUTH_SECRET` | **YES (Fail-Closed)** | Signs and encrypts NextAuth session JWTs (`src/lib/auth-options.ts`, `src/middleware.ts`) | `openssl rand -hex 32` |
+| `NEXTAUTH_SECRET` | **YES (Fail-Closed)** | Signs and encrypts NextAuth session JWTs (`src/lib/auth-options.ts`, `src/proxy.ts`) | `openssl rand -hex 32` |
 | `JWT_SECRET` | **YES (Fail-Closed)** | Signs auxiliary platform JWT tokens (must be distinct from `NEXTAUTH_SECRET`) | `openssl rand -hex 32` |
 | `APP_ENCRYPTION_KEY` | **YES (Fail-Closed)** | Master key material for AES-256-GCM at-rest secret encryption (`src/lib/encryption.ts`, `/api/security/encrypt`, GitHub OAuth tokens, site `.env` secrets) | `openssl rand -hex 32` |
 | `INTERNAL_SECRET` | **YES (Fail-Closed)** | Authenticates internal background worker/collector endpoints (`/api/operations/worker`, `/api/monitoring/collect`) via constant-time SHA-256 `timingSafeEqual` (`>=16` chars) | `openssl rand -hex 32` |
@@ -76,4 +76,4 @@ All external integrations are **optional**. Missing keys never block application
 
 ## 5. Historical Secret Exposure Remediation Notice (`SEC-01`)
 
-During Phase One auditing, plaintext credentials were discovered inside `alo-server-kit/scripts/auto-env-fixer.js` (introduced in historical commit `fa37b00`). Phase Two scrubbed all hardcoded values and replaced them with CSPRNG generation (`0o600` permissions). **Before production cutover**, an authorized operator must rotate any database, LiteLLM, or cron credentials on hosts that ever executed the legacy `auto-env-fixer.js` script, and optionally purge historical commit blobs only under an explicitly approved Git maintenance window.
+During Phase One auditing, plaintext credentials were discovered inside `deploy/server-kit/scripts/auto-env-fixer.js` (introduced in historical commit `fa37b00`). Phase Two scrubbed all hardcoded values and replaced them with CSPRNG generation (`0o600` permissions). **Before production cutover**, an authorized operator must rotate any database, LiteLLM, or cron credentials on hosts that ever executed the legacy `auto-env-fixer.js` script, and optionally purge historical commit blobs only under an explicitly approved Git maintenance window.
