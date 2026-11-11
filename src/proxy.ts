@@ -21,6 +21,8 @@ const STRICT_PUBLIC_PATHS = new Set([
   "/api/auth/signup",
   "/api/auth/register",
   "/api/auth/mfa-challenge",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/contact",
   "/api/newsletter",
   // Public storefront domain availability lookup (registry RDAP, no session needed).

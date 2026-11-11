@@ -195,10 +195,10 @@ function LoginContent() {
             <div className="flex items-center justify-between">
               <Label htmlFor="password">Password</Label>
               <Link
-                href="/verify-email"
+                href="/forgot-password"
                 className="text-xs font-medium text-[#E8501A] hover:underline"
               >
-                Verify email / Help?
+                Forgot password?
               </Link>
             </div>
             <div className="relative">
@@ -255,6 +255,12 @@ function LoginContent() {
             Create a free account
           </Link>
         </p>
+        <Link
+          href="/verify-email"
+          className="text-xs text-slate-500 hover:text-[#E8501A] hover:underline"
+        >
+          Need to verify your email?
+        </Link>
       </CardFooter>
     </Card>
   );

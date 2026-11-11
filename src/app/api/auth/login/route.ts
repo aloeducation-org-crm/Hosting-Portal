@@ -57,8 +57,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (user.isLocked && user.lockedUntil) {
-      if (new Date() > user.lockedUntil) {
+    // Check if locked and if lock period has expired. A null `lockedUntil`
+    // must not silently disable the lockout.
+    if (user.isLocked) {
+      if (user.lockedUntil && new Date() > user.lockedUntil) {
         await db.user.update({
           where: { id: user.id },
           data: { isLocked: false, lockedUntil: null, failedLoginAttempts: 0 },

@@ -63,9 +63,11 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        // Check if locked and if lock period has expired
-        if (user.isLocked && user.lockedUntil) {
-          if (new Date() > user.lockedUntil) {
+        // Check if locked. A lock with an expired `lockedUntil` is lifted; a
+        // lock without one (or still inside its window) blocks sign-in — a
+        // null `lockedUntil` must never silently disable the lockout.
+        if (user.isLocked) {
+          if (user.lockedUntil && new Date() > user.lockedUntil) {
             await db.user.update({
               where: { id: user.id },
               data: { isLocked: false, lockedUntil: null, failedLoginAttempts: 0 },
