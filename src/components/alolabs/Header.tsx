@@ -416,6 +416,7 @@ function ALOLogo({ className }: { className?: string }) {
 export default function Header() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user, isAuthenticated, logout } = useAuthStore();
 
   return (
@@ -500,7 +501,7 @@ export default function Header() {
             </div>
 
             {/* Mobile hamburger */}
-            <Sheet>
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
                 <button
                   type="button"
@@ -511,7 +512,7 @@ export default function Header() {
                 </button>
               </SheetTrigger>
               <SheetContent side="left" className="w-80 p-0 overflow-hidden">
-                <MobileMenuContent onClose={() => {}} />
+                <MobileMenuContent onClose={() => setMobileMenuOpen(false)} />
               </SheetContent>
             </Sheet>
           </div>
