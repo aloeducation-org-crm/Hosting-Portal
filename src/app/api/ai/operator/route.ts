@@ -5,6 +5,11 @@ import { db } from "@/lib/db";
 import { requireSession, isAdminRole, type AuthUser } from "@/lib/auth";
 import { apiError, apiSuccess, type ApiResponse } from "@/lib/response";
 import { createAuditLog } from "@/lib/audit";
+import {
+  assertOperatorCommandAllowed,
+  OperatorForbiddenError,
+  type OperatorCommand,
+} from "@/lib/operator/command-policy";
 import { ensureDefaultAgentsSeeded } from "@/lib/seed-agents";
 import { resolveProviders } from "@/lib/ai/providers";
 import { generateMarketingKit } from "@/lib/marketing/suite";
@@ -82,6 +87,14 @@ function handleErr(e: unknown): NextResponse {
     return NextResponse.json(
       apiError("Validation failed", "VALIDATION_ERROR", e.flatten(), 400),
       { status: 400 },
+    );
+  }
+  // Checked before the generic `status`-bearing branch below, which would
+  // serialise an Error instance to `{}` and return a 403 with no explanation.
+  if (e instanceof OperatorForbiddenError) {
+    return NextResponse.json(
+      apiError(e.message, "FORBIDDEN", { command: e.command, rationale: e.rationale }, 403),
+      { status: 403 },
     );
   }
   if (e && typeof e === "object" && "status" in e) {
@@ -357,11 +370,42 @@ export async function POST(request: NextRequest) {
       if (inferred.extractedEmail && !params.email) params.email = inferred.extractedEmail;
     }
 
+    // Authorise the *concrete* command, after any natural-language inference has
+    // been resolved. Checking here — rather than trusting the declared command —
+    // is what stops a prompt like "upgrade me to enterprise" from reaching the
+    // entitlement-changing branch through `natural_language`.
+    try {
+      assertOperatorCommandAllowed(user, effectiveCommand as OperatorCommand);
+    } catch (denied) {
+      // Record the attempt before rethrowing. A customer trying to self-grant a
+      // plan is a security event, not a routine 403: it must be reviewable.
+      await createAuditLog({
+        actorId: user.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        action: `BILL_AGENT_AI_${effectiveCommand.toUpperCase()}`,
+        resourceType: "AiAgent",
+        resourceId: billAgent?.id ?? "alo-bill-ops-autopilot",
+        result: "FAILURE",
+        metadata: {
+          authMode,
+          command: effectiveCommand,
+          reason: "operator command requires an administrative role",
+          durationMs: Date.now() - startedAt,
+        },
+      }).catch(() => undefined);
+      throw denied;
+    }
+
     let summaryBn = "";
     let summaryEn = "";
     let actionResult: Record<string, unknown> = {};
 
     if (effectiveCommand === "activate_plan") {
+      // Re-asserted at the branch, not only at dispatch: this branch mints a
+      // paid entitlement, so it must never be reachable by a customer session
+      // even if the dispatch gate above is refactored away.
+      assertOperatorCommandAllowed(user, "activate_plan");
       const rawSlug = String(params.planSlug || params.planId || "business").toLowerCase();
       const targetSlug = rawSlug === "premium" ? "business" : rawSlug;
       const cycle = params.billingCycle === "yearly" ? "yearly" : "monthly";
@@ -440,6 +484,7 @@ export async function POST(request: NextRequest) {
       summaryEn = `Bill Agent AI activated the "${plan.name}" plan ($${amountUsd.toFixed(2)}) and issued paid invoice #${txResult.invoice.id.slice(0, 8).toUpperCase()}.`;
       actionResult = txResult;
     } else if (effectiveCommand === "generate_invoice") {
+      assertOperatorCommandAllowed(user, "generate_invoice");
       const amountUsd = Math.max(0.5, Number(params.amount ?? 49));
       const amountCents = Math.round(amountUsd * 100);
       const status = params.markPaid === true ? "paid" : "pending";
@@ -459,6 +504,7 @@ export async function POST(request: NextRequest) {
       summaryEn = `Bill Agent AI generated invoice #${invoice.id.slice(0, 8).toUpperCase()} for $${amountUsd.toFixed(2)} (${status}).`;
       actionResult = { invoice };
     } else if (effectiveCommand === "mark_invoice_paid") {
+      assertOperatorCommandAllowed(user, "mark_invoice_paid");
       const invoiceId = String(params.invoiceId || "");
       const target = invoiceId
         ? await db.invoice.findUnique({ where: { id: invoiceId } })
