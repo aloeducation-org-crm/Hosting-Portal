@@ -1,5 +1,7 @@
 # Phase 0 — Independent Re-Audit — ALO Hosting Portal
 
+> **Corrections:** a later audit at `c5c81fdd` corrects several statements in this document (production status, tenant isolation, build isolation, billing). See section 4 of [`PHASE-0-MASTER-AUDIT-2026-11-11.md`](PHASE-0-MASTER-AUDIT-2026-11-11.md).
+
 **Date:** 2026-11-11 (UTC)
 **Branch:** `arena/30b1a218-hosting-portal` @ `e8ab07467d9a3a90e3bc40a04588ea87d1f2cb03`
 **Base:** `origin/main` @ `e8ab074` (merge of PR #31)
