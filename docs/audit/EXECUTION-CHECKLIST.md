@@ -12,7 +12,8 @@
 | Baseline status | Working tree clean at start; 1,357 tracked files |
 | Baseline gate | `npm test` → 67 files / 1017 tests passing |
 | Session date | 2026-11-12 (UTC) |
-| Current gate | `npm test` → **74 files / 1174 tests** passing, `tsc --noEmit` clean, `eslint src/` clean, `next build` succeeds, `audit:repo` 17/17 |
+| Current gate | `npm run verify` → **76 files / 1234 tests** passing (1 skipped), lint clean, `tsc --noEmit` clean, production build succeeds, both worker bundles build, `audit:repo` 17/17 |
+| Pull request | **#36** — https://github.com/aloeducation-org-crm/Hosting-Portal/pull/36 (open, not merged) |
 
 ## Honesty legend
 
@@ -150,6 +151,10 @@ source (see §9).
 | `d1dc3d0` | SEC-06 verification gate, self-selected roles | +21 |
 | `37b4a41` | SEC-13 identifier validation before the raw probe | +3 |
 | `b5a523e` | audit baseline: 8 audit documents | 0 |
+| `0d4ea40` | operations runbooks + 3 audit docs | 0 |
+| `afa09cd` | SEC-11 host-level deploy settings operator-only | +30 |
+| `ea15686` | REL-03 deploy worker supervision | +26 |
+| `aa91fa1` | SEC-02 disconnect through shared rule | +4 |
 
 ## 9. Corrections made while writing the docs
 
