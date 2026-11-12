@@ -127,6 +127,21 @@ export function sanitiseDetail(raw: string): string {
   return out;
 }
 
+/**
+ * Reject anything that is not a bare SQL identifier.
+ *
+ * Defence in depth around `$queryRawUnsafe`: the only caller passes constants, but
+ * a future caller that passes a variable must not be able to inject SQL through a
+ * table or column name. An identifier-shaped string cannot contain a quote, a
+ * semicolon or whitespace, so interpolation cannot escape the quoted position.
+ */
+export function requireIdentifier(value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(value)) {
+    throw new Error("health probe identifier rejected");
+  }
+  return value;
+}
+
 /** True when the process is running on the fixture fallback rather than a configured database. */
 export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim());
@@ -157,10 +172,20 @@ export interface HealthInputs {
  */
 export async function buildHealthReport(inputs: HealthInputs = {}): Promise<HealthReport> {
   const now = inputs.now ?? (() => Date.now());
+  /**
+   * The probe builds SQL from a compile-time constant list (`SCHEMA_PROBES`), not
+   * from any request input, and identifiers are validated before interpolation as
+   * a second layer. `$queryRawUnsafe` is used because Prisma cannot parameterise
+   * identifiers; the validation below is what makes that safe, and the repo audit
+   * counts raw statements so this one is visible in review.
+   */
   const query =
     inputs.query ??
-    (async (probe: { table: string; columns: string[] }) =>
-      db.$queryRawUnsafe(`SELECT ${probe.columns.map((c) => `"${c}"`).join(", ")} FROM "${probe.table}" LIMIT 0`));
+    (async (probe: { table: string; columns: string[] }) => {
+      const table = requireIdentifier(probe.table);
+      const columns = probe.columns.map(requireIdentifier);
+      return db.$queryRawUnsafe(`SELECT ${columns.map((c) => `"${c}"`).join(", ")} FROM "${table}" LIMIT 0`);
+    });
 
   const base = {
     uptimeSeconds: processUptimeSeconds(now()),

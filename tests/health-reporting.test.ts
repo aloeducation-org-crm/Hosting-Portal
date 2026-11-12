@@ -20,6 +20,7 @@ import {
   httpStatusFor,
   describeHealth,
   isDatabaseConfigured,
+  requireIdentifier,
 } from "../src/lib/health";
 import { resolveDatabaseUrl } from "../src/lib/db";
 
@@ -156,6 +157,27 @@ describe("SEC-13 error classification is precise and does not over-claim health"
     const detail = sanitiseDetail("x".repeat(2_000));
     expect(detail.length).toBeLessThanOrEqual(300);
     expect(detail.endsWith("...")).toBe(true);
+  });
+});
+
+describe("SEC-13 the raw probe cannot be used for injection", () => {
+  it("accepts bare identifiers", () => {
+    for (const value of ["servers", "hosting_sites", "_x1", "git_projects"]) {
+      expect(requireIdentifier(value), value).toBe(value);
+    }
+  });
+
+  it("rejects anything that could escape a quoted identifier", () => {
+    for (const value of ['servers"; DROP TABLE audit_logs; --', "servers'", "servers;", "servers OR 1=1", "a b", "1abc", '"x"']) {
+      expect(() => requireIdentifier(value), value).toThrow(/identifier rejected/);
+    }
+  });
+
+  it("the default probe validates before it interpolates", () => {
+    const source = fs.readFileSync(path.join(ROOT, "src/lib/health.ts"), "utf8");
+    const block = source.slice(source.indexOf("const query ="), source.indexOf("const base ="));
+    expect(block).toContain("requireIdentifier(probe.table)");
+    expect(block.indexOf("requireIdentifier")).toBeLessThan(block.indexOf("$queryRawUnsafe"));
   });
 });
 
