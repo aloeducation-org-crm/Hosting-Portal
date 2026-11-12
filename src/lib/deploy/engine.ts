@@ -19,7 +19,8 @@ import {
   verifyDeployment,
   projectRoot,
 } from "./service";
-import { redact, redactCommand, collectSecrets } from "./redact";
+import { redact, redactCommand, collectSecrets, matchesPlatformSecretName } from "./redact";
+import { planBuildIsolation, assertIsolationAvailable, describeIsolation, type IsolationPlan, type ResolvedIsolation } from "./sandbox";
 import { cloneUrlFor, resolveToken } from "./github";
 import type { DeployStage, DeployConfig, ReleaseMarker } from "./types";
 
@@ -52,7 +53,14 @@ function buildEnvironment(config: DeployConfig, buildEnvFileContent: string | nu
   return env;
 }
 
-/** argv-only execution. No shell, no arbitrary interpreter eval, hard timeout. */
+/**
+ * argv-only execution. No shell, no arbitrary interpreter eval, hard timeout.
+ *
+ * `spawn.argv` is whatever the caller passes; when the caller is the deployment
+ * engine the argv is the isolation wrapper produced by `sandbox.ts` (see
+ * `runIsolatedCommand`). This function stays free of policy so it can also be
+ * used for trusted host-side commands such as `git clone`.
+ */
 export function runCommand(
   argv: string[],
   options: { cwd: string; env: Record<string, string>; timeoutMs?: number; onChunk?: (text: string) => void; secrets?: string[] },
@@ -65,9 +73,21 @@ export function runCommand(
       cwd: options.cwd,
       env: options.env as NodeJS.ProcessEnv,
       shell: false,
+      // A new session detaches the build from the control plane's terminal and
+      // process group, so a signal sent to the panel (Ctrl-C, SIGTERM on
+      // restart) does not also reach customer build steps.
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
+      // The child is a process-group leader (detached). Killing only the
+      // wrapper leaves `npm → sh → tsc` grandchildren alive, which on a real
+      // host means a timed-out build keeps consuming CPU indefinitely.
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
       finish(new Error(`command timed out after ${options.timeoutMs ?? COMMAND_TIMEOUT_MS}ms`));
     }, options.timeoutMs ?? COMMAND_TIMEOUT_MS);
 
@@ -89,6 +109,63 @@ export function runCommand(
     child.on("error", (error) => finish(error));
     child.on("close", () => finish());
   });
+}
+
+/**
+ * Environment for a customer build step.
+ *
+ * This is a *defence in depth* layer, not the isolation boundary. The boundary
+ * is the namespace wrapper applied by `runIsolatedCommand`; this function makes
+ * sure that even inside the boundary the build cannot read a platform secret
+ * from its own environment, and that a customer-supplied `.env` cannot inject
+ * one either (the allowlist in `buildEnvironment` runs first, then this filter
+ * removes anything that looks like a platform credential name).
+ */
+function assertBuildEnvIsClean(env: Record<string, string>): void {
+  const forbidden = Object.keys(env).filter((key) => matchesPlatformSecretName(key));
+  if (forbidden.length) {
+    throw new Error(`refusing to run a build with platform secret variables in its environment: ${forbidden.join(", ")}`);
+  }
+}
+
+/**
+ * Run a customer-controlled command (install/build/test script) under the
+ * configured isolation boundary.
+ *
+ * Every customer code path in this module goes through here. `runCommand`
+ * remains available for trusted host-side commands (`git clone`), but a
+ * customer build must not call it directly — `tests/build-isolation.test.ts`
+ * enforces that with a source scan.
+ */
+export async function runIsolatedCommand(
+  argv: string[],
+  options: {
+    workDir: string;
+    chdir: string;
+    cwd: string;
+    env: Record<string, string>;
+    timeoutMs?: number;
+    onChunk?: (text: string) => void;
+    secrets?: string[];
+    isolation?: IsolationPlan;
+  },
+): Promise<RunResult & { isolation: IsolationPlan }> {
+  assertBuildEnvIsClean(options.env);
+  const isolation =
+    options.isolation ??
+    (await planBuildIsolation(argv, {
+      workDir: options.workDir,
+      chdir: options.chdir,
+      env: options.env,
+    }));
+  const result = await runCommand(isolation.argv, {
+    cwd: options.cwd,
+    env: options.env,
+    timeoutMs: options.timeoutMs,
+    onChunk: options.onChunk,
+    secrets: options.secrets,
+  });
+  return { ...result, isolation };
 }
 
 async function gitCheckout(cloneUrl: string, sha: string, workdir: string, secrets: string[]): Promise<string> {
@@ -326,6 +403,19 @@ export async function runDeployment(deploymentId: string): Promise<void> {
 
     const envFile = await readBuildEnvFile(config);
     const env = buildEnvironment(config, envFile);
+
+    // Refuse before spawning anything if the isolation policy cannot be met.
+    // Planning twice (here and inside runIsolatedCommand) is intentional: this
+    // call turns an unavailable boundary into a deployment failure at the
+    // earliest stage, instead of after a clone and a detection pass.
+    let isolationLogged = false;
+    const buildRoot = workdir;
+    // Fail the deployment here — before any customer byte is fetched — if this
+    // host cannot contain a build under the configured policy.
+    const plannedIsolation: ResolvedIsolation = await assertIsolationAvailable();
+    if (plannedIsolation.unisolated) {
+      await log("WARN", describeIsolation({ ...plannedIsolation, argv: [] }));
+    }
     const run = async (label: DeployStage, command: string | null, required: boolean) => {
       const argv = parseCommand(command);
       if (!argv) {
@@ -334,7 +424,18 @@ export async function runDeployment(deploymentId: string): Promise<void> {
       }
       await setStage(label);
       await log("INFO", `$ ${redactCommand(argv, secrets)}`);
-      const result = await runCommand(argv, { cwd: checkoutDir, env, secrets, onChunk: (chunk) => void log("INFO", chunk.trim()) });
+      const result = await runIsolatedCommand(argv, {
+        workDir: buildRoot,
+        chdir: checkoutDir,
+        cwd: checkoutDir,
+        env,
+        secrets,
+        onChunk: (chunk) => void log("INFO", chunk.trim()),
+      });
+      if (!isolationLogged) {
+        isolationLogged = true;
+        await log(result.isolation.unisolated ? "WARN" : "INFO", describeIsolation(result.isolation));
+      }
       if (result.code !== 0) {
         if (required) throw new DeploymentFailure(label, `${label} failed with exit code ${result.code}`);
         await log("WARN", `${label} exited ${result.code} (non-blocking)`);

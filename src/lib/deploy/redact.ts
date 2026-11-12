@@ -31,6 +31,59 @@ const SECRET_ENV_NAMES = [
   "OPENAI_API_KEY",
 ];
 
+/**
+ * Suffixes/substrings that make an environment variable name a platform secret.
+ *
+ * Used twice: to collect values for redaction, and (by `engine.ts`) to assert
+ * that a customer build's environment contains no platform credential before
+ * the build starts. Keeping one list means a new secret added to configuration
+ * is automatically both redacted and refused in a build environment.
+ *
+ * `_URL` variables are matched only for known credential-bearing schemes
+ * (`DATABASE_URL`, `REDIS_URL`) because a customer build legitimately needs
+ * something like `API_URL`.
+ */
+const SECRET_NAME_SUFFIXES = [
+  "SECRET",
+  "PASSWORD",
+  "PASSWD",
+  "PRIVATE_KEY",
+  "PRIVATE_KEY_B64",
+  "API_KEY",
+  "ACCESS_TOKEN",
+  "REFRESH_TOKEN",
+  "SESSION_TOKEN",
+  "CLIENT_SECRET",
+  "ENCRYPTION_KEY",
+  "SIGNING_KEY",
+  "WEBHOOK_SECRET",
+  "MASTER_KEY",
+  "SALT_KEY",
+];
+
+const SECRET_NAME_EXACT = new Set([
+  "DATABASE_URL",
+  "DB_URL",
+  "REDIS_URL",
+  "NEXTAUTH_SECRET",
+  "JWT_SECRET",
+  "APP_ENCRYPTION_KEY",
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "CLOUDFLARE_API_TOKEN",
+  "SSH_PRIVATE_KEY",
+]);
+
+/** True when the variable name denotes a platform credential. */
+export function matchesPlatformSecretName(name: string): boolean {
+  const upper = name.trim().toUpperCase();
+  if (!upper) return false;
+  if (SECRET_NAME_EXACT.has(upper)) return true;
+  return SECRET_NAME_SUFFIXES.some((suffix) => upper === suffix || upper.endsWith(`_${suffix}`));
+}
+
 export function collectSecrets(extra: Array<string | undefined | null> = []): string[] {
   const values = new Set<string>();
   for (const name of SECRET_ENV_NAMES) {

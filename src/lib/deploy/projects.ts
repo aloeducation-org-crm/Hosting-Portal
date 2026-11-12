@@ -18,10 +18,14 @@ import {
   type TokenSource,
 } from "./github";
 import { encryptSecret } from "@/lib/encryption";
+import type { AuthUser } from "@/lib/auth";
+import { requireConnectionAccess, tokenForConnection, assertRepositoryAllowedForSource } from "./connections";
 import type { DetectionResult } from "./types";
 
 export interface ImportInput {
   userId: string;
+  /** The authenticated caller. Required so the connection can be authorized. */
+  user: AuthUser;
   repository: string;
   productionBranch?: string;
   previewBranches?: string[];
@@ -42,13 +46,23 @@ export interface ImportResult {
   warnings: string[];
 }
 
-export async function accessToken(connectionId?: string | null): Promise<TokenSource> {
-  const connection = connectionId ? await db.gitConnection.findUnique({ where: { id: connectionId } }) : null;
-  const source = await resolveToken(connection);
-  if (!source.token) {
-    throw new Error("No GitHub credentials available. Connect a GitHub account or configure a GitHub App/token first.");
-  }
-  return source;
+/**
+ * Resolve GitHub credentials for a caller.
+ *
+ * SEC-02: this used to accept any connection id and return a token for it. It
+ * now requires the authenticated user, and a supplied connection id is
+ * authorized through `requireConnectionAccess` before a token is minted. Kept as
+ * a thin wrapper so existing call sites keep working while the ownership check
+ * is impossible to forget.
+ */
+export async function accessToken(
+  user: AuthUser,
+  connectionId?: string | null,
+  context: { route?: string } = {},
+): Promise<TokenSource> {
+  if (!connectionId) return tokenForConnection(null);
+  const connection = await requireConnectionAccess(user, connectionId, context);
+  return tokenForConnection(connection);
 }
 
 function slugify(value: string): string {
@@ -83,7 +97,9 @@ function runtimeFor(detection: DetectionResult): "STATIC" | "NODE" | "NEXTJS" | 
 export async function importRepository(input: ImportInput): Promise<ImportResult> {
   const warnings: string[] = [];
   const repository = validateRepositoryName(input.repository);
-  const source = input.cloneUrlOverride ? null : await accessToken(input.connectionId);
+  const source = input.cloneUrlOverride
+    ? null
+    : await accessToken(input.user, input.connectionId, { route: "POST /api/deploy/projects" });
 
   let manifests: Record<string, string> = {};
   let detectionSource: ReturnType<typeof fsReader> | null = null;
@@ -92,6 +108,7 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
   if (source?.token) {
     try {
       const info = await getRepository(source.token, repository);
+      await assertRepositoryAllowedForSource(source, { private: info.private, fullName: repository });
       defaultBranch = input.productionBranch || info.defaultBranch;
       branch = defaultBranch;
       const result = await fetchRepoManifests(source.token, repository, branch);
