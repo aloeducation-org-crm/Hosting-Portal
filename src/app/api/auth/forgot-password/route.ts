@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
 
 const RESET_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const GENERIC_MESSAGE =
-  "If an account exists for that email, a password reset link is on its way.";
+  "If an account exists for that email, a password reset request has been received.";
+const DELIVERY_MESSAGE =
+  "If delivery is configured, a reset link will arrive by email. The link expires in 30 minutes.";
 
 const bodySchema = z.object({
   email: z.string().email("A valid email address is required").max(320),
@@ -20,7 +22,7 @@ const bodySchema = z.object({
 
 // Constant-time-shape response for every outcome that could reveal whether an
 // account exists: same status, same message, same requestId shape.
-const genericResponse = () => apiSuccess({ sent: true }, GENERIC_MESSAGE);
+const genericResponse = () => apiSuccess({ accepted: true }, `${GENERIC_MESSAGE} ${DELIVERY_MESSAGE}`);
 
 export async function POST(request: NextRequest) {
   let email: string;
@@ -97,7 +99,8 @@ export async function POST(request: NextRequest) {
           action: "PASSWORD_RESET_REQUESTED",
           resourceType: "User",
           resourceId: user.id,
-          result: "SUCCESS",
+          result: emailResult.sent ? "SUCCESS" : "DELIVERY_FAILED",
+          errorCode: emailResult.sent ? undefined : "EMAIL_DELIVERY_FAILED",
           ipAddress:
             request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip") ?? undefined,
         },
@@ -110,12 +113,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       apiSuccess(
         {
-          sent: emailResult.sent,
+          accepted: true,
+          // Do not claim delivery (or reveal account existence) in the response.
+          // The audit/log records the actual transport result for operators.
           // Development convenience only — mirrors the verify-email pattern.
           // Never present in production responses.
           ...(process.env.NODE_ENV !== "production" ? { devToken: rawToken } : {}),
         },
-        GENERIC_MESSAGE,
+        `${GENERIC_MESSAGE} ${DELIVERY_MESSAGE}`,
       ),
     );
   } catch (error) {

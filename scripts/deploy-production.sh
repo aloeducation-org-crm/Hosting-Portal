@@ -24,8 +24,8 @@ succeeded=0
 previous=""
 
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "commit SHA is not a full 40-character Git SHA"
-[[ -d "$PAYLOAD/.next/standalone" && -s "$PAYLOAD/.next/standalone/server.js" ]] \
-  || fail "standalone server bundle missing in $PAYLOAD"
+[[ -d "$PAYLOAD/.next/standalone" && -s "$PAYLOAD/.next/standalone/server.js" && -s "$PAYLOAD/.next/standalone/automation-worker.cjs" ]] \
+  || fail "standalone server or automation worker bundle missing in $PAYLOAD"
 [[ -d "$PAYLOAD/.next/static" && -d "$PAYLOAD/public" && -f "$PAYLOAD/prisma/schema.prisma" ]] \
   || fail "release payload is incomplete (static, public, or Prisma schema missing)"
 [[ -f "$ROOT/scripts/init-production-db.sh" ]] || fail "database bootstrap helper missing from checkout"
@@ -94,6 +94,7 @@ cleanup() {
       rm -f "$CURRENT"
     fi
     sudo -n /usr/bin/systemctl restart alo-hosting-panel || true
+    sudo -n /usr/bin/systemctl restart alo-automation-worker || true
     log "rollback attempt finished"
   fi
   exit "$code"
@@ -163,6 +164,7 @@ mv -Tf "$link_tmp" "$CURRENT"
 activated=1
 log "activated release $SHA; restarting systemd service"
 sudo -n /usr/bin/systemctl restart alo-hosting-panel
+sudo -n /usr/bin/systemctl restart alo-automation-worker
 
 healthy=0
 for attempt in $(seq 1 30); do

@@ -87,6 +87,9 @@ enum WorkerKind {
   DOMAIN_TLS
   MONITORING_RECOVERY
   BACKUP_RESTORE
+  WORKFLOW_STEP
+  PLATFORM_OPS
+  AI_DIAGNOSIS
 }
 
 enum RiskLevel {
@@ -3006,4 +3009,134 @@ model CloudProjectQuota {
   project CloudProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@map("cloud_project_quotas")
+}
+
+// ─── Central automation engine ──────────────────────────────────────────────
+// Definitions are versioned; every run freezes its definition. Actual execution
+// uses operation_jobs (leases, retries, approval gates and audit), not a second
+// in-memory queue. Configuration contains references to credentials, never secrets.
+
+model AutomationWorkflow {
+  id              String    @id @default(uuid())
+  key             String    @unique
+  name            String
+  description     String?
+  ownerId         String?
+  enabled         Boolean   @default(false)
+  version         Int       @default(1)
+  definition      String
+  trigger         String    @default("manual") // manual | event | schedule | webhook
+  eventName       String?
+  intervalSeconds Int?
+  nextRunAt       DateTime?
+  lastRunAt       DateTime?
+  scheduleInput   String    @default("{}")
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  runs            AutomationRun[]
+
+  @@index([enabled, trigger, nextRunAt])
+  @@index([eventName])
+  @@index([ownerId])
+  @@map("automation_workflows")
+}
+
+model AutomationRun {
+  id              String   @id @default(uuid())
+  workflowId      String
+  workflowVersion Int
+  snapshot        String
+  trigger         String
+  idempotencyKey  String   @unique
+  correlationId   String
+  input           String
+  status          String   @default("QUEUED") // QUEUED | RUNNING | WAITING_APPROVAL | WAITING_EXTERNAL | RETRYING | SUCCEEDED | FAILED | CANCELLED
+  output          String?
+  error           String?
+  verified        Boolean  @default(false)
+  actorId         String?
+  actorEmail      String?
+  actorRole       String?
+  actorScopes     String   @default("[]")
+  resourceId      String?
+  resourceType    String?
+  notificationId  String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  durationMs      Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workflow        AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Restrict)
+  steps           AutomationStep[]
+
+  @@index([workflowId, createdAt])
+  @@index([status])
+  @@index([resourceType, resourceId])
+  @@map("automation_runs")
+}
+
+model AutomationStep {
+  id            String   @id @default(uuid())
+  runId         String
+  key           String
+  ordinal       Int
+  label         String
+  handler       String
+  dependsOn     String   @default("[]")
+  inputTemplate String   @default("{}")
+  condition     String?
+  status        String   @default("PENDING") // PENDING | QUEUED | RUNNING | WAITING_APPROVAL | RETRYING | SUCCEEDED | FAILED | SKIPPED | CANCELLED
+  jobId         String?  @unique
+  output        String?
+  error         String?
+  verified      Boolean?
+  attempts      Int      @default(0)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  run           AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, key])
+  @@index([runId, ordinal])
+  @@index([status])
+  @@map("automation_steps")
+}
+
+model AutomationProfile {
+  id            String   @id @default(uuid())
+  key           String   @unique
+  name          String
+  kind          String   // node | github | dns | runtime | database
+  framework     String?
+  ownerId       String?
+  activeVersion Int?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  versions      AutomationProfileVersion[]
+
+  @@index([kind, framework, ownerId])
+  @@map("automation_profiles")
+}
+
+model AutomationProfileVersion {
+  id                String   @id @default(uuid())
+  profileId         String
+  version           Int
+  config            String
+  checksum          String
+  status            String   @default("VALIDATED") // VALIDATED | VERIFYING | VERIFIED | FAILED | RETIRED
+  changeNote        String?
+  verificationJobId String?
+  verificationError String?
+  verifiedById      String?
+  verifiedAt        DateTime?
+  createdAt         DateTime @default(now())
+  profile           AutomationProfile @relation(fields: [profileId], references: [id], onDelete: Restrict)
+
+  @@unique([profileId, version])
+  @@index([status])
+  @@map("automation_profile_versions")
 }

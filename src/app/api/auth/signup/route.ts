@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
     });
 
     const verifyUrl = `${env.APP_URL}/verify-email?token=${verificationToken}&email=${encodeURIComponent(normalizedEmail)}`;
-    await sendEmail({
+    const emailResult = await sendEmail({
       to: normalizedEmail,
       subject: "Verify your ALO Labs Hosting Portal account",
       text: `Welcome to ALO Labs, ${newUser.name}! Verify your email here: ${verifyUrl}`,
@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
           permissions,
           plan: "starter",
           emailVerified: false,
+          emailSent: emailResult.sent,
           onboardingCompleted: false,
           onboardingStep: 0,
           verificationToken:
@@ -169,7 +170,7 @@ export async function POST(request: NextRequest) {
           token: jwtToken,
           createdAt: newUser.createdAt,
         },
-        "User registered successfully",
+        emailResult.sent ? "User registered successfully" : "User registered, but the verification email was not sent. Use resend verification after SMTP is configured.",
         201
       ),
       { status: 201 }

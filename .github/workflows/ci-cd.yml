@@ -165,7 +165,7 @@ jobs:
       - run: npm ci --include=dev
       - run: npx prisma generate
       - name: Build with non-production CI credentials
-        run: npm run build
+        run: npm run build && npm run build:worker
         env:
           NODE_ENV: production
           NEXTAUTH_URL: http://127.0.0.1:3101
@@ -174,8 +174,11 @@ jobs:
           APP_ENCRYPTION_KEY: ci-only-not-a-real-key-0123456789abcdef0123456789abcdef01234567
           INTERNAL_SECRET: ci-only-not-a-real-internal-0123456789abcdef
           DATABASE_URL: file:/tmp/alo-hosting-ci.db
-      - name: Check standalone entrypoint
-        run: test -s .next/standalone/server.js
+      - name: Check standalone entrypoints
+        run: |
+          test -s .next/standalone/server.js
+          test -s .next/standalone/automation-worker.cjs
+          node --check .next/standalone/automation-worker.cjs
       # The digest travels inside the artifact and is also published as a job
       # output, so the host can prove the payload it received is the payload CI
       # built — and the two values can be compared in the run summary.

@@ -137,11 +137,11 @@ export const AGENT_ALLOWLIST = {
   },
   "backup.database": {
     executable: "alo-site-backup",
-    argv: (a) => ["--target", String(a.target || "/opt/backups")],
+    argv: (a) => ["create", String(a.domain)],
     sudo: true,
     risk: "REVERSIBLE",
     timeoutMs: 20 * 60_000,
-    validate: (a) => a.target === undefined || a.target === null || (typeof a.target === "string" && ABS_PATH.test(a.target)),
+    validate: (a) => validDomain(a.domain),
   },
   "backup.verify": {
     executable: "sha256sum",
@@ -281,6 +281,17 @@ export const AGENT_ALLOWLIST = {
     validate: () => true,
   },
   // ── DNS (alo-dns-helper) ──────────────────────────────────────────────────
+  "domain.add": {
+    executable: "alo-domain-helper",
+    argv: (a) => ["add", String(a.domain), String(a.type || "static"), ...(a.port ? [String(a.port)] : [])],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 60_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      (a.type === undefined || a.type === null || a.type === "static" || a.type === "node") &&
+      (a.port === undefined || a.port === null || (typeof a.port === "number" && Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535)),
+  },
   "dns.add": {
     executable: "alo-dns-helper",
     argv: (a) => [

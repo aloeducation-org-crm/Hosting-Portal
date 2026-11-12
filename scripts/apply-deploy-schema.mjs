@@ -181,6 +181,9 @@ const MIGRATIONS = [
       },
     },
   },
+  // Keep after the optional rebuild: a fresh apply must not add tables that a
+  // later rebuild could obscure. This migration only creates automation tables.
+  { name: "20261111190000_central_automation", kind: "ADDITIVE" },
 ];
 
 function registry() {

@@ -41,7 +41,7 @@ export async function enqueueOperation(
 ) {
   const op = await db.operationJob.create({
     data: {
-      websiteId: options?.resourceId ?? 'system',
+      websiteId: options?.resourceId ?? null,
       type,
       status: 'QUEUED',
       priority: options?.priority ?? 100,

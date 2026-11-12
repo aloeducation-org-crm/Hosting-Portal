@@ -20,6 +20,9 @@ export const WORKER_KINDS = [
   "DOMAIN_TLS",
   "MONITORING_RECOVERY",
   "BACKUP_RESTORE",
+  "WORKFLOW_STEP",
+  "PLATFORM_OPS",
+  "AI_DIAGNOSIS",
 ] as const;
 
 export type WorkerKind = (typeof WORKER_KINDS)[number];
@@ -90,6 +93,11 @@ export const SCOPES = [
   "backup:restore",
   "monitoring:read",
   "recovery:execute",
+  "automation:run",
+  "automation:manage",
+  "billing:read",
+  "billing:write",
+  "ai:read",
 ] as const;
 export type Scope = (typeof SCOPES)[number];
 
@@ -120,6 +128,14 @@ export const NON_RETRYABLE_CODES = [
   "APPROVAL_REJECTED",
   "REFUSED_BY_ALLOWLIST",
   "TENANT_MISMATCH",
+  "NOT_CONFIGURED",
+  "NOT_IMPLEMENTED",
+  "AGENT_UNAVAILABLE",
+  "VERIFICATION_REQUIRED",
+  "WAITING_CREDENTIALS",
+  "WAITING_EXTERNAL",
+  "CANCELLED",
+  "UNSAFE_RETRY",
 ] as const;
 
 export const retryPolicySchema = z.object({
@@ -162,6 +178,8 @@ export interface WorkerResult<T = unknown> {
   data?: T;
   /** True only when the outcome was confirmed by an independent observation. */
   verified: boolean;
+  /** A handler may explicitly veto a retry even when maxAttempts allows one. */
+  retryable?: boolean;
   /** How the outcome was verified, when it was. */
   evidence?: string;
   /** Structured findings (security, detection, health) for the UI. */
@@ -209,10 +227,22 @@ export class WorkerError extends Error {
 }
 
 /** Anything a worker needs to run, handed over by the orchestrator. */
+export interface JobActor {
+  id: string;
+  email: string;
+  role: string;
+  /** Explicit grants. Missing scopes fail closed; a role label is not a grant. */
+  scopes?: string[];
+}
+
 export interface WorkerContext {
   jobId: string;
   correlationId: string;
-  actor?: { id: string; email: string; role: string } | null;
+  actor?: JobActor | null;
+  /** Aborted on timeout or a cooperative cancellation request. */
+  signal: AbortSignal;
+  /** Fresh human approval for this exact immutable job, when one was required. */
+  approval?: { by: string; at: Date } | null;
   /** Report structured progress; persisted and redacted by the orchestrator. */
   progress: (percent: number, message: string) => Promise<void>;
   /** Enrolled agents that are currently reachable, for AGENT-mode workers. */
@@ -232,6 +262,11 @@ export interface WorkerDefinition<TInput = unknown, TOutput = unknown> {
   /** Defaults merged into every job of this kind unless the caller overrides. */
   defaultMaxAttempts?: number;
   defaultTimeoutMs?: number;
+  /** Opt-in only. A handler must tolerate a crash between effect and completion. */
+  retrySafe?: boolean | ((input: TInput) => boolean);
+  /** Per-action risk/scopes may narrow the declared maximum, never exceed it. */
+  riskForInput?: (input: TInput) => RiskLevel;
+  scopesForInput?: (input: TInput) => Scope[];
   handler: (input: TInput, ctx: WorkerContext) => Promise<WorkerResult<TOutput>>;
 }
 
@@ -251,4 +286,24 @@ export const RISK_ORDER: Record<RiskLevel, number> = {
 
 export function riskAtLeast(level: RiskLevel, minimum: RiskLevel): boolean {
   return RISK_ORDER[level] >= RISK_ORDER[minimum];
+}
+
+export function effectiveRisk(worker: WorkerDefinition<any, any>, input: unknown): RiskLevel {
+  const actionRisk = worker.riskForInput?.(input) ?? worker.maxRisk;
+  // The catalogue is the ceiling. An action may narrow it, never widen it.
+  return riskAtLeast(actionRisk, worker.maxRisk) ? worker.maxRisk : actionRisk;
+}
+
+export function effectiveScopes(worker: WorkerDefinition<any, any>, input: unknown): Scope[] {
+  return worker.scopesForInput?.(input) ?? worker.requiredScopes;
+}
+
+export function isHandlerRetrySafe(worker: WorkerDefinition<any, any>, input: unknown): boolean {
+  return typeof worker.retrySafe === "function" ? worker.retrySafe(input) : worker.retrySafe === true;
+}
+
+export function assertActorScopes(actor: JobActor | null | undefined, scopes: readonly string[]): void {
+  const granted = new Set(actor?.scopes ?? []);
+  const missing = scopes.filter((scope) => !granted.has(scope));
+  if (missing.length) throw new WorkerError("FORBIDDEN", `Missing automation scope(s): ${missing.join(", ")}`, false);
 }

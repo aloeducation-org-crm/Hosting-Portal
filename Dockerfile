@@ -15,11 +15,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
-RUN npm run build
+RUN npm run build && npm run build:worker
 
 FROM base AS runner
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=8080 HOSTNAME=0.0.0.0 ALO_HELPER_DIR=/app/helpers
-RUN apk add --no-cache bash \
+RUN apk add --no-cache bash git \
   && addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs \
   && mkdir -p /var/lib/alo-hosting && chown nextjs:nodejs /var/lib/alo-hosting

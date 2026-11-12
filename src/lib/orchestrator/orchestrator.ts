@@ -36,6 +36,12 @@ import {
   computeBackoffDelay,
   isRetryable,
   riskAtLeast,
+  effectiveRisk,
+  effectiveScopes,
+  isHandlerRetrySafe,
+  assertActorScopes,
+  retryPolicySchema,
+  type JobActor,
   type JobState,
   type RetryPolicy,
   type RiskLevel,
@@ -74,7 +80,9 @@ export interface EnqueueJobInput {
   /** Override the risk the worker declared (only ever upwards is honoured). */
   riskLevel?: RiskLevel;
   requiresApproval?: boolean;
-  actor?: { id: string; email: string; role: string } | null;
+  actor?: JobActor | null;
+  /** Immutable job metadata; never accepted from an HTTP payload. */
+  automation?: { runId: string; stepId: string };
   /** Run no earlier than this instant. */
   availableAt?: Date;
 }
@@ -111,16 +119,25 @@ const DEFAULT_OPTIONS: Required<Omit<OrchestratorOptions, "now">> = {
   approvalThreshold: "PRIVILEGED",
 };
 
+interface JobMetadata {
+  timeoutMs: number;
+  scopes: string[];
+  inputHash: string;
+  retrySafe: boolean;
+  automation?: { runId: string; stepId: string };
+}
+
 interface StoredEvents {
   events: Array<{ at: string; percent: number; message: string }>;
   result?: WorkerResult;
+  meta?: JobMetadata;
 }
 
 function parseOutput(raw: string | null): StoredEvents {
   if (!raw) return { events: [] };
   try {
     const parsed = JSON.parse(raw) as Partial<StoredEvents>;
-    return { events: Array.isArray(parsed.events) ? parsed.events : [], result: parsed.result };
+    return { events: Array.isArray(parsed.events) ? parsed.events : [], result: parsed.result, meta: parsed.meta };
   } catch {
     // Legacy rows stored free-form text. Preserve it as a single event.
     return { events: [{ at: new Date(0).toISOString(), percent: 0, message: raw.slice(0, 500) }] };
@@ -153,6 +170,35 @@ export class Orchestrator {
     return this.overrides.get(kind) ?? getWorker(kind);
   }
 
+  private assertIdempotentMatch(job: { output: string | null; workerKind: string | null }, meta: JobMetadata, kind: string): void {
+    const previous = parseOutput(job.output).meta;
+    if (previous && (previous.inputHash !== meta.inputHash || job.workerKind !== kind)) {
+      throw new WorkerError("IDEMPOTENCY_CONFLICT", "This idempotency key belongs to a different operation payload", false);
+    }
+  }
+
+  private async assertResourceAccess(request: EnqueueJobInput): Promise<void> {
+    const actor = request.actor;
+    const privileged = actor?.role === "SUPER_ADMIN" || actor?.role === "ADMIN" || actor?.role === "AUTOMATION";
+    if (request.websiteId) {
+      const website = await db.website.findUnique({ where: { id: request.websiteId }, select: { ownerId: true, deletedAt: true } });
+      if (!website || website.deletedAt) throw new WorkerError("NOT_FOUND", "Website not found", false);
+      if (!privileged && website.ownerId !== actor?.id) throw new WorkerError("TENANT_MISMATCH", "Website belongs to another customer", false);
+    }
+    if (!request.resourceId || request.resourceType === "AutomationStep" || request.resourceType === "AutomationProfileVersion") return;
+    if (request.resourceType === "GitProject") {
+      // GitProject deliberately has no Prisma relation; resolve its anchor separately.
+      const row = await db.gitProject.findUnique({ where: { id: request.resourceId } });
+      if (!row) throw new WorkerError("NOT_FOUND", "Project not found", false);
+      const website = await db.website.findUnique({ where: { id: row.websiteId } });
+      if (!privileged && row.createdById !== actor?.id && website?.ownerId !== actor?.id) {
+        throw new WorkerError("TENANT_MISMATCH", "Project belongs to another customer", false);
+      }
+    } else if (!privileged) {
+      throw new WorkerError("FORBIDDEN", "This infrastructure resource requires an administrator grant", false);
+    }
+  }
+
   // ── Enqueue ────────────────────────────────────────────────────────────────
 
   async enqueue(request: EnqueueJobInput): Promise<EnqueueJobResult> {
@@ -174,18 +220,33 @@ export class Orchestrator {
     }
 
     const correlationId = request.correlationId ?? randomUUID();
-
-    // Risk can be raised by the caller but never lowered below what the worker
-    // itself declared — otherwise any caller could smuggle a destructive
-    // operation past the approval gate by labelling it READ_ONLY.
-    const declared = request.riskLevel ?? worker.maxRisk;
-    const risk: RiskLevel = riskAtLeast(declared, worker.maxRisk) ? declared : worker.maxRisk;
-
-    const requiresApproval =
-      request.requiresApproval ?? riskAtLeast(risk, this.options.approvalThreshold);
-
-    const maxAttempts = Math.max(1, request.maxAttempts ?? worker.defaultMaxAttempts ?? 1);
-    const retryPolicy: RetryPolicy = { ...DEFAULT_RETRY_POLICY, ...(request.retryPolicy ?? {}) };
+    const actionRisk = effectiveRisk(worker, parsed.data);
+    const declared = request.riskLevel ?? actionRisk;
+    const risk: RiskLevel = riskAtLeast(declared, actionRisk) ? declared : actionRisk;
+    const requiresApproval = request.requiresApproval === true || riskAtLeast(risk, this.options.approvalThreshold);
+    const retrySafe = isHandlerRetrySafe(worker, parsed.data);
+    const requestedAttempts = request.maxAttempts ?? worker.defaultMaxAttempts ?? 1;
+    if (!Number.isInteger(requestedAttempts) || requestedAttempts < 1 || requestedAttempts > 10) {
+      throw new WorkerError("VALIDATION_FAILED", "maxAttempts must be an integer from 1 to 10", false);
+    }
+    if (!retrySafe && requestedAttempts > 1) {
+      throw new WorkerError("UNSAFE_RETRY", `${request.kind} has not declared this action safe to retry; maxAttempts must be 1`, false);
+    }
+    const maxAttempts = retrySafe ? requestedAttempts : 1;
+    const retryPolicy = retryPolicySchema.parse({ ...DEFAULT_RETRY_POLICY, ...(request.retryPolicy ?? {}) });
+    const timeoutMs = request.timeoutMs ?? worker.defaultTimeoutMs ?? 5 * 60_000;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 3_600_000) {
+      throw new WorkerError("VALIDATION_FAILED", "timeoutMs must be an integer from 100 to 3600000", false);
+    }
+    const scopes = effectiveScopes(worker, parsed.data);
+    assertActorScopes(request.actor, scopes);
+    await this.assertResourceAccess(request);
+    const input = JSON.stringify(parsed.data);
+    const meta: JobMetadata = {
+      timeoutMs, scopes: [...scopes], retrySafe,
+      inputHash: createHash("sha256").update(`${request.kind}:${input}`).digest("hex"),
+      ...(request.automation ? { automation: request.automation } : {}),
+    };
 
     const data = {
       websiteId: request.websiteId ?? PLATFORM_SCOPE,
@@ -193,11 +254,12 @@ export class Orchestrator {
       status: (requiresApproval ? "WAITING_APPROVAL" : "QUEUED") as JobState,
       priority: request.priority ?? 100,
       progress: 0,
-      input: JSON.stringify(parsed.data),
+      input,
+      output: JSON.stringify({ events: [], meta } satisfies StoredEvents),
       resourceId: request.resourceId ?? null,
       resourceType: request.resourceType ?? null,
       requestId: correlationId,
-      actorId: request.actor?.id ?? null,
+      actorId: request.actor?.id && request.actor.id !== "system" ? request.actor.id : null,
       actorEmail: request.actor?.email ?? null,
       actorRole: request.actor?.role ?? null,
       correlationId,
@@ -214,6 +276,7 @@ export class Orchestrator {
       const key = request.idempotencyKey;
       const existing = await db.operationJob.findUnique({ where: { idempotencyKey: key } });
       if (existing) {
+        this.assertIdempotentMatch(existing, meta, request.kind);
         logger.info({ jobId: existing.id, correlationId: existing.correlationId }, "duplicate job suppressed");
         return {
           jobId: existing.id,
@@ -225,11 +288,12 @@ export class Orchestrator {
       }
       try {
         const job = await db.operationJob.create({ data: { ...data, idempotencyKey: key } });
-        return await this.afterEnqueue(job.id, worker.kind, correlationId, requiresApproval, request.actor);
+        return await this.afterEnqueue(job.id, worker.kind, correlationId, requiresApproval, request.actor?.id === "system" ? null : request.actor);
       } catch (error) {
         // Unique-index collision: another writer won the race. Return their job.
         const raced = await db.operationJob.findUnique({ where: { idempotencyKey: key } });
         if (raced) {
+          this.assertIdempotentMatch(raced, meta, request.kind);
           return {
             jobId: raced.id,
             status: raced.status as JobState,
@@ -243,7 +307,7 @@ export class Orchestrator {
     }
 
     const job = await db.operationJob.create({ data });
-    return await this.afterEnqueue(job.id, worker.kind, correlationId, requiresApproval, request.actor);
+    return await this.afterEnqueue(job.id, worker.kind, correlationId, requiresApproval, request.actor?.id === "system" ? null : request.actor);
   }
 
   private async afterEnqueue(
@@ -279,6 +343,7 @@ export class Orchestrator {
     actor: { id: string; email: string; role: string },
     note?: string,
   ): Promise<{ ok: true; status: JobState } | { ok: false; reason: string }> {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(actor.role)) return { ok: false, reason: "Only a named administrator can approve infrastructure work" };
     const job = await db.operationJob.findUnique({ where: { id: jobId } });
     if (!job) return { ok: false, reason: "Job not found" };
     if (job.status !== "WAITING_APPROVAL") {
@@ -307,6 +372,7 @@ export class Orchestrator {
       result: "SUCCESS",
       metadata: { riskLevel: job.riskLevel, workerKind: job.workerKind },
     });
+    await this.afterJobTransition(jobId);
     return { ok: true, status: "QUEUED" };
   }
 
@@ -337,6 +403,7 @@ export class Orchestrator {
       result: "SUCCESS",
       metadata: { reason: redact(reason).slice(0, 400) },
     });
+    await this.afterJobTransition(jobId);
     return { ok: true };
   }
 
@@ -370,7 +437,8 @@ export class Orchestrator {
     if (!job) return null;
     if (job.status !== "QUEUED" && job.status !== "RETRYING") return null;
     if (job.availableAt && job.availableAt.getTime() > this.now().getTime()) return null;
-    if (job.requiresApproval && !job.approvedAt) return null;
+    if (job.attempts >= job.maxAttempts) return null;
+    if (job.requiresApproval && (!job.approvedAt || this.now().getTime() - job.approvedAt.getTime() > APPROVAL_TTL_MS)) return null;
 
     if (job.lockKey) {
       const running = await db.operationJob.count({
@@ -380,7 +448,7 @@ export class Orchestrator {
     }
 
     const now = this.now();
-    const timeoutMs = this.timeoutFor(job.workerKind as WorkerKind | null);
+    const timeoutMs = parseOutput(job.output).meta?.timeoutMs ?? this.timeoutFor(job.workerKind as WorkerKind | null);
     const lease = new Date(now.getTime() + timeoutMs + this.options.leaseBufferMs);
     const strictSerial = job.lockKey !== null && this.options.maxConcurrentPerKey <= 1;
 
@@ -388,12 +456,15 @@ export class Orchestrator {
       where: {
         id: jobId,
         status: { in: ["QUEUED", "RETRYING"] },
+        attempts: { lt: job.maxAttempts },
+        availableAt: { lte: now },
+        ...(job.requiresApproval ? { approvedAt: { gte: new Date(now.getTime() - APPROVAL_TTL_MS) } } : {}),
         ...(strictSerial
           ? {
               NOT: {
                 lockKey: job.lockKey,
                 status: { in: ["RUNNING", "VERIFYING", "ROLLING_BACK"] },
-                leaseExpiresAt: { gt: SENTINEL_NO_LEASE },
+                leaseExpiresAt: { gt: now },
               },
             }
           : {}),
@@ -475,12 +546,25 @@ export class Orchestrator {
 
     const correlationId = job.correlationId ?? jobId;
     const started = Date.now();
+    const stored = parseOutput(job.output);
+    const controller = new AbortController();
+    const timeoutMs = stored.meta?.timeoutMs ?? this.timeoutFor(job.workerKind as WorkerKind);
+    const timer = setTimeout(() => controller.abort(new TimeoutError(`Worker ${worker.kind} exceeded its ${timeoutMs}ms timeout`)), timeoutMs);
+    const cancellationPoll = setInterval(() => {
+      void db.operationJob.findUnique({ where: { id: jobId }, select: { status: true, leasedBy: true, cancelledAt: true } }).then((current) => {
+        if (!current || current.status === "CANCELLED" || current.cancelledAt || current.leasedBy !== workerId) controller.abort(new WorkerError("CANCELLED", "Job cancellation was requested or its lease was reclaimed", false));
+      }).catch(() => {});
+    }, Math.min(1000, Math.max(25, timeoutMs / 4)));
+    cancellationPoll.unref();
     const ctx: WorkerContext = {
       jobId,
       correlationId,
-      actor: job.actorEmail ? { id: job.actorId ?? "", email: job.actorEmail, role: job.actorRole ?? "" } : null,
+      signal: controller.signal,
+      approval: job.approvedBy && job.approvedAt ? { by: job.approvedBy, at: job.approvedAt } : null,
+      actor: job.actorEmail ? { id: job.actorId ?? "", email: job.actorEmail, role: job.actorRole ?? "", scopes: stored.meta?.scopes ?? [] } : null,
       progress: async (percent, message) => {
-        await db.operationJob.update({ where: { id: jobId }, data: { progress: clamp(percent, 0, 100) } }).catch(() => {});
+        controller.signal.throwIfAborted();
+        await db.operationJob.updateMany({ where: { id: jobId, leasedBy: workerId, status: "RUNNING" }, data: { progress: clamp(percent, 0, 100) } });
         await this.appendEvent(jobId, clamp(percent, 0, 100), message);
       },
       onlineAgents: async () => {
@@ -512,24 +596,36 @@ export class Orchestrator {
     }
 
     try {
+      assertActorScopes(ctx.actor, stored.meta?.scopes ?? effectiveScopes(worker, validation.data));
       const result = await withTimeout(
-        worker.handler(validation.data, ctx),
-        this.timeoutFor(job.workerKind as WorkerKind),
-        `Worker ${worker.kind} exceeded its timeout`,
+        Promise.resolve().then(() => worker.handler(validation.data, ctx)),
+        timeoutMs,
+        `Worker ${worker.kind} exceeded its ${timeoutMs}ms timeout`,
+        controller.signal,
       );
-      await this.complete(jobId, workerId, { ...result, durationMs: result.durationMs ?? Date.now() - started });
+      if (!result.ok && !result.code) throw new WorkerError("WORKER_CRASHED", "Worker returned a failure without a reason", false);
+      // An unverified observation is evidence, not a completed operation.
+      const normalized: WorkerResult = result.ok && !result.verified
+        ? { ...result, ok: false, code: "VERIFICATION_REQUIRED", message: result.message || "The outcome could not be verified" }
+        : result;
+      await this.complete(jobId, workerId, { ...normalized, durationMs: normalized.durationMs ?? Date.now() - started });
     } catch (error) {
-      const isWorkerError = error instanceof WorkerError;
-      const details = isWorkerError ? error.details : undefined;
+      const cause = controller.signal.aborted ? controller.signal.reason : error;
+      const isWorkerError = cause instanceof WorkerError;
+      const details = isWorkerError ? cause.details : undefined;
       await this.complete(jobId, workerId, {
         ok: false,
-        code: isWorkerError ? error.code : error instanceof TimeoutError ? "TIMEOUT" : "WORKER_CRASHED",
-        message: redact(error instanceof Error ? error.message : String(error)).slice(0, 1000),
+        code: isWorkerError ? cause.code : cause instanceof TimeoutError ? "TIMEOUT" : "WORKER_CRASHED",
+        message: redact(cause instanceof Error ? cause.message : String(cause)).slice(0, 1000),
         verified: false,
+        retryable: isWorkerError ? cause.retryable : !(cause instanceof TimeoutError),
         ...(details && typeof details === "object" && !Array.isArray(details)
           ? { mergeInput: details as Record<string, unknown> }
           : {}),
       });
+    } finally {
+      clearTimeout(timer);
+      clearInterval(cancellationPoll);
     }
   }
 
@@ -539,14 +635,16 @@ export class Orchestrator {
     const job = await db.operationJob.findUnique({ where: { id: jobId } });
     if (!job) return "FAILED";
     if (TERMINAL_STATES.includes(job.status as JobState)) return job.status as JobState;
+    // Lease fence: a timed-out/reclaimed worker cannot complete the new attempt.
+    if (job.leasedBy !== workerId || !["RUNNING", "VERIFYING"].includes(job.status)) return job.status as JobState;
 
     const now = this.now();
     const durationMs = now.getTime() - (job.startedAt?.getTime() ?? now.getTime());
 
     if (result.ok) {
       await this.persistResult(jobId, result, durationMs);
-      await db.operationJob.update({
-        where: { id: jobId },
+      const completed = await db.operationJob.updateMany({
+        where: { id: jobId, leasedBy: workerId, status: { in: ["RUNNING", "VERIFYING"] } },
         data: {
           status: "SUCCESS",
           progress: 100,
@@ -559,20 +657,31 @@ export class Orchestrator {
           lastError: null,
         },
       });
-      await this.appendEvent(jobId, 100, `${result.code}: ${result.message}${result.verified ? "" : " (unverified)"}`);
-      await this.audit(job, "JOB_COMPLETED", result.verified ? "SUCCESS" : "SUCCESS_UNVERIFIED", {
-        code: result.code,
-        verified: result.verified,
-        durationMs,
-      });
+      if (completed.count !== 1) return (await db.operationJob.findUnique({ where: { id: jobId } }))?.status as JobState ?? "CANCELLED";
+      await this.appendEvent(jobId, 100, `${result.code}: ${result.message}`);
+      await this.audit(job, "JOB_COMPLETED", "SUCCESS", { code: result.code, verified: true, durationMs });
+      await this.afterJobTransition(jobId);
       return "SUCCESS";
+    }
+
+    if (job.cancelledAt && !result.ok) {
+      await this.persistResult(jobId, result, durationMs);
+      await db.operationJob.updateMany({
+        where: { id: jobId, leasedBy: workerId, status: { in: ["RUNNING", "VERIFYING"] } },
+        data: { status: "CANCELLED", progress: 100, finishedAt: now, completedAt: now, durationMs, leaseExpiresAt: null, leasedBy: null, lastError: "CANCELLED" },
+      });
+      await this.appendEvent(jobId, 100, "handler stopped after cancellation request");
+      await this.audit(job, "JOB_CANCELLED", "CANCELLED", { code: result.code, durationMs });
+      await this.afterJobTransition(jobId);
+      return "CANCELLED";
     }
 
     // Failure path: retry, dead-letter, or fail.
     const attempts = job.attempts;
     const maxAttempts = job.maxAttempts;
     const policy = parseRetryPolicy(job.retryPolicy);
-    const retryable = isRetryable(result.code) && attempts < maxAttempts;
+    const retrySafe = parseOutput(job.output).meta?.retrySafe === true;
+    const retryable = retrySafe && result.retryable !== false && isRetryable(result.code) && attempts < maxAttempts;
 
     await this.persistResult(jobId, result, durationMs);
 
@@ -583,8 +692,8 @@ export class Orchestrator {
       const mergedInput = result.mergeInput
         ? JSON.stringify({ ...(safeParse(job.input) as Record<string, unknown>), ...result.mergeInput }).slice(0, 100_000)
         : undefined;
-      await db.operationJob.update({
-        where: { id: jobId },
+      const transitioned = await db.operationJob.updateMany({
+        where: { id: jobId, leasedBy: workerId, status: { in: ["RUNNING", "VERIFYING"] } },
         data: {
           ...(mergedInput ? { input: mergedInput } : {}),
           status: "RETRYING",
@@ -596,15 +705,17 @@ export class Orchestrator {
           finishedAt: null,
         },
       });
+      if (transitioned.count !== 1) return (await db.operationJob.findUnique({ where: { id: jobId } }))?.status as JobState ?? "CANCELLED";
       await this.appendEvent(jobId, job.progress, `attempt ${attempts}/${maxAttempts} failed (${result.code}); retrying in ${delay}ms`);
       logger.warn({ jobId, code: result.code, attempts, delay }, "job retry scheduled");
+      await this.afterJobTransition(jobId);
       return "RETRYING";
     }
 
-    const exhausted = attempts >= maxAttempts && isRetryable(result.code);
+    const exhausted = attempts >= maxAttempts && retrySafe && result.retryable !== false && isRetryable(result.code);
     const terminal: JobState = exhausted ? "DEAD_LETTER" : "FAILED";
-    await db.operationJob.update({
-      where: { id: jobId },
+    const transitioned = await db.operationJob.updateMany({
+      where: { id: jobId, leasedBy: workerId, status: { in: ["RUNNING", "VERIFYING"] } },
       data: {
         status: terminal,
         progress: 100,
@@ -623,22 +734,33 @@ export class Orchestrator {
           : {}),
       },
     });
+    if (transitioned.count !== 1) return (await db.operationJob.findUnique({ where: { id: jobId } }))?.status as JobState ?? "CANCELLED";
     await this.appendEvent(jobId, 100, `${terminal}: ${result.code} — ${result.message}`);
     await this.audit(job, terminal === "DEAD_LETTER" ? "JOB_DEAD_LETTERED" : "JOB_FAILED", terminal, {
       code: result.code,
       attempts,
       durationMs,
     });
+    await this.afterJobTransition(jobId);
     return terminal;
   }
 
   async cancel(jobId: string, actor: { id?: string; email: string; role?: string }, reason = "cancelled"): Promise<boolean> {
     const now = this.now();
+    const job = await db.operationJob.findUnique({ where: { id: jobId } });
+    if (!job || TERMINAL_STATES.includes(job.status as JobState)) return false;
+    const executing = ["RUNNING", "VERIFYING", "ROLLING_BACK"].includes(job.status);
+    // Never clear a live lease or claim the process stopped. The handler receives
+    // an abort signal; a non-cooperative effect is allowed to finish and fenced
+    // from advancing the workflow. The UI reports cancellation as requested.
     const res = await db.operationJob.updateMany({
       where: { id: jobId, status: { in: [...ACTIVE_STATES] } },
-      data: { status: "CANCELLED", cancelledAt: now, cancelledBy: actor.email, finishedAt: now, completedAt: now, leaseExpiresAt: null, leasedBy: null, error: redact(reason).slice(0, 400) },
+      data: executing
+        ? { cancelledAt: now, cancelledBy: actor.email, error: `Cancellation requested: ${redact(reason).slice(0, 300)}` }
+        : { status: "CANCELLED", cancelledAt: now, cancelledBy: actor.email, finishedAt: now, completedAt: now, leaseExpiresAt: null, leasedBy: null, error: redact(reason).slice(0, 400) },
     });
     if (res.count !== 1) return false;
+    if (!executing) await this.afterJobTransition(jobId);
     await this.appendEvent(jobId, 100, `cancelled by ${actor.email}: ${reason}`);
     await createAuditLog({
       actorId: actor.id,
@@ -658,8 +780,12 @@ export class Orchestrator {
    * manual: a job that failed maxAttempts times should not retry itself.
    */
   async requeueDeadLetter(jobId: string, actor: { id: string; email: string; role: string }, note?: string): Promise<boolean> {
+    const job = await db.operationJob.findUnique({ where: { id: jobId } });
+    if (!job) return false;
+    const meta = parseOutput(job.output).meta;
+    if (meta?.retrySafe !== true || (job.status === "FAILED" && !isRetryable(job.lastError))) return false;
     const res = await db.operationJob.updateMany({
-      where: { id: jobId, status: "DEAD_LETTER" },
+      where: { id: jobId, status: { in: ["DEAD_LETTER", "FAILED"] } },
       data: {
         status: "QUEUED",
         attempts: 0,
@@ -673,9 +799,13 @@ export class Orchestrator {
         completedAt: null,
         availableAt: this.now(),
         progress: 0,
+        cancelledAt: null,
+        cancelledBy: null,
+        ...(job.requiresApproval ? { status: "WAITING_APPROVAL", approvedBy: null, approvedAt: null, approvalNote: null } : {}),
       },
     });
     if (res.count !== 1) return false;
+    await this.afterJobTransition(jobId);
     await this.appendEvent(jobId, 0, `requeued from dead letter by ${actor.email}${note ? `: ${redact(note).slice(0, 200)}` : ""}`);
     await createAuditLog({
       actorId: actor.id,
@@ -706,11 +836,12 @@ export class Orchestrator {
     const jobIds: string[] = [];
 
     for (const job of abandoned) {
-      const exhausted = job.attempts >= job.maxAttempts;
+      const retrySafe = parseOutput(job.output).meta?.retrySafe === true;
+      const exhausted = !retrySafe || job.attempts >= job.maxAttempts;
       const policy = parseRetryPolicy(job.retryPolicy);
       if (exhausted) {
-        await db.operationJob.update({
-          where: { id: job.id },
+        const changed = await db.operationJob.updateMany({
+          where: { id: job.id, status: { in: ["RUNNING", "VERIFYING"] }, leaseExpiresAt: { lt: now } },
           data: {
             status: "DEAD_LETTER",
             deadLetteredAt: now,
@@ -721,11 +852,12 @@ export class Orchestrator {
             completedAt: now,
           },
         });
+        if (changed.count !== 1) continue;
         deadLettered++;
       } else {
         const delay = computeBackoffDelay(policy, job.attempts);
-        await db.operationJob.update({
-          where: { id: job.id },
+        const changed = await db.operationJob.updateMany({
+          where: { id: job.id, status: { in: ["RUNNING", "VERIFYING"] }, leaseExpiresAt: { lt: now } },
           data: {
             status: "RETRYING",
             lastError: "LEASE_EXPIRED",
@@ -735,10 +867,13 @@ export class Orchestrator {
             leasedBy: null,
           },
         });
+        if (changed.count !== 1) continue;
         requeued++;
       }
       jobIds.push(job.id);
       await this.appendEvent(job.id, job.progress, `lease expired (worker ${job.leasedBy ?? "unknown"}) → ${exhausted ? "dead letter" : "requeued"}`);
+      await this.audit(job, exhausted ? "JOB_DEAD_LETTERED" : "JOB_LEASE_RECOVERED", exhausted ? "DEAD_LETTER" : "RETRYING", { code: "LEASE_EXPIRED", retrySafe });
+      await this.afterJobTransition(job.id);
       logger.warn({ jobId: job.id, attempts: job.attempts, exhausted }, "recovered abandoned job");
     }
     return { requeued, deadLettered, jobIds };
@@ -754,6 +889,10 @@ export class Orchestrator {
       id: job.id,
       type: job.type,
       workerKind: job.workerKind,
+      websiteId: job.websiteId,
+      resourceId: job.resourceId,
+      resourceType: job.resourceType,
+      actorId: job.actorId,
       status: job.status as JobState,
       riskLevel: job.riskLevel as RiskLevel,
       progress: job.progress,
@@ -772,6 +911,10 @@ export class Orchestrator {
       lastError: job.lastError,
       error: job.error,
       deadLetterReason: job.deadLetterReason,
+      cancellationRequestedAt: job.cancelledAt,
+      timeoutMs: stored.meta?.timeoutMs ?? null,
+      retrySafe: stored.meta?.retrySafe ?? false,
+      automation: stored.meta?.automation ?? null,
       input: safeParse(job.input),
       result: stored.result ?? null,
       events: stored.events,
@@ -788,10 +931,16 @@ export class Orchestrator {
       orderBy: { createdAt: "desc" },
       take: Math.min(limit, 200),
     });
-    return jobs.map((job) => ({
+    return jobs.map((job) => {
+      const result = parseOutput(job.output).result;
+      return {
       id: job.id,
       type: job.type,
       workerKind: job.workerKind,
+      websiteId: job.websiteId,
+      resourceId: job.resourceId,
+      resourceType: job.resourceType,
+      actorId: job.actorId,
       status: job.status,
       riskLevel: job.riskLevel,
       progress: job.progress,
@@ -808,7 +957,16 @@ export class Orchestrator {
       finishedAt: job.finishedAt,
       durationMs: job.durationMs,
       actorEmail: job.actorEmail,
-    }));
+      // Summary only; the detail endpoint carries the bounded evidence/findings.
+      // Missing evidence is null, never an implied verification.
+      verified: result ? result.verified === true : null,
+      resultCode: result?.code ?? null,
+      hasEvidence: Boolean(result?.evidence),
+      findingCount: result?.findings?.length ?? 0,
+      criticalFindings: result?.findings?.filter((f) => f.severity === "critical").length ?? 0,
+      retrySafe: parseOutput(job.output).meta?.retrySafe === true,
+    };
+    });
   }
 
   async queueDepth() {
@@ -820,11 +978,25 @@ export class Orchestrator {
       orderBy: { createdAt: "asc" },
       select: { id: true, createdAt: true, availableAt: true },
     });
+    const finished = await db.operationJob.aggregate({ where: { status: { in: ["SUCCESS", "FAILED", "DEAD_LETTER"] } }, _avg: { durationMs: true }, _count: { _all: true } });
+    const last = await db.operationJob.findFirst({ where: { finishedAt: { not: null } }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } });
+    const next = await db.operationJob.findFirst({ where: { status: { in: ["QUEUED", "RETRYING"] } }, orderBy: { availableAt: "asc" }, select: { availableAt: true } });
+    const completed = byState["SUCCESS"] ?? 0;
+    const terminalCount = finished._count._all;
     return {
       byState,
+      total: Object.values(byState).reduce((sum, count) => sum + count, 0),
       active: ACTIVE_STATES.reduce((sum, s) => sum + (byState[s] ?? 0), 0),
+      running: (byState["RUNNING"] ?? 0) + (byState["VERIFYING"] ?? 0) + (byState["ROLLING_BACK"] ?? 0),
+      queued: (byState["QUEUED"] ?? 0) + (byState["RETRYING"] ?? 0),
+      completed,
+      failed: (byState["FAILED"] ?? 0) + (byState["DEAD_LETTER"] ?? 0),
       waitingApproval: byState["WAITING_APPROVAL"] ?? 0,
       deadLetters: byState["DEAD_LETTER"] ?? 0,
+      averageDurationMs: finished._avg.durationMs,
+      successRate: terminalCount ? completed / terminalCount : null,
+      lastExecutionAt: last?.finishedAt ?? null,
+      nextExecutionAt: next?.availableAt ?? null,
       oldestQueuedAt: oldestQueued?.createdAt ?? null,
       oldestQueuedDelayMs: oldestQueued ? this.now().getTime() - oldestQueued.createdAt.getTime() : 0,
     };
@@ -832,11 +1004,30 @@ export class Orchestrator {
 
   // ── Internals ──────────────────────────────────────────────────────────────
 
+  private async afterJobTransition(jobId: string): Promise<void> {
+    try {
+      const step = await db.automationStep.findUnique({ where: { jobId } });
+      if (step) {
+        const { syncWorkflowStep } = await import("./workflows");
+        await syncWorkflowStep(step.id, this);
+      }
+      const job = await db.operationJob.findUnique({ where: { id: jobId } });
+      if (job?.resourceType === "AutomationProfileVersion" && job.resourceId) {
+        const { syncProfileVerification } = await import("./profiles");
+        await syncProfileVerification(job.resourceId, job.status, job.error, job.id, job.actorId);
+      }
+    } catch (error) {
+      // The durable reconciliation sweep repairs this without losing the job.
+      logger.error({ jobId, error }, "automation transition synchronization failed");
+    }
+  }
+
   private async persistResult(jobId: string, result: WorkerResult, durationMs: number) {
     const stored = parseOutput((await db.operationJob.findUnique({ where: { id: jobId }, select: { output: true } }))?.output ?? null);
-    const payload: StoredEvents = { events: stored.events.slice(-MAX_EVENTS), result: { ...result, durationMs } };
+    const safeResult = JSON.parse(redact(JSON.stringify({ ...result, durationMs }), collectSecrets())) as WorkerResult;
+    const payload: StoredEvents = { events: stored.events.slice(-MAX_EVENTS), result: safeResult, meta: stored.meta };
     await db.operationJob
-      .update({ where: { id: jobId }, data: { output: JSON.stringify(payload).slice(0, 200_000) } })
+      .update({ where: { id: jobId }, data: { output: boundedJson(payload, 200_000) } })
       .catch((error) => logger.error({ jobId, error }, "failed to persist job result"));
   }
 
@@ -847,7 +1038,7 @@ export class Orchestrator {
     const stored = parseOutput(job.output);
     const events = [...stored.events, { at: this.now().toISOString(), percent: clamp(percent, 0, 100), message: safe }].slice(-MAX_EVENTS);
     await db.operationJob
-      .update({ where: { id: jobId }, data: { output: JSON.stringify({ events, result: stored.result }).slice(0, 200_000) } })
+      .update({ where: { id: jobId }, data: { output: boundedJson({ events, result: stored.result, meta: stored.meta }, 200_000) } })
       .catch((error) => logger.error({ jobId, error }, "failed to append job event"));
   }
 
@@ -873,6 +1064,7 @@ export class Orchestrator {
 
 /** Agents that have not reported within this window are considered offline. */
 export const AGENT_ONLINE_WINDOW_MS = 3 * 60_000;
+export const APPROVAL_TTL_MS = 15 * 60_000;
 
 /**
  * Lexicographically smaller than any real ISO-8601 timestamp, so
@@ -883,18 +1075,32 @@ export const SENTINEL_NO_LEASE = "0000-01-01T00:00:00.000Z";
 
 class TimeoutError extends Error {}
 
-async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string, signal?: AbortSignal): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
         timer = setTimeout(() => reject(new TimeoutError(message)), ms);
+        if (signal) {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }
       }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function boundedJson(value: unknown, maxBytes: number): string {
+  const text = JSON.stringify(value);
+  if (text.length <= maxBytes) return text;
+  const stored = value as StoredEvents;
+  return JSON.stringify({
+    events: stored.events?.slice(-20) ?? [], meta: stored.meta,
+    result: { ok: false, code: "OUTPUT_TRUNCATED", message: "Worker output exceeded the persistence budget; inspect the source logs.", verified: false },
+  });
 }
 
 function clamp(n: number, min: number, max: number) {

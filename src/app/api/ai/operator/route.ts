@@ -566,14 +566,14 @@ export async function POST(request: NextRequest) {
             name: plan.appName,
             domain: plan.domain,
             runtime: plan.websiteRuntime,
-            status: "ACTIVE",
+            status: "DEPLOYING",
             documentRoot: `/srv/alo-sites/${plan.domain}`,
             applicationPort: plan.allocatedPort,
             startupCommand: plan.deployConfig.startCmd ?? null,
             buildCommand: plan.deployConfig.buildCmd ?? null,
             outputDirectory: plan.deployConfig.outputDir,
             healthPath: plan.deployConfig.healthPath,
-            healthStatus: "HEALTHY",
+            healthStatus: "UNKNOWN",
             ownerId: user.id,
           },
         });
@@ -581,7 +581,7 @@ export async function POST(request: NextRequest) {
           data: {
             domain: plan.domain,
             primary: true,
-            sslEnabled: true,
+            sslEnabled: false,
             sslStatus: "PENDING",
             dnsVerified: false,
             nameservers: JSON.stringify(["ns1.alolabs.net", "ns2.alolabs.net"]),
@@ -594,9 +594,9 @@ export async function POST(request: NextRequest) {
             actorId: user.id,
             branch: "main",
             trigger: "BILL_AGENT_AI_OPERATOR",
-            status: "SUCCESS",
-            stage: "verify",
-            buildOutput: `[Bill Agent AI] Allocated port ${plan.allocatedPort} on ${ALO_SERVER_SPEC.hostName} (${ALO_SERVER_SPEC.publicIp}).`,
+            status: "PENDING",
+            stage: "waiting_for_repository",
+            buildOutput: `[Bill Agent AI] Allocation record created; port ${plan.allocatedPort} reserved on ${ALO_SERVER_SPEC.hostName}. Connect a repository and run the central lifecycle workflow before any deployment can be verified.`,
           },
         });
         if (targetServer) {
@@ -617,9 +617,9 @@ export async function POST(request: NextRequest) {
         return { website, deployment };
       });
 
-      summaryBn = `বিল এজেন্ট এআই "${plan.domain}" সাইটটি ${ALO_SERVER_SPEC.hostName}-এ পোর্ট ${plan.allocatedPort}-এ সফলভাবে প্রভিশন করেছে।`;
-      summaryEn = `Bill Agent AI provisioned "${plan.domain}" on ${ALO_SERVER_SPEC.hostName} (port ${plan.allocatedPort}).`;
-      actionResult = { ...provisioned, shareableYaml: plan.shareableBriefYaml };
+      summaryBn = `বিল এজেন্ট এআই "${plan.domain}"-এর জন্য পোর্ট ${plan.allocatedPort} রিজার্ভ করেছে। ডিপ্লয়মেন্ট এখনও যাচাই হয়নি; রিপোজিটরি সংযোগ প্রয়োজন।`;
+      summaryEn = `Bill Agent AI reserved port ${plan.allocatedPort} for "${plan.domain}". This is an allocation record, not a verified deployment; a repository must be connected before the lifecycle workflow can run.`;
+      actionResult = { ...provisioned, automationStatus: "waiting_for_repository", shareableYaml: plan.shareableBriefYaml };
     } else if (effectiveCommand === "create_crm_lead") {
       const email = String(params.email || "").trim().toLowerCase();
       if (!email || !email.includes("@")) {

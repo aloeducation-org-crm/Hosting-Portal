@@ -73,7 +73,7 @@ export default function ForgotPasswordPage() {
           Reset your password
         </CardTitle>
         <CardDescription className="text-slate-500">
-          Enter the email for your account and we&apos;ll send you a reset link
+          Enter the email for your account to request a reset link
         </CardDescription>
       </CardHeader>
 
@@ -82,9 +82,9 @@ export default function ForgotPasswordPage() {
           <Alert className="py-3 border-emerald-200 bg-emerald-50 text-emerald-900">
             <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             <AlertDescription>
-              If an account exists for <strong>{email.trim()}</strong>, a reset link is on
-              its way. The link expires in 30 minutes. Check your spam folder if you
-              don&apos;t see it.
+              If an account exists for <strong>{email.trim()}</strong>, the reset
+              request has been received. If delivery is configured, the link will
+              arrive by email and expire in 30 minutes. Check your spam folder.
             </AlertDescription>
           </Alert>
         ) : (

@@ -35,6 +35,12 @@ const FORBIDDEN_META = /[;&|`$<>(){}\[\]!*?~#\\\n\r]/;
 const FORBIDDEN_EVAL_FLAGS = new Set(["-e", "--eval", "-c", "--command", "-p", "--print"]);
 const SAFE_SCRIPT_NAME = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}$/;
 
+/** Shared guard: the exact unit name `restartExternalService` will act on. */
+export function isSafeServiceName(name: string): boolean {
+  return SAFE_SCRIPT_NAME.test(name);
+}
+
+
 export class UnsafeCommandError extends Error {
   constructor(message: string) {
     super(message);
@@ -137,7 +143,7 @@ export function validateDeployConfig(raw: unknown): DeployConfig {
   if (parsed.serviceManager !== "static" && parsed.serviceManager !== "none" && !parsed.serviceName) {
     throw new UnsafeCommandError("serviceName is required for pm2/systemd service managers");
   }
-  if (parsed.serviceName && !SAFE_SCRIPT_NAME.test(parsed.serviceName)) {
+  if (parsed.serviceName && !isSafeServiceName(parsed.serviceName)) {
     throw new UnsafeCommandError("Unsafe serviceName");
   }
   return parsed as DeployConfig;

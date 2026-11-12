@@ -1,0 +1,62 @@
+# Durable Automation Engine worker. Shares the panel env and database, runs the
+# bundled worker (no tsx/dev dependencies in production), and drains the current
+# job on SIGTERM before systemd's TimeoutStopSec expires.
+[Unit]
+Description=ALO Labs Hosting Portal Automation Worker
+Documentation=https://github.com/aloeducation-org-crm/Hosting-Portal
+After=network-online.target alo-hosting-panel.service
+Wants=network-online.target
+PartOf=alo-hosting-panel.service
+
+[Service]
+Type=simple
+User=alo-panel
+Group=alo-panel
+WorkingDirectory=/opt/alo-hosting/current/.next/standalone
+EnvironmentFile=/etc/alo-hosting/panel.env
+Environment=NODE_ENV=production
+Environment=DEPLOY_INLINE_WORKER=false
+Environment=ORCHESTRATOR_HEARTBEAT_FILE=/run/alo-hosting/automation-worker.json
+ExecStart=/usr/bin/node /opt/alo-hosting/current/.next/standalone/automation-worker.cjs
+Restart=always
+RestartSec=5s
+TimeoutStartSec=30
+TimeoutStopSec=1900
+LimitNOFILE=65535
+MemoryMax=2G
+MemorySwapMax=0
+OOMPolicy=kill
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alo-automation-worker
+RuntimeDirectory=alo-hosting
+RuntimeDirectoryMode=0750
+
+# Matches the panel: only root-owned allowlisted helpers may elevate via sudo.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+ReadWritePaths=/var/lib/alo-hosting
+ReadWritePaths=-/srv/alo-sites
+ReadWritePaths=-/var/backups/alo-sites
+ReadWritePaths=-/opt/alo-hosting/logs
+ReadWritePaths=-/opt/alo-hosting/current/.next/cache
+ReadWritePaths=-/etc/caddy
+ReadWritePaths=-/etc/nginx
+ReadWritePaths=-/etc/systemd/system
+ReadWritePaths=-/etc/letsencrypt
+ReadWritePaths=-/var/lib/letsencrypt
+ReadWritePaths=-/var/log/letsencrypt
+ReadWritePaths=-/etc/alo-dns
+ReadWritePaths=-/etc/bind
+ReadWritePaths=-/var/cache/bind
+ReadWritePaths=-/var/log/caddy
+ReadWritePaths=-/var/log/nginx
+
+[Install]
+WantedBy=multi-user.target

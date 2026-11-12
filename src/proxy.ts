@@ -113,6 +113,7 @@ const HMAC_AUTHENTICATED_API_PATHS = [
 
 const ADMIN_UI_PREFIXES = [
   "/ai/research",
+  "/automation",
   "/admin",
   "/users",
   "/servers",
@@ -149,6 +150,7 @@ const ADMIN_API_PREFIXES = [
   "/api/security/lockout",
   "/api/security/audit-export",
   "/api/orchestrator",
+  "/api/automation/admin",
   "/api/agents/enrollment-tokens",
   "/api/infrastructure",
   "/api/industries",
@@ -514,6 +516,7 @@ export const config = {
     "/databases/:path*",
     "/storage/:path*",
     "/ai/:path*",
+    "/automation/:path*",
     "/billing/:path*",
     "/settings/:path*",
     "/onboarding/:path*",

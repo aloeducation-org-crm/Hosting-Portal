@@ -2,8 +2,9 @@
  * Proof that the 2026-11-09 "no functionality removed" merge really carried
  * forward the unique behaviour from the retired nested application.
  */
-import { isolatedDbUrl, teardownIsolatedDb } from "./helpers/isolated-db";
-import { describe, it, expect, afterAll } from "vitest";
+import { isolatedDbUrl, isolatedDbPath, teardownIsolatedDb } from "./helpers/isolated-db";
+import { applyCurrentSchema } from "./helpers/apply-schema";
+import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +18,13 @@ const exists = (p: string) => fs.existsSync(path.join(ROOT, p));
 afterAll(async () => {
   await teardownIsolatedDb();
 });
+
+// The legacy cron trigger now delegates to the automation engine tick, which
+// reads the automation tables this release adds — so the scratch copy must be
+// brought up to the current schema, exactly like an upgraded host would be.
+beforeAll(() => {
+  applyCurrentSchema(isolatedDbPath);
+}, 180_000);
 
 describe("legacy automation APIs are present in the canonical tree", () => {
   it("re-adds the bearer-authenticated cron trigger", async () => {
