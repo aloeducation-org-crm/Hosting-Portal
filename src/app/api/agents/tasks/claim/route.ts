@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError } from "@/lib/response";
-import { claimTask, expireStaleTasks } from "@/lib/agents/agent";
-import { signPayload } from "@/lib/agents/agent";
+import { claimTask, expireStaleTasks, signTaskEnvelope } from "@/lib/agents/agent";
 import { decryptSecret } from "@/lib/encryption";
 import { requireAgent, parseBody } from "@/lib/agents/http";
 import { randomBytes } from "node:crypto";
@@ -13,6 +12,16 @@ import { randomBytes } from "node:crypto";
  * `signature` the agent verifies with its own secret before executing, so a
  * task can only come from a control plane that already holds that secret — and
  * an agent still refuses anything outside its compiled-in allowlist.
+ *
+ * SEC-07: the control plane has always *produced* this signature, but the agent
+ * never checked it (`verify()` existed in agent/alo-agent.mjs and was never
+ * called), so the claim in the paragraph above was not true. Worse, the signed
+ * body was a four-field projection of the task while `executeTask` read the
+ * full stored row, so even a checked signature would not have bound the fields
+ * that actually ran. The envelope is now built by `signTaskEnvelope`, is signed
+ * over a canonically ordered object, and carries the complete task the agent is
+ * allowed to execute. The agent refuses any task whose payload does not match
+ * its signature, or whose payload carries fields it did not expect.
  */
 export async function POST(request: NextRequest) {
   const auth = await requireAgent(request);
@@ -34,23 +43,20 @@ export async function POST(request: NextRequest) {
 
   const timestamp = String(Date.now());
   const nonce = randomBytes(12).toString("hex");
-  const body = JSON.stringify({ taskId: task.id, command: task.command, args: task.args, timeoutMs: task.timeoutMs });
-  const signature = signPayload(secret, body, timestamp, nonce);
+  const envelope = signTaskEnvelope(secret, task, timestamp, nonce);
 
   return NextResponse.json(
-    apiSuccess({
-      task: {
-        id: task.id,
-        command: task.command,
-        args: task.args,
-        timeoutMs: task.timeoutMs,
-        correlationId: task.correlationId,
-        jobId: task.jobId,
+    apiSuccess(
+      {
+        // The signed payload IS the task the agent executes. There is no second,
+        // unsigned copy for it to read from, which is what makes the signature
+        // meaningful.
+        task: envelope.task,
+        signature: envelope.signature,
+        timestamp: envelope.timestamp,
+        nonce: envelope.nonce,
       },
-      signature,
-      timestamp,
-      nonce,
-      signedBody: body,
-    }, "Task claimed"),
+      "Task claimed",
+    ),
   );
 }
