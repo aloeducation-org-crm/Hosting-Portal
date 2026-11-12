@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, hasSessionCookie, validateCsrf } from "@/lib/security/csrf";
+import { resolveClientIdentity, describeIdentityProblem } from "@/lib/security/client-identity";
 
 const RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const RATE_MAX_CLIENTS = 10_000;
@@ -261,10 +262,35 @@ export async function proxy(request: NextRequest) {
   }
 
   // --- Rate limiting (applies to ALL requests) ---
-  // Nginx/Caddy are configured to overwrite X-Real-IP from the actual peer.
-  // Do not trust the client-controlled leftmost X-Forwarded-For value for limits.
-  const ip = request.headers.get("x-real-ip")?.trim() || "unknown";
+  //
+  // SEC-05: this used to be `x-real-ip || "unknown"`, so whenever the header was
+  // absent — direct connection, container hop, tunnel, or a proxy that does not
+  // set it — every client on the platform shared the literal key "unknown". The
+  // limit then applied to the platform as a whole: one client could exhaust
+  // everyone's budget, and every audit record named the same non-identity.
+  //
+  // Identity now comes from `resolveClientIdentity`, which uses the transport
+  // peer and only trusts forwarding headers for the number of hops the operator
+  // declares (TRUSTED_PROXY_COUNT, default 0 = trust none). An unidentifiable
+  // request gets its own random bucket, so it can never be merged with another
+  // client or with identified traffic.
+  const identity = resolveClientIdentity({
+    peerAddress: (request as unknown as { ip?: string }).ip ?? null,
+    headers: request.headers,
+  });
+  const ip = identity.key;
   const now = Date.now();
+  if (identity.unidentifiable) {
+    // Warn at most once per process per minute: a missing peer address or proxy
+    // declaration is a configuration defect an operator must see, but it must
+    // not flood the log at request rate.
+    const problem = describeIdentityProblem(identity);
+    const last = (globalThis as { __aloIdentityWarnedAt?: number }).__aloIdentityWarnedAt ?? 0;
+    if (problem && now - last > 60_000) {
+      (globalThis as { __aloIdentityWarnedAt?: number }).__aloIdentityWarnedAt = now;
+      console.warn(`[SEC-05] ${problem}`);
+    }
+  }
   cleanupRateLimitState(now);
 
   // Stricter rate limit for auth & public form endpoints
