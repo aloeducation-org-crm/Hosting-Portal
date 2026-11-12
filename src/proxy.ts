@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, hasSessionCookie, validateCsrf } from "@/lib/security/csrf";
 import { resolveClientIdentity, describeIdentityProblem } from "@/lib/security/client-identity";
+import { decideVerificationAccess } from "@/lib/account-status";
 
 const RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const RATE_MAX_CLIENTS = 10_000;
@@ -443,6 +444,43 @@ export async function proxy(request: NextRequest) {
             requestId: "",
           },
           { status: 403 }
+        ),
+        corsOrigin,
+        pathname
+      );
+    }
+
+    /**
+     * Email verification gate (SEC-06).
+     *
+     * A new account could use the whole customer API — create sites, import
+     * repositories, run builds — before its address was verified. `emailVerified`
+     * was recorded and never consulted.
+     *
+     * `undefined` is treated as unverified: tokens issued before this claim
+     * existed (and any fixture that omits it) must not be trusted as verified.
+     * Administrators are exempt — see `decideVerificationAccess` — because
+     * locking the platform's own operators out during an incident is the worse
+     * failure.
+     */
+    const emailVerified = token.emailVerified === true;
+    const verification = decideVerificationAccess({
+      pathname,
+      emailVerified,
+      isAdministrator: ADMIN_ROLES.has(userRole),
+    });
+    if (!verification.allowed) {
+      return applySecurityHeaders(
+        NextResponse.json(
+          {
+            status: verification.status ?? 403,
+            success: false,
+            message: verification.reason,
+            data: null,
+            error: { code: verification.code ?? "EMAIL_NOT_VERIFIED" },
+            requestId: "",
+          },
+          { status: verification.status ?? 403 }
         ),
         corsOrigin,
         pathname

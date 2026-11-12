@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { UserRole } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
 import { encode, getToken } from "next-auth/jwt";
 import { apiSuccess, apiError } from "@/lib/response";
 import { db } from "@/lib/db";
 import { applyEntitlementChange, freeTierAuthorization, type PlanRecord } from "@/lib/billing/entitlements";
 import { logger } from "@/lib/logger";
+import { resolveSignupRole } from "@/lib/account-status";
 import { hashPassword } from "@/lib/password";
 import { sendEmail } from "@/lib/smtp";
 import { env } from "@/lib/env";
@@ -36,27 +38,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Only allow privileged role assignment if caller is an authenticated admin
-    let targetRoleName = input.role;
-    const privilegedRoles = ["SUPER_ADMIN", "ADMIN", "DEVOPS", "SUPPORT"];
-    if (privilegedRoles.includes(targetRoleName)) {
-      const callerToken = await getToken({ req: request, secret: env.NEXTAUTH_SECRET }).catch(
-        () => null
+    /**
+     * Role selection (SEC-06).
+     *
+     * The previous check gated SUPER_ADMIN, ADMIN, DEVOPS and SUPPORT but left
+     * RESELLER open, and a reseller is treated as an administrator on several
+     * surfaces. `resolveSignupRole` is the single policy: every role that
+     * carries administrative reach is reduced to CLIENT for a self-service
+     * signup, and a requested reseller capability is recorded so an
+     * administrator can review and grant it.
+     */
+    const callerToken = await getToken({ req: request, secret: env.NEXTAUTH_SECRET }).catch(
+      () => null
+    );
+    const callerRole = callerToken?.role as string | undefined;
+    const roleDecision = resolveSignupRole({
+      requested: input.role,
+      callerIsAdministrator: callerRole === "SUPER_ADMIN" || callerRole === "ADMIN",
+    });
+    const targetRoleName = roleDecision.role;
+    if (roleDecision.downgraded) {
+      logger.warn(
+        {
+          event: "signup_role_downgraded",
+          email: normalizedEmail,
+          requested: roleDecision.requested,
+          granted: roleDecision.role,
+        },
+        "self-service signup requested a privileged role; granted CLIENT",
       );
-      const callerRole = callerToken?.role as string | undefined;
-      if (callerRole !== "SUPER_ADMIN" && callerRole !== "ADMIN") {
-        targetRoleName = "CLIENT";
-      }
     }
 
-    let role = await db.role.findUnique({ where: { name: targetRoleName } });
+    // `UserRole` is a Prisma enum; the policy returns a string so it stays
+    // testable without importing generated types. The cast is safe because the
+    // schema enum and the signup Zod enum are the same seven values, and the
+    // policy only ever returns CLIENT or the requested value from that set.
+    const targetRole = targetRoleName as UserRole;
+    let role = await db.role.findUnique({ where: { name: targetRole } });
     if (!role) {
       role = await db.role.findUnique({ where: { name: "VIEWER" } });
     }
     if (!role) {
       role = await db.role.create({
         data: {
-          name: targetRoleName,
+          name: targetRole,
           description: `${targetRoleName} role`,
         },
       });

@@ -52,8 +52,26 @@ afterEach(() => {
   process.env.APP_ENCRYPTION_KEY = "a".repeat(64);
 });
 
-async function sessionValue(user = { id: "u-1", email: "client@example.com", role: "CLIENT" }) {
-  return await encode({ secret: TEST_JWT_SECRET, token: { id: user.id, sub: user.id, email: user.email, role: user.role } });
+/**
+ * A session token for a *verified customer*.
+ *
+ * `emailVerified` is part of the token because `src/proxy.ts` enforces the
+ * verification policy (SEC-06) for every `/api` path: a token without the claim
+ * is treated as unverified, which is the fail-closed direction. These tests are
+ * about CSRF, so they use the state a normal, working customer session is in.
+ */
+async function sessionValue(
+  user: { id: string; email: string; role: string; emailVerified?: boolean } = {
+    id: "u-1",
+    email: "client@example.com",
+    role: "CLIENT",
+    emailVerified: true,
+  },
+) {
+  return await encode({
+    secret: TEST_JWT_SECRET,
+    token: { id: user.id, sub: user.id, email: user.email, role: user.role, emailVerified: user.emailVerified ?? true },
+  });
 }
 
 interface ReqOpts {
