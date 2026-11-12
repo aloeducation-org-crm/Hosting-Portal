@@ -97,6 +97,52 @@ services:
       retries: 3
       start_period: 30s
 
+  # REL-03: the deployment worker gets the same supervision as the automation
+  # worker. Without it, PENDING deployments are only ever claimed by a request
+  # handler, and an install that sets DEPLOY_INLINE_WORKER=false has nothing
+  # draining the queue.
+  deploy-worker:
+    image: alo-hosting-panel:runtime
+    container_name: alo-deploy-worker
+    command: ["node", "deploy-worker.cjs"]
+    depends_on:
+      alo-hosting-panel:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: ./deploy/env/alo-hosting-panel.env
+        required: false
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:/var/lib/alo-hosting/alo.db
+      DEPLOY_RELEASE_BASE: /var/lib/alo-hosting/releases
+      DEPLOY_INLINE_WORKER: "false"
+      DEPLOY_WORKER_INTERVAL_MS: "2000"
+      DEPLOY_WORKER_HEARTBEAT_FILE: /tmp/alo-deploy-worker.json
+      # Build isolation needs the same namespace tooling the panel has; without
+      # it prod refuses to build rather than building unisolated (SEC-01).
+      DEPLOY_BUILD_ISOLATION: ${DEPLOY_BUILD_ISOLATION:-required}
+    volumes:
+      - alo-hosting-data:/var/lib/alo-hosting
+    read_only: true
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 512
+    stop_grace_period: 31m
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('fs');const h=JSON.parse(fs.readFileSync(process.env.DEPLOY_WORKER_HEARTBEAT_FILE,'utf8'));process.exit(Date.now()-new Date(h.updatedAt).getTime()<60000?0:1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
   alo-hosting-data:
     name: alo-hosting-data

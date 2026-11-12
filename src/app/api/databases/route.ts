@@ -8,6 +8,7 @@ import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
 import { v4 as uuidv4 } from 'uuid';
 import { env } from '@/lib/env';
+import { assertWithinPlanLimit, EntitlementError } from '@/lib/billing/entitlements';
 
 const createSchema = z.object({
   websiteId: z.string().uuid(),
@@ -76,6 +77,24 @@ export async function POST(request: NextRequest) {
     // This closes the cross-tenant provisioning IDOR where a permitted user
     // could submit another tenant's websiteId.
     assertWebsiteAccess(user, website);
+
+    /**
+     * SEC-03: the plan's `maxDatabases` was displayed on every plan page and
+     * enforced nowhere. The limit is checked against the site's *owner* (a
+     * database belongs to a website, which belongs to an owner) and before the
+     * privileged helper runs.
+     */
+    try {
+      await assertWithinPlanLimit(website.ownerId ?? user.id, 'databases');
+    } catch (error) {
+      if (error instanceof EntitlementError) {
+        return NextResponse.json(
+          apiError(error.message, error.code, error.customerAction ? { customerAction: error.customerAction } : undefined, error.status),
+          { status: error.status },
+        );
+      }
+      throw error;
+    }
 
     // Call real helper
     const helperCmd = input.engine === 'MARIADB' ? 'create-mariadb' : 'create-postgresql';

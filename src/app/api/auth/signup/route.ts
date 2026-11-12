@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { UserRole } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
 import { encode, getToken } from "next-auth/jwt";
 import { apiSuccess, apiError } from "@/lib/response";
 import { db } from "@/lib/db";
+import { applyEntitlementChange, freeTierAuthorization, type PlanRecord } from "@/lib/billing/entitlements";
+import { logger } from "@/lib/logger";
+import { resolveSignupRole } from "@/lib/account-status";
 import { hashPassword } from "@/lib/password";
 import { sendEmail } from "@/lib/smtp";
 import { env } from "@/lib/env";
@@ -34,27 +38,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Only allow privileged role assignment if caller is an authenticated admin
-    let targetRoleName = input.role;
-    const privilegedRoles = ["SUPER_ADMIN", "ADMIN", "DEVOPS", "SUPPORT"];
-    if (privilegedRoles.includes(targetRoleName)) {
-      const callerToken = await getToken({ req: request, secret: env.NEXTAUTH_SECRET }).catch(
-        () => null
+    /**
+     * Role selection (SEC-06).
+     *
+     * The previous check gated SUPER_ADMIN, ADMIN, DEVOPS and SUPPORT but left
+     * RESELLER open, and a reseller is treated as an administrator on several
+     * surfaces. `resolveSignupRole` is the single policy: every role that
+     * carries administrative reach is reduced to CLIENT for a self-service
+     * signup, and a requested reseller capability is recorded so an
+     * administrator can review and grant it.
+     */
+    const callerToken = await getToken({ req: request, secret: env.NEXTAUTH_SECRET }).catch(
+      () => null
+    );
+    const callerRole = callerToken?.role as string | undefined;
+    const roleDecision = resolveSignupRole({
+      requested: input.role,
+      callerIsAdministrator: callerRole === "SUPER_ADMIN" || callerRole === "ADMIN",
+    });
+    const targetRoleName = roleDecision.role;
+    if (roleDecision.downgraded) {
+      logger.warn(
+        {
+          event: "signup_role_downgraded",
+          email: normalizedEmail,
+          requested: roleDecision.requested,
+          granted: roleDecision.role,
+        },
+        "self-service signup requested a privileged role; granted CLIENT",
       );
-      const callerRole = callerToken?.role as string | undefined;
-      if (callerRole !== "SUPER_ADMIN" && callerRole !== "ADMIN") {
-        targetRoleName = "CLIENT";
-      }
     }
 
-    let role = await db.role.findUnique({ where: { name: targetRoleName } });
+    // `UserRole` is a Prisma enum; the policy returns a string so it stays
+    // testable without importing generated types. The cast is safe because the
+    // schema enum and the signup Zod enum are the same seven values, and the
+    // policy only ever returns CLIENT or the requested value from that set.
+    const targetRole = targetRoleName as UserRole;
+    let role = await db.role.findUnique({ where: { name: targetRole } });
     if (!role) {
       role = await db.role.findUnique({ where: { name: "VIEWER" } });
     }
     if (!role) {
       role = await db.role.create({
         data: {
-          name: targetRoleName,
+          name: targetRole,
           description: `${targetRoleName} role`,
         },
       });
@@ -76,19 +103,33 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Provision default Starter subscription if available
+    /**
+     * Provision the default free plan, if the platform has one.
+     *
+     * SEC-03: this used to write the Subscription row directly, which made it a
+     * fourth place the entitlement rule was not applied. The plan is selected by
+     * *price* first — the previous `OR: [{ name: "Starter" }, { priceCents: 0 }]`
+     * would happily match a plan literally named "Starter" whatever it cost — and
+     * the grant goes through the single entitlement service, which refuses any
+     * non-zero plan.
+     */
     const starterPlan = await db.plan.findFirst({
-      where: { OR: [{ name: "Starter" }, { priceCents: 0 }] },
+      where: { isActive: true, priceCents: 0 },
+      orderBy: { priceCents: "asc" },
     });
     if (starterPlan) {
-      await db.subscription.create({
-        data: {
-          userId: newUser.id,
-          planId: starterPlan.id,
-          status: "active",
-          currentPeriodStart: new Date(),
-          currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        },
+      await applyEntitlementChange({
+        userId: newUser.id,
+        plan: starterPlan as PlanRecord,
+        authorization: freeTierAuthorization("Default free plan provisioned at signup"),
+      }).catch((error: unknown) => {
+        // A missing default plan must never roll back a successful registration;
+        // the account simply starts with no subscription, which the plan-limit
+        // check treats as "no limit agreed yet" rather than "unlimited".
+        logger.error(
+          { event: "signup_free_plan_failed", userId: newUser.id, error: error instanceof Error ? error.message : "unknown" },
+          "default free plan could not be provisioned at signup",
+        );
       });
     }
 

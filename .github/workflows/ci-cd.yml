@@ -178,7 +178,24 @@ jobs:
         run: |
           test -s .next/standalone/server.js
           test -s .next/standalone/automation-worker.cjs
+          test -s .next/standalone/deploy-worker.cjs
           node --check .next/standalone/automation-worker.cjs
+          node --check .next/standalone/deploy-worker.cjs
+          # Every shipped unit must point at a bundle this build produced. A unit
+          # whose ExecStart target is missing fails at start, after a release has
+          # already been activated.
+          # Units use the installed path (/opt/alo-hosting/current/.next/standalone/x.cjs);
+          # map that back to the build output before checking it exists.
+          for unit in deploy/systemd/*.service; do
+            target="$(sed -n 's|^ExecStart=/usr/bin/node \([^ ]*\).*|\1|p' "$unit")"
+            [ -n "$target" ] || continue
+            case "$target" in
+              *.cjs)
+                relative="${target#/opt/alo-hosting/current/}"
+                test -s "$relative" || { echo "::error::$unit points at missing $target (expected $relative from this build)"; exit 1; }
+                ;;
+            esac
+          done
       # The digest travels inside the artifact and is also published as a job
       # output, so the host can prove the payload it received is the payload CI
       # built — and the two values can be compared in the run summary.

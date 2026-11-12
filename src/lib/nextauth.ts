@@ -218,6 +218,41 @@ export const authOptions: NextAuthOptions = {
         token.mfaEnabled = user.mfaEnabled ?? false;
         token.emailVerified = user.emailVerified ?? false;
         token.onboardingCompleted = user.onboardingCompleted ?? false;
+        token.emailVerifiedCheckedAt = Date.now();
+      } else if (token.sub) {
+        /**
+         * Refresh volatile claims from the database (SEC-06).
+         *
+         * Sessions are 24-hour JWTs, so a claim minted at sign-in is stale for a
+         * day. Without this, a user who verifies their email would still be
+         * refused by the verification gate (`src/proxy.ts`) until the token
+         * expired — the fix would look broken to every new customer. The same
+         * refresh also makes a revoked role or a suspended account take effect
+         * within the refresh window rather than within a day.
+         *
+         * The interval is one minute: a cheap primary-key read, and short enough
+         * that verification feels immediate.
+         */
+        const checkedAt = Number(token.emailVerifiedCheckedAt ?? 0);
+        if (Date.now() - checkedAt > 60_000) {
+          try {
+            const dbUser = await db.user.findUnique({
+              where: { id: String(token.sub) },
+              include: { role: true, mfa: true },
+            });
+            if (dbUser) {
+              token.emailVerified = dbUser.emailVerified !== null;
+              token.role = dbUser.role.name;
+              token.mfaEnabled = dbUser.mfa?.isEnabled ?? false;
+              token.isActive = dbUser.isActive;
+              token.isLocked = dbUser.isLocked;
+            }
+            token.emailVerifiedCheckedAt = Date.now();
+          } catch {
+            // A transient database error must not sign the user out; the previous
+            // claim stands and the next request retries.
+          }
+        }
       }
       if (trigger === "update" && session) {
         if (session.onboardingCompleted !== undefined) {
