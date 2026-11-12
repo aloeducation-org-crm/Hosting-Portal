@@ -53,7 +53,7 @@ runner.
 |---|---|---|---|
 | REL-01 | Deploy engine: real clone → detect → build → package → activate → verify → rollback | **PASS** (static sites, local) | pre-existing `tests/deploy-e2e.test.ts`, still green after SEC-01 |
 | REL-02 | Health distinguishes unreachable vs stale schema | **PASS** | SEC-13 above |
-| REL-03 | Orchestrator workers supervised by a process manager | **FAIL** | No unit/timer shipped for `scripts/orchestrator-worker.ts`; next task below. |
+| REL-03 | Workers supervised by a process manager | **PARTIAL** | Orchestrator **is** supervised: `deploy/systemd/alo-automation-worker.service` + Compose `automation-worker` + CI entrypoint check + heartbeat file. Unsupervised: `scripts/deploy-worker.ts` only. Earlier "none shipped" claim was wrong and is corrected in `WORKER-SCHEDULER-AUDIT.md`. Next task below. |
 | REL-04 | Agent task lifecycle has a start transition and duplicate-execution guard | **PASS** | `POST /api/agents/tasks/start`; `startTask()`; SEC-07 tests |
 | REL-05 | Off-host backup target + evidenced restore | **BLOCKED** | No off-host destination exists; requires storage credentials. |
 | REL-06 | Server application runtimes (Node/Python/PHP) actually run | **FAIL** by design | Detection exists; service manager is `none` pending operator wiring. Documented, not fixed here. |
@@ -101,9 +101,9 @@ In priority order. Each is small enough to complete and verify in one pass.
 
 1. **SEC-11** — make deployment settings that affect shared host resources
    operator-only rather than customer-editable, and test it.
-2. **REL-03** — ship a supervised unit for `scripts/orchestrator-worker.ts`
-   (systemd timer/unit in `deploy/`, plus a Docker Compose service), with a
-   readiness probe.
+2. **REL-03** — ship a supervised unit for `scripts/deploy-worker.ts`
+   (the orchestrator already has `alo-automation-worker.service`), modelled on
+   that unit, with a heartbeat file and a readiness probe.
 3. **REL-05** — implement an off-host backup destination interface with a
    filesystem implementation and a restore verification job; the off-host
    credential itself stays BLOCKED.
@@ -132,7 +132,14 @@ records what they got right, what this pass changed, and what remains.
 | `docs/audit/TEST-AND-COVERAGE-REPORT.md` | written |
 | `docs/audit/ISSUE-AND-REMEDIATION-MATRIX.md` | written |
 | `docs/audit/PRODUCTION-READINESS.md` | written |
-| `docs/operations/*` (4 files) | written |
+| `docs/operations/INSTALLATION.md` | written (154 lines) |
+| `docs/operations/BACKUP-RESTORE.md` | written (127 lines) |
+| `docs/operations/INCIDENT-RESPONSE.md` | written (116 lines) |
+| `docs/operations/RELEASE-AND-ROLLBACK.md` | written (126 lines) |
+
+Every file above was verified to exist with non-zero length before this row was
+marked written; three of them were corrected during writing after checking the
+source (see §9).
 
 ## 8. Session log
 
@@ -144,7 +151,27 @@ records what they got right, what this pass changed, and what remains.
 | `8b6b5fb` | SEC-13 health classes, SEC-12 fixture refusal | +18 |
 | `3dd87af` | SEC-05 client identity for rate limiting | +20 |
 | `d1dc3d0` | SEC-06 verification gate, self-selected roles | +21 |
+| `37b4a41` | SEC-13 identifier validation before the raw probe | +3 |
+| `b5a523e` | audit baseline: 8 audit documents | 0 |
 
-Baseline 1017 tests → 1174 tests. No test was deleted or weakened to make CI
-green; two tests that asserted defective behaviour were rewritten to assert the
-correct behaviour, and the reason is recorded in each commit message.
+## 9. Corrections made while writing the docs
+
+Documentation that flatters the code is worse than none. Six claims were written,
+checked against the source, and corrected:
+
+| Claim | Reality | Where corrected |
+|---|---|---|
+| "No unit or timer supervises any worker" | `deploy/systemd/alo-automation-worker.service` + Compose `automation-worker` + a CI entrypoint check supervise the orchestrator. Only `scripts/deploy-worker.ts` is unsupervised. | `WORKER-SCHEDULER-AUDIT.md`, checklist REL-03 |
+| "The restore path is refused" | Site restore is **real**: `helpers/alo-site-restore` verifies SHA-256 and aborts on mismatch. Only the **database** restore drill returns `NOT_IMPLEMENTED`. | `BACKUP-RESTORE.md`, `INTEGRATION-STATUS.md`, matrix DB-04 |
+| "`npm run db:migrate -- --check`" | `db:migrate` is `prisma migrate deploy` and takes no such flags. The dry-run flags belong to `node scripts/apply-deploy-schema.mjs`. | `INSTALLATION.md` |
+| "`curl ... \| jq -r '.version // .release'`" | `/api/health` reports `release.commitSha`, and `scripts/deploy-release.sh` verifies that exact field. | `RELEASE-AND-ROLLBACK.md` |
+| Matrix summary "6 BLOCKED" | The table has 8. Counts are now parsed from the table, not hand-tallied. | `ISSUE-AND-REMEDIATION-MATRIX.md` |
+| "`alo-site-backup <site-id> --dest …`" | The helper takes a **domain**, has no `--dest` (destination is fixed), and its actions are `create`/`list`/`cleanup`/`delete-one`. `alo-site-restore` takes `(domain, archive)`. | `BACKUP-RESTORE.md` |
+
+### Test accounting across the pass
+
+Baseline `0b51a10`: 67 files / 1017 tests. At `b5a523e`: 74 files / 1174 passed
+plus 1 skipped. No test was deleted or weakened to make CI green; tests that
+asserted defective behaviour were rewritten to assert the correct behaviour, and
+the reason is recorded in each commit message. The single skip is the SEC-01
+namespace test, skipped only where the OS cannot create a namespace.

@@ -24,7 +24,8 @@
 | systemd / sudo helpers | `helpers/*` (23) | Yes | No | **PARTIAL** | Scripts parse (`bash -n` in CI); not executed as root here |
 | Server agent | `agent/alo-agent.mjs` | Yes | No | **PARTIAL** | Signing/transport/heartbeat tested against a fake server; no real enrollment |
 | Reverse proxy (nginx/Caddy) | `deploy/nginx/*` | Config | No | **PARTIAL** | Config present, not applied |
-| Backups | `alo-site-backup`, `/api/backups` | Yes | No | **PARTIAL** | Creation tested; **restore drill `NOT_IMPLEMENTED`** |
+| Site backup/restore | `helpers/alo-site-backup`, `helpers/alo-site-restore` | Yes | No | **PARTIAL** | Backup writes a SHA-256 checksummed archive; restore verifies the checksum and aborts on mismatch. Real path, not executed as root in this sandbox. |
+| Database restore (automated drill) | orchestrator worker | No | No | **NOT IMPLEMENTED** | Returns `NOT_IMPLEMENTED` rather than faking a restore |
 | Monitoring / alert delivery | `/api/monitoring/collect` | Rules only | No | **PARTIAL** | Evaluation exists; no delivery channel proven, no scheduler |
 | Firebase / Google Drive | — | No | — | **NOT APPLICABLE** | Not referenced by product code |
 

@@ -65,9 +65,9 @@ This is why the platform is documented as single-instance.
 | site lifecycle | create/suspend/resume/terminate via helper | — |
 | deploy | delegates to the deploy engine | — |
 | backup | dump + verify | — |
-| restore | restores into a target | **restore drill returns `NOT_IMPLEMENTED`** rather than a false success |
+| site restore | `helpers/alo-site-restore` verifies SHA-256 and aborts on mismatch | — real restore path |
+| database restore drill | — | **returns `NOT_IMPLEMENTED`** rather than a false success |
 | database provision | helper contract | **returns `NOT_IMPLEMENTED`** for the orchestrated path |
-| database migration/restore | — | `NOT_IMPLEMENTED` |
 | certificate issue/renew | helper contract | **`NOT_IMPLEMENTED`** — does not claim issuance |
 | agent task dispatch | signed task envelope | — |
 | health probe | real HTTP + release marker | — |
