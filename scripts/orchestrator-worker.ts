@@ -1,91 +1,79 @@
 /**
- * Standalone durable-job worker for self-hosted installs.
+ * Standalone durable Automation Engine worker.
  *
- * One process, one loop, two existing persistent queues — deliberately *not* a
- * second queue implementation:
+ * One loop drives the central engine: lease recovery, stale agent-task expiry,
+ * schedule claims, workflow reconciliation, bounded job claims and legacy
+ * deployment attachment. It never creates a second in-memory queue.
  *
- *   1. `operation_jobs` — the durable orchestrator (build/test, security
- *      analysis, release identity, backups, monitoring, recovery, database and
- *      domain audits). Claimed with leases, per-lock-key serialization, retries
- *      and dead-lettering.
- *   2. `deployments` — the Git-connected deployment pipeline, which keeps its
- *      own PENDING rows and its own atomic PENDING → RUNNING claim.
- *
- * Usage:
- *   DATABASE_URL=file:/var/lib/alo-hosting/alo.db npx tsx scripts/orchestrator-worker.ts
- *   npx tsx scripts/orchestrator-worker.ts --once
+ * Development:  npx tsx scripts/orchestrator-worker.ts [--once]
+ * Production:   node .next/standalone/automation-worker.cjs [--once]
  *
  * Environment:
- *   ORCHESTRATOR_INTERVAL_MS   poll interval (default 2000)
- *   ORCHESTRATOR_WORKER_ID     worker identity written into leases (default: hostname+pid)
- *   DEPLOY_INLINE_WORKER       set to "false" in the panel env when this worker
- *                              is the one running deployments (default here: false)
- *
- * Safe to run next to the panel's inline worker: every claim is a conditional
- * write, so two processes cannot run the same job twice.
+ *   ORCHESTRATOR_INTERVAL_MS      poll interval (1000..60000, default 5000)
+ *   ORCHESTRATOR_MAX_JOBS         jobs per tick (1..25, default 5)
+ *   ORCHESTRATOR_WORKER_ID        lease identity (default hostname-pid)
+ *   ORCHESTRATOR_HEARTBEAT_FILE   liveness file (default /tmp/alo-automation-worker.json)
+ *   DEPLOY_INLINE_WORKER          defaults to false here; set the panel to false too
  */
 import os from "node:os";
-import { Orchestrator } from "../src/lib/orchestrator/orchestrator";
-import "../src/lib/orchestrator/workers"; // registers the worker catalogue
-import { processPendingDeployments } from "../src/lib/deploy/queue";
-import { expireStaleTasks } from "../src/lib/agents/agent";
+import fs from "node:fs/promises";
+import { runAutomationTick } from "../src/lib/orchestrator/engine";
+import "../src/lib/orchestrator/workers";
 import { db } from "../src/lib/db";
+import { logger } from "../src/lib/logger";
 
 const once = process.argv.includes("--once");
-const intervalMs = Number(process.env.ORCHESTRATOR_INTERVAL_MS || 2000);
-const workerId = process.env.ORCHESTRATOR_WORKER_ID || `${os.hostname()}-${process.pid}`;
-
-// When a dedicated worker is running, the panel process should not also start
-// deployments inline — that is what DEPLOY_INLINE_WORKER=false is for.
+const intervalMs = Math.min(60_000, Math.max(1000, Number(process.env.ORCHESTRATOR_INTERVAL_MS) || 5000));
+const maxJobs = Math.min(25, Math.max(1, Number(process.env.ORCHESTRATOR_MAX_JOBS) || 5));
+const workerId = (process.env.ORCHESTRATOR_WORKER_ID || `${os.hostname()}-${process.pid}`).slice(0, 64);
+const heartbeatFile = process.env.ORCHESTRATOR_HEARTBEAT_FILE || "/tmp/alo-automation-worker.json";
 if (process.env.DEPLOY_INLINE_WORKER === undefined) process.env.DEPLOY_INLINE_WORKER = "false";
 
-const orchestrator = new Orchestrator();
+let stopping = false;
+let inTick = false;
+let lastSuccessAt: string | null = null;
+let lastError: string | null = null;
+
+async function heartbeat() {
+  const payload = { workerId, pid: process.pid, inTick, lastSuccessAt, lastError, updatedAt: new Date().toISOString() };
+  await fs.writeFile(heartbeatFile, JSON.stringify(payload), "utf8").catch((error) => logger.warn({ error }, "worker heartbeat write failed"));
+}
 
 async function tick() {
-  const recovered = await orchestrator.recoverAbandoned();
-  const expiredTasks = await expireStaleTasks().catch(() => 0);
-
-  let jobs = 0;
-  for (let i = 0; i < 5; i++) {
-    const jobId = await orchestrator.runNext(workerId);
-    if (!jobId) break;
-    jobs++;
-    console.log(`[orchestrator] job ${jobId} completed by ${workerId}`);
+  inTick = true;
+  await heartbeat();
+  try {
+    const result = await runAutomationTick({ workerId, maxJobs });
+    lastSuccessAt = new Date().toISOString();
+    lastError = null;
+    if (result.recovered.jobIds.length || result.expiredTasks || result.ran.length || result.scheduled.length) {
+      logger.info({ workerId, jobs: result.ran.length, scheduled: result.scheduled.length, recovered: result.recovered.jobIds.length }, "automation tick");
+    }
+  } catch (error) {
+    lastError = error instanceof Error ? error.message.slice(0, 300) : "unknown";
+    logger.error({ workerId, error }, "automation tick failed");
+  } finally {
+    inTick = false;
+    await heartbeat();
   }
-
-  const deployments = await processPendingDeployments(3).catch((error) => {
-    console.error("[orchestrator] deployment sweep failed:", error instanceof Error ? error.message : String(error));
-    return [] as string[];
-  });
-
-  if (recovered.jobIds.length || expiredTasks || jobs || deployments.length) {
-    console.log(
-      `[orchestrator] jobs=${jobs} deployments=${deployments.length} recovered=${recovered.jobIds.length} expiredTasks=${expiredTasks}`,
-    );
-  }
-  return jobs + deployments.length;
 }
 
 async function main() {
-  console.log(`[orchestrator-worker] started (id=${workerId}, once=${once}, interval=${intervalMs}ms)`);
-  const stop = async () => {
-    console.log("[orchestrator-worker] shutting down gracefully");
-    await db.$disconnect().catch(() => {});
-    process.exit(0);
-  };
-  process.on("SIGTERM", () => void stop());
-  process.on("SIGINT", () => void stop());
-
+  logger.info({ workerId, once, intervalMs, maxJobs }, "automation worker started");
+  const stop = () => { stopping = true; logger.info({ workerId }, "automation worker draining current tick"); };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  const pulse = setInterval(() => void heartbeat(), 15_000);
+  pulse.unref();
+  await heartbeat();
   do {
-    try {
-      await tick();
-    } catch (error) {
-      console.error("[orchestrator-worker] tick failed:", error instanceof Error ? error.message : String(error));
-    }
-    if (!once) await new Promise((r) => setTimeout(r, intervalMs));
-  } while (!once);
-
-  await db.$disconnect();
+    await tick();
+    if (once || stopping) break;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  } while (!stopping);
+  clearInterval(pulse);
+  await db.$disconnect().catch(() => {});
+  logger.info({ workerId }, "automation worker stopped");
 }
 
-void main();
+void main().catch((error) => { logger.fatal({ error }, "automation worker crashed"); process.exitCode = 1; });

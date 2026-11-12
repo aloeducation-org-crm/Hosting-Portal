@@ -125,13 +125,10 @@ export async function sendEmail(options: SmtpOptions): Promise<SmtpResult> {
   const from = options.from || env.SMTP_FROM;
   const smtpHost = env.SMTP_HOST;
 
-  // Dev mode: if no SMTP configured, log and return success
+  // Never report an email as sent when no transport exists.
   if (!smtpHost) {
-    logger.info(
-      { to: options.to, subject: options.subject, from, messageId },
-      'SMTP not configured — email logged (dev mode)',
-    );
-    return { sent: true, messageId };
+    logger.warn({ subject: options.subject, from, messageId }, 'SMTP not configured — email was NOT sent');
+    return { sent: false, messageId, error: 'SMTP_NOT_CONFIGURED' };
   }
 
   const smtpPort = env.SMTP_PORT;

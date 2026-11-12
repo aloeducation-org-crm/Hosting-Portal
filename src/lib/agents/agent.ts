@@ -464,6 +464,8 @@ export interface DispatchInput {
   correlationId?: string;
   actorEmail?: string;
   actorScopes?: string[];
+  approvedBy?: string;
+  approvedAt?: Date;
 }
 
 export interface DispatchedTask {
@@ -506,23 +508,37 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchedTask
     return await recordRefusal(input, "REFUSED_BY_ALLOWLIST", decision.reason ?? "Not authorized");
   }
 
-  const online = agentOnline(agent);
-  const task = await db.agentTask.create({
+  const gated = decision.entry.risk === "PRIVILEGED" || decision.entry.risk === "DESTRUCTIVE";
+  const approvalFresh = Boolean(input.approvedBy && input.approvedAt && Date.now() - input.approvedAt.getTime() <= AGENT_APPROVAL_TTL_MS);
+  // A crash after dispatch but before the job records taskId must not create a
+  // second host command. The orchestrator job id is the dispatch idempotency key.
+  const taskId = input.jobId
+    ? createHash("sha256").update(`agent-task:${input.jobId}:${agent.id}:${decision.entry.command}:${JSON.stringify(input.args ?? {})}`).digest("hex").slice(0, 64)
+    : undefined;
+  const existing = taskId ? await db.agentTask.findUnique({ where: { id: taskId } }) : null;
+  const task = existing ?? await db.agentTask.create({
     data: {
+      ...(taskId ? { id: taskId } : {}),
       agentId: agent.id,
       jobId: input.jobId ?? null,
       correlationId: input.correlationId ?? null,
       command: decision.entry.command,
       args: JSON.stringify(input.args ?? {}),
-      // Queued but not yet picked up: the agent polls and claims it.
-      status: online ? "PENDING" : "PENDING",
+      // Queued but not yet picked up: the agent polls and claims it. Offline
+      // agents are rejected by the worker before dispatch; do not queue forever.
+      status: "PENDING",
       timeoutMs: decision.entry.timeoutMs,
-      requiresApproval: decision.entry.risk === "PRIVILEGED" || decision.entry.risk === "DESTRUCTIVE",
-      approvedBy: decision.entry.risk === "PRIVILEGED" || decision.entry.risk === "DESTRUCTIVE" ? null : input.actorEmail ?? null,
+      requiresApproval: gated,
+      approvedBy: gated ? (approvalFresh ? input.approvedBy : null) : input.actorEmail ?? null,
+      approvedAt: gated ? (approvalFresh ? input.approvedAt : null) : null,
     },
+  }).catch(async (error: unknown) => {
+    const raced = taskId ? await db.agentTask.findUnique({ where: { id: taskId } }) : null;
+    if (raced) return raced;
+    throw error;
   });
 
-  if (decision.entry.risk === "PRIVILEGED" || decision.entry.risk === "DESTRUCTIVE") {
+  if (gated && !task.approvedBy) {
     await createAuditLog({
       actorEmail: input.actorEmail,
       action: "AGENT_TASK_GATED",

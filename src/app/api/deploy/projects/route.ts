@@ -14,6 +14,7 @@ const importSchema = z.object({
   previewBranches: z.array(z.string().regex(/^[A-Za-z0-9._\/-]{1,100}$/)).max(20).optional(),
   connectionId: z.string().optional(),
   autoDeploy: z.boolean().optional(),
+  domain: z.string().min(3).max(253).regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?$/).optional(),
   port: z.number().int().min(1024).max(65535).optional(),
   // Probed server-side by verifyDeployment during every deployment, and the
   // result is persisted to deployment.healthResult. Without this it is a
@@ -94,6 +95,12 @@ export async function POST(request: NextRequest) {
       return badRequest("Local source override is not enabled on this host");
     }
     const result = await importRepository({ ...parsed.data, userId: user.id, cloneUrlOverride });
+    let automationRunId: string | null = null;
+    if (result.project.lastCommitSha) {
+      const { triggerEvent, actorForUser } = await import("@/lib/orchestrator/workflows");
+      const runs = await triggerEvent("project.lifecycle.requested", { projectId: result.project.id, commitSha: result.project.lastCommitSha, domain: parsed.data.domain ?? null, userId: user.id }, await actorForUser(user.id), `import:${result.project.id}`);
+      automationRunId = runs[0]?.id ?? null;
+    }
     await createAuditLog({
       actorId: user.id, actorEmail: user.email, actorRole: user.role,
       action: "GITHUB_REPOSITORY_IMPORT", resourceType: "GitProject", resourceId: result.project.id,
@@ -106,6 +113,8 @@ export async function POST(request: NextRequest) {
       detection: result.detection,
       webhook: result.webhook,
       warnings: result.warnings,
+      automationRunId,
+      automationStatus: automationRunId ? "queued" : "waiting_for_commit",
     }), { status: 201 });
   } catch (error) {
     return errorResponse(error);

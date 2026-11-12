@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
-import { requireAdmin, requireSession } from "@/lib/auth";
+import { requireAdmin, requireSession, isAdminRole } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { actorForUser } from "@/lib/orchestrator/workflows";
 import { orchestrator, type EnqueueJobInput } from "@/lib/orchestrator/orchestrator";
 import { WORKER_KINDS, type RiskLevel } from "@/lib/orchestrator/contracts";
 import { listWorkers } from "@/lib/orchestrator/workers";
@@ -46,7 +48,7 @@ function handleErr(e: unknown): NextResponse {
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireSession(request);
+    const user = await requireSession(request);
     const sp = request.nextUrl.searchParams;
     const status = sp.getAll("status").filter(Boolean);
     const lockKey = sp.get("lockKey") ?? undefined;
@@ -58,8 +60,16 @@ export async function GET(request: NextRequest) {
       lockKey,
       kind: kind && (WORKER_KINDS as readonly string[]).includes(kind) ? (kind as never) : undefined,
     });
+    let visible = jobs;
+    if (!isAdminRole(user.role)) {
+      const websites = await db.website.findMany({ where: { ownerId: user.id, deletedAt: null }, select: { id: true } });
+      const projects = await db.gitProject.findMany({ where: { OR: [{ createdById: user.id }, { websiteId: { in: websites.map((w) => w.id) } }] }, select: { id: true } });
+      const websiteIds = new Set(websites.map((w) => w.id));
+      const projectIds = new Set(projects.map((p) => p.id));
+      visible = jobs.filter((j) => (j.websiteId && websiteIds.has(j.websiteId)) || (j.resourceType === "GitProject" && j.resourceId && projectIds.has(j.resourceId)) || j.actorId === user.id);
+    }
     const depth = await orchestrator.queueDepth();
-    return NextResponse.json(apiSuccess({ jobs, queue: depth, workers: listWorkers() }));
+    return NextResponse.json(apiSuccess({ jobs: visible, queue: depth, workers: listWorkers() }));
   } catch (e) {
     return handleErr(e);
   }
@@ -75,7 +85,7 @@ export async function POST(request: NextRequest) {
     const payload: EnqueueJobInput = {
       ...parsed.data,
       riskLevel: parsed.data.riskLevel as RiskLevel | undefined,
-      actor: { id: admin.id, email: admin.email, role: admin.role },
+      actor: await actorForUser(admin.id),
     };
     const result = await orchestrator.enqueue(payload);
     return NextResponse.json(

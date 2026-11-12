@@ -97,6 +97,8 @@ function makeCtx(jobId = "job-test"): WorkerContext {
     jobId,
     correlationId: "corr-test",
     actor: null,
+    signal: new AbortController().signal,
+    approval: null,
     progress: async () => {},
     onlineAgents: async () => [],
   };
@@ -111,6 +113,7 @@ function echoWorker(overrides: Partial<WorkerDefinition<any, any>> = {}): Worker
     execution: "LOCAL",
     maxRisk: "REVERSIBLE",
     requiredScopes: ["build:run"],
+    retrySafe: true,
     defaultMaxAttempts: 3,
     defaultTimeoutMs: 30_000,
     inputSchema: echoInput,
@@ -149,12 +152,13 @@ function orch(...defs: WorkerDefinition<any, any>[]): OrchestratorType {
  * and logs the error), and the audit assertion would report a phantom bug.
  */
 const ADMIN = { id: "", email: "", role: "ADMIN" };
+function testActor() { return { ...ADMIN, scopes: [...contracts.SCOPES] }; }
 // ── Core guarantees ─────────────────────────────────────────────────────────
 
 describe("durable orchestrator", () => {
   it("enqueues, claims and completes a job, persisting the verified result", async () => {
     const o = orch(echoWorker());
-    const enq = await o.enqueue({ kind: "BUILD_TEST", input: { value: "happy" } });
+    const enq = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "happy" } });
     expect(enq.duplicate).toBe(false);
     expect(enq.status).toBe("QUEUED");
 
@@ -172,7 +176,7 @@ describe("durable orchestrator", () => {
 
   it("persists the job so a restart cannot lose it", async () => {
     const o = orch(echoWorker());
-    const enq = await o.enqueue({ kind: "BUILD_TEST", input: { value: "durable" } });
+    const enq = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "durable" } });
     const row = await db.operationJob.findUnique({ where: { id: enq.jobId } });
     expect(row).not.toBeNull();
     expect(row.status).toBe("QUEUED");
@@ -186,7 +190,7 @@ describe("durable orchestrator", () => {
 
   it("rejects an invalid payload before anything is persisted", async () => {
     const o = orch(echoWorker());
-    await expect(o.enqueue({ kind: "BUILD_TEST", input: { value: "" } })).rejects.toMatchObject({
+    await expect(o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "" } })).rejects.toMatchObject({
       code: "VALIDATION_FAILED",
     });
     const count = await db.operationJob.count({ where: { input: '{"value":""}' } });
@@ -195,23 +199,19 @@ describe("durable orchestrator", () => {
 
   it("refuses an unknown worker kind", async () => {
     const o = new Orchestrator();
-    await expect(o.enqueue({ kind: "NOT_A_WORKER" as never, input: {} })).rejects.toMatchObject({ code: "UNKNOWN_WORKER" });
+    await expect(o.enqueue({ actor: testActor(), kind: "NOT_A_WORKER" as never, input: {} })).rejects.toMatchObject({ code: "UNKNOWN_WORKER" });
   });
 
   it("collapses duplicate enqueues into one job via the idempotency key", async () => {
     const o = orch(echoWorker());
     const key = `idem-${crypto.randomUUID()}`;
-    const first = await o.enqueue({ kind: "BUILD_TEST", input: { value: "dupe" }, idempotencyKey: key });
-    const second = await o.enqueue({ kind: "BUILD_TEST", input: { value: "dupe" }, idempotencyKey: key });
-    const third = await o.enqueue({ kind: "BUILD_TEST", input: { value: "different" }, idempotencyKey: key });
-
+    const first = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "dupe" }, idempotencyKey: key });
+    const second = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "dupe" }, idempotencyKey: key });
     expect(first.duplicate).toBe(false);
     expect(second.duplicate).toBe(true);
     expect(second.jobId).toBe(first.jobId);
-    // Same key ⇒ same job even when the payload differs. That is the point: a
-    // webhook redelivery must not produce a second deployment.
-    expect(third.duplicate).toBe(true);
-    expect(third.jobId).toBe(first.jobId);
+    // Same key with a different payload is a conflict, never a silent reuse.
+    await expect(o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "different" }, idempotencyKey: key })).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
 
     const rows = await db.operationJob.findMany({ where: { idempotencyKey: key } });
     expect(rows).toHaveLength(1);
@@ -220,7 +220,7 @@ describe("durable orchestrator", () => {
   it("retries with exponential backoff, then succeeds", async () => {
     const o = orch(echoWorker());
     failCounts.delete("retry-me");
-    const enq = await o.enqueue({
+    const enq = await o.enqueue({ actor: testActor(),
       kind: "BUILD_TEST",
       input: { value: "retry-me", failTimes: 2 },
       maxAttempts: 4,
@@ -247,7 +247,7 @@ describe("durable orchestrator", () => {
   it("dead-letters a job that exhausts its retry budget and never reruns it automatically", async () => {
     const o = orch(echoWorker());
     failCounts.delete("always-fails");
-    const enq = await o.enqueue({
+    const enq = await o.enqueue({ actor: testActor(),
       kind: "BUILD_TEST",
       input: { value: "always-fails", failTimes: 99 },
       maxAttempts: 2,
@@ -277,7 +277,7 @@ describe("durable orchestrator", () => {
         handler: async () => contracts.fail("FORBIDDEN", "actor may not do this"),
       } as Partial<WorkerDefinition<any, any>>),
     );
-    const enq = await o.enqueue({ kind: "SECURITY_ANALYSIS", input: {}, maxAttempts: 5 });
+    const enq = await o.enqueue({ actor: testActor(), kind: "SECURITY_ANALYSIS", input: {}, maxAttempts: 5 });
     await o.runNext("worker-a", { jobId: enq.jobId });
     const status = await o.status(enq.jobId);
     expect(status?.status).toBe("FAILED");
@@ -288,7 +288,7 @@ describe("durable orchestrator", () => {
   it("does not claim a job whose backoff window has not elapsed", async () => {
     const o = orch(echoWorker());
     failCounts.delete("slow-backoff");
-    const enq = await o.enqueue({
+    const enq = await o.enqueue({ actor: testActor(),
       kind: "BUILD_TEST",
       input: { value: "slow-backoff", failTimes: 1 },
       maxAttempts: 3,
@@ -301,7 +301,7 @@ describe("durable orchestrator", () => {
 
   it("requeues a job whose worker lost its lease, and dead-letters it once the budget is gone", async () => {
     const o = new Orchestrator({ leaseBufferMs: 0 }).withWorker(echoWorker());
-    const enq = await o.enqueue({
+    const enq = await o.enqueue({ actor: testActor(),
       kind: "BUILD_TEST",
       input: { value: "abandoned" },
       maxAttempts: 2,
@@ -335,7 +335,7 @@ describe("durable orchestrator", () => {
   it("requeues a dead letter only through an explicit, audited human action", async () => {
     const o = orch(echoWorker());
     failCounts.delete("requeue-me");
-    const enq = await o.enqueue({
+    const enq = await o.enqueue({ actor: testActor(),
       kind: "BUILD_TEST",
       input: { value: "requeue-me", failTimes: 99 },
       maxAttempts: 1,
@@ -360,8 +360,8 @@ describe("durable orchestrator", () => {
   it("serializes two jobs that share a lock key", async () => {
     const o = new Orchestrator({ maxConcurrentPerKey: 1 }).withWorker(echoWorker());
     const lockKey = `project-${crypto.randomUUID()}`;
-    const a = await o.enqueue({ kind: "BUILD_TEST", input: { value: "serial-a" }, lockKey });
-    const b = await o.enqueue({ kind: "BUILD_TEST", input: { value: "serial-b" }, lockKey });
+    const a = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "serial-a" }, lockKey });
+    const b = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "serial-b" }, lockKey });
 
     expect(await o.claim("worker-a", { lockKey })).toBe(a.jobId);
     // While the first holds its lease the second must not be claimable.
@@ -374,8 +374,8 @@ describe("durable orchestrator", () => {
 
   it("lets two jobs run concurrently when they use different lock keys", async () => {
     const o = new Orchestrator({ maxConcurrentPerKey: 1 }).withWorker(echoWorker());
-    const a = await o.enqueue({ kind: "BUILD_TEST", input: { value: "par-a" }, lockKey: `p-${crypto.randomUUID()}` });
-    const b = await o.enqueue({ kind: "BUILD_TEST", input: { value: "par-b" }, lockKey: `p-${crypto.randomUUID()}` });
+    const a = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "par-a" }, lockKey: `p-${crypto.randomUUID()}` });
+    const b = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "par-b" }, lockKey: `p-${crypto.randomUUID()}` });
     expect(await o.claimSpecific("worker-a", a.jobId)).toBe(a.jobId);
     expect(await o.claimSpecific("worker-b", b.jobId)).toBe(b.jobId);
     await o.complete(a.jobId, "worker-a", contracts.ok({}, "done"));
@@ -384,7 +384,7 @@ describe("durable orchestrator", () => {
 
   it("gates PRIVILEGED work behind a named human approval", async () => {
     const o = orch(privilegedWorker());
-    const enq = await o.enqueue({ kind: "INFRASTRUCTURE", input: { unit: "alo-hosting-panel.service" } });
+    const enq = await o.enqueue({ actor: testActor(), kind: "INFRASTRUCTURE", input: { unit: "alo-hosting-panel.service" } });
     expect(enq.requiresApproval).toBe(true);
     expect(enq.status).toBe("WAITING_APPROVAL");
     expect(await o.claim("worker-a", { jobId: enq.jobId })).toBeNull();
@@ -403,7 +403,7 @@ describe("durable orchestrator", () => {
 
   it("never lets a caller lower the risk below what the worker declared", async () => {
     const o = orch(privilegedWorker());
-    const enq = await o.enqueue({
+    const enq = await o.enqueue({ actor: testActor(),
       kind: "INFRASTRUCTURE",
       input: { unit: "sneaky.service" },
       riskLevel: "READ_ONLY", // an attacker-supplied label must not bypass the gate
@@ -415,7 +415,7 @@ describe("durable orchestrator", () => {
 
   it("records a rejection without ever running the job", async () => {
     const o = orch(privilegedWorker());
-    const enq = await o.enqueue({ kind: "INFRASTRUCTURE", input: { unit: "rejected.service" } });
+    const enq = await o.enqueue({ actor: testActor(), kind: "INFRASTRUCTURE", input: { unit: "rejected.service" } });
     expect((await o.reject(enq.jobId, ADMIN, "not during business hours")).ok).toBe(true);
     const status = await o.status(enq.jobId);
     expect(status?.status).toBe("FAILED");
@@ -426,7 +426,7 @@ describe("durable orchestrator", () => {
 
   it("cancels an active job and refuses to cancel a finished one", async () => {
     const o = orch(echoWorker());
-    const enq = await o.enqueue({ kind: "BUILD_TEST", input: { value: "cancel-me" } });
+    const enq = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "cancel-me" } });
     expect(await o.cancel(enq.jobId, ADMIN, "changed my mind")).toBe(true);
     expect((await o.status(enq.jobId))?.status).toBe("CANCELLED");
     expect(await o.cancel(enq.jobId, ADMIN)).toBe(false);
@@ -450,7 +450,7 @@ describe("durable orchestrator", () => {
     } as WorkerDefinition<any, any>);
 
     const o = orch(leaky);
-    const enq = await o.enqueue({ kind: "RELEASE", input: {} });
+    const enq = await o.enqueue({ actor: testActor(), kind: "RELEASE", input: {} });
     await o.runNext("worker-a", { jobId: enq.jobId });
     const status = await o.status(enq.jobId);
     const persisted = JSON.stringify(status?.events ?? []);
@@ -461,7 +461,7 @@ describe("durable orchestrator", () => {
 
   it("reports queue depth per state, including dead letters and pending approvals", async () => {
     const o = orch(privilegedWorker());
-    await o.enqueue({ kind: "INFRASTRUCTURE", input: { unit: "depth.service" } });
+    await o.enqueue({ actor: testActor(), kind: "INFRASTRUCTURE", input: { unit: "depth.service" } });
     const depth = await o.queueDepth();
     expect(depth.byState).toBeDefined();
     expect(depth.waitingApproval).toBeGreaterThan(0);
@@ -502,7 +502,7 @@ describe("backoff maths", () => {
 // ── The production worker catalogue ─────────────────────────────────────────
 
 describe("worker catalogue", () => {
-  it("registers all ten specialized workers with declared risk and scopes", () => {
+  it("registers all thirteen specialized workers with declared risk and scopes", () => {
     const list = listWorkers();
     expect(list.map((w) => w.kind).sort()).toEqual(
       [
@@ -516,6 +516,9 @@ describe("worker catalogue", () => {
         "RELEASE",
         "REPO_DISCOVERY",
         "SECURITY_ANALYSIS",
+        "WORKFLOW_STEP",
+        "PLATFORM_OPS",
+        "AI_DIAGNOSIS",
       ].sort(),
     );
     for (const worker of list) {

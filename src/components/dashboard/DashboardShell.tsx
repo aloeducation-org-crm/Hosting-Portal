@@ -53,6 +53,7 @@ import {
   Package,
   Activity,
   Archive,
+  Workflow,
 } from "lucide-react";
 
 const clientNavItems = [
@@ -82,6 +83,7 @@ const clientNavItems = [
 ];
 
 const adminNavItems = [
+  { label: "Automation Center", href: "/automation", altPrefix: "/automation", icon: Workflow },
   { label: "AI Research & Evolution", href: "/ai/research", icon: Cpu },
   { label: "Manage Users", href: "/users", altPrefix: "/dashboard/users", icon: Users },
   { label: "Unified Infrastructure", href: "/infrastructure", altPrefix: "/dashboard/infrastructure", icon: Network },

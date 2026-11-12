@@ -199,12 +199,12 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
   },
   {
     command: "backup.database",
-    label: "Take a database backup",
+    label: "Create a site backup",
     description:
-      "Runs the installed backup helper. Writes a new artifact; never deletes or overwrites an existing one.",
+      "Runs alo-site-backup create <domain>. Writes a new checksummed artifact; never deletes or overwrites an existing one.",
     executable: "alo-site-backup",
-    argv: (a) => ["--target", String(a.target ?? "/opt/backups")],
-    argsSchema: recordOf({ target: optionalPath }),
+    argv: (a) => ["create", String(a.domain)],
+    argsSchema: recordOf({ domain: domainName }),
     risk: "REVERSIBLE",
     timeoutMs: 20 * 60_000,
     requiresSudo: true,
@@ -431,6 +431,20 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     timeoutMs: 15_000,
     requiresSudo: false,
     scopes: ["server:read"],
+  },
+  // ── Reverse proxy / domain (alo-domain-helper) ───────────────────────────
+  {
+    command: "domain.add",
+    label: "Configure a Caddy reverse-proxy site",
+    description:
+      "Creates and validates a Caddy site fragment for <domain>, then reloads Caddy. Refuses to overwrite an existing fragment.",
+    executable: "alo-domain-helper",
+    argv: (a) => ["add", String(a.domain), String(a.type ?? "static"), ...(a.port ? [String(a.port)] : [])],
+    argsSchema: recordOf({ domain: domainName, type: z.enum(["static", "node"]).optional(), port: z.number().int().min(1).max(65535).optional() }),
+    risk: "PRIVILEGED",
+    timeoutMs: 60_000,
+    requiresSudo: true,
+    scopes: ["server:execute", "domain:write"],
   },
   // ── DNS (alo-dns-helper) ──────────────────────────────────────────────────
   {

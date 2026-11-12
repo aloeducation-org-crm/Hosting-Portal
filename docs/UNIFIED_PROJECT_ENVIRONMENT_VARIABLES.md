@@ -49,6 +49,9 @@ When `NODE_ENV=production` (outside `next build`), `src/lib/env.ts` inspects fou
 | `HELPER_TIMEOUT_SECONDS` | No | `120` | Max execution timeout (`5`–`3600`s) per privileged helper call |
 | `DEPLOY_TIMEOUT_SECONDS` | No | `1800` | Max timeout (`30`–`7200`s) per Git build/deploy pipeline run |
 | `DEPLOY_WEBHOOK_SECRET` | Recommended | Falls back to `INTERNAL_SECRET` | Dedicated secret (`>=16` chars) verified via `x-webhook-secret` header on `POST /api/deploy/webhook` |
+| `DEPLOY_LOCAL_EXECUTION` | No | `true` | When `"false"`, platform deploy jobs without a selected node agent fail closed with `WAITING_EXTERNAL` instead of executing locally |
+| `DEPLOY_PUBLIC_IP` | No | None | Advertised public IP of the deploy host, attached to deployment job context (`platform-workers` `runAgent`) |
+| `AUTOMATION_DEFAULT_AGENT_ID` | Recommended | None | Agent id used when an automation job (ACME issuance/renewal, DNS, restarts) has no explicit `agentId`; ACME workers fail closed with `NOT_CONFIGURED` when unset |
 | `CRON_SECRET` | Recommended | None (fails closed if unset) | Secret (`>=16` chars) for scheduled cron trigger endpoints |
 | `BACKUP_RETENTION_COUNT` | No | `14` | Number of per-site backups retained before rotation (`1`–`365`) |
 | `MAX_UPLOAD_SIZE_MB` | No | `500` | Maximum File Manager upload size (`1`–`5120` MB) |

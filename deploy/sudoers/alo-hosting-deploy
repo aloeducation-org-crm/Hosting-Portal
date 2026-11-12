@@ -19,6 +19,9 @@ alamin ALL=(root) NOPASSWD: /bin/systemctl restart alo-hosting-panel
 alamin ALL=(root) NOPASSWD: /usr/bin/systemctl restart alo-hosting-panel
 alamin ALL=(root) NOPASSWD: /bin/systemctl status alo-hosting-panel
 alamin ALL=(root) NOPASSWD: /usr/bin/systemctl status alo-hosting-panel
+alamin ALL=(root) NOPASSWD: /bin/systemctl restart alo-automation-worker
+alamin ALL=(root) NOPASSWD: /usr/bin/systemctl restart alo-automation-worker
+alamin ALL=(root) NOPASSWD: /usr/bin/systemctl status alo-automation-worker
 alamin ALL=(root) NOPASSWD: /usr/bin/journalctl -u alo-hosting-panel *
 
 # Reload the reverse proxy / tunnel after a config change.

@@ -3,11 +3,15 @@ import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { detectFramework, memoryReader, fsReader } from "./detect";
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { configFromDetection, validateDeployConfig } from "./config";
 import {
   resolveToken,
   validateRepositoryName,
   getRepository,
+  getCommit,
   fetchRepoManifests,
   createWebhook,
   cloneUrlFor,
@@ -27,6 +31,7 @@ export interface ImportInput {
   cloneUrlOverride?: string;
   port?: number;
   healthUrl?: string;
+  domain?: string;
 }
 
 export interface ImportResult {
@@ -119,7 +124,7 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
     warnings.push(`${detection.framework} needs an operator-configured service manager; automatic deploys stay paused until confirmed`);
   }
 
-  const domain = await uniqueDomain(repository);
+  const domain = input.domain ?? (await uniqueDomain(repository));
   const website = await db.website.create({
     data: {
       domain,
@@ -160,6 +165,20 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
     },
   });
 
+  // Pin the exact commit at import time so the lifecycle workflow never deploys a moving branch.
+  let commitSha: string | null = null;
+  if (source?.token) {
+    const commit = await getCommit(source.token, repository, branch).catch(() => null);
+    commitSha = commit?.sha ?? null;
+  } else if (input.cloneUrlOverride?.startsWith("/")) {
+    const rev = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: input.cloneUrlOverride }).catch(() => null);
+    commitSha = rev?.stdout.trim() ?? null;
+  }
+  if (commitSha) await db.gitProject.update({ where: { id: project.id }, data: { lastCommitSha: commitSha } });
+  if (input.domain) {
+    await db.domain.upsert({ where: { domain }, create: { domain, websiteId: website.id, primary: true, nameservers: "[]", sslStatus: "NONE", dnsVerified: false }, update: {} });
+  }
+
   let webhook: ImportResult["webhook"] = { created: false, reason: "GITHUB_WEBHOOK_SECRET or APP_URL not configured" };
   if (source?.token && secret && env.APP_URL) {
     try {
@@ -173,7 +192,7 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
     }
   }
 
-  return { project, website, detection, webhook, warnings };
+  return { project: { ...project, lastCommitSha: commitSha ?? project.lastCommitSha }, website, detection, webhook, warnings };
 }
 
 /** Never serialize stored credentials. */
