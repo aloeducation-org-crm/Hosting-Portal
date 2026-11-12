@@ -2,6 +2,11 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import {
+  applyEntitlementChange,
+  adminGrantAuthorization,
+  type PlanRecord,
+} from "@/lib/billing/entitlements";
 import { requireSession, isAdminRole, type AuthUser } from "@/lib/auth";
 import { apiError, apiSuccess, type ApiResponse } from "@/lib/response";
 import { createAuditLog } from "@/lib/audit";
@@ -421,68 +426,27 @@ export async function POST(request: NextRequest) {
         throw new Error("No active hosting plans configured");
       }
 
-      const amountCents = cycle === "yearly" ? plan.priceCents * 10 : plan.priceCents;
-      const amountUsd = Number((amountCents / 100).toFixed(2));
-      const now = new Date();
-      const periodEnd = new Date(now);
-      if (cycle === "yearly") periodEnd.setFullYear(periodEnd.getFullYear() + 1);
-      else periodEnd.setMonth(periodEnd.getMonth() + 1);
-      const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
-
-      const txResult = await db.$transaction(async (tx) => {
-        await tx.subscription.updateMany({
-          where: { userId: user.id, status: "active" },
-          data: { status: "cancelled", cancelledAt: now },
-        });
-        const subscription = await tx.subscription.create({
-          data: {
-            userId: user.id,
-            planId: plan.id,
-            status: "active",
-            currentPeriodStart: now,
-            currentPeriodEnd: periodEnd,
-          },
-          include: { plan: true },
-        });
-        const order = await tx.order.create({
-          data: {
-            orderNumber,
-            userId: user.id,
-            totalCents: amountCents,
-            currency: "USD",
-            status: "completed",
-            paymentMethod: "bill_agent_ai",
-            completedAt: now,
-            items: {
-              create: [
-                {
-                  type: "plan_upgrade",
-                  description: `${plan.name} (${cycle})`,
-                  quantity: 1,
-                  unitPriceCents: amountCents,
-                  totalCents: amountCents,
-                },
-              ],
-            },
-          },
-        });
-        const invoice = await tx.invoice.create({
-          data: {
-            userId: user.id,
-            subscriptionId: subscription.id,
-            amountCents,
-            currency: "USD",
-            status: "paid",
-            dueDate: periodEnd,
-            paidAt: now,
-          },
-        });
-        return { subscription, order, invoice };
+      /**
+       * SEC-03: this branch used to contain its own copy of the billing writes —
+       * a subscription, an order and a `paid` invoice — so the entitlement rule
+       * existed in three places and was fixed in three different pull requests.
+       * It now delegates to the single service. The amount, the invoice status
+       * and the audit metadata all come from that service, so the AI path cannot
+       * drift from the customer and onboarding paths again.
+       */
+      const granted = await applyEntitlementChange({
+        userId: user.id,
+        plan: plan as PlanRecord,
+        billingCycle: cycle,
+        authorization: adminGrantAuthorization(
+          { id: user.id, role: user.role },
+          "AI operator activate_plan command by an administrator",
+        ),
       });
-
-      summaryBn = `বিল এজেন্ট এআই সফলভাবে "${plan.name}" প্ল্যান ($${amountUsd.toFixed(2)}) চালু করেছে এবং পেইড ইনভয়েস জেনারেট করেছে।`;
-      summaryEn = `Bill Agent AI activated the "${plan.name}" plan ($${amountUsd.toFixed(2)}) and issued paid invoice #${txResult.invoice.id.slice(0, 8).toUpperCase()}.`;
-      actionResult = txResult;
+      const amountUsd = Number((granted.amountCents / 100).toFixed(2));
+      summaryBn = `বিল এজেন্ট এআই সফলভাবে "${plan.name}" প্ল্যান ($${amountUsd.toFixed(2)}) চালু করেছে এবং ইনভয়েস তৈরি করেছে।`;
+      summaryEn = `Bill Agent AI activated the "${plan.name}" plan ($${amountUsd.toFixed(2)}) and opened invoice #${(granted.invoiceId ?? "").slice(0, 8).toUpperCase()}.`;
+      actionResult = granted as unknown as Record<string, unknown>;
     } else if (effectiveCommand === "generate_invoice") {
       assertOperatorCommandAllowed(user, "generate_invoice");
       const amountUsd = Math.max(0.5, Number(params.amount ?? 49));

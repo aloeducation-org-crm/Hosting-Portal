@@ -136,11 +136,56 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     );
   });
 
-  it("activates hosting plans atomically via POST /api/subscriptions", async () => {
-    const clientUser = await db.user.findFirst({ where: { isActive: true }, orderBy: { createdAt: "desc" } });
-    expect(clientUser).toBeTruthy();
+  /**
+   * SEC-03 rewrote this test.
+   *
+   * The original asserted that a signed-in account could activate the paid
+   * "premium" plan and receive an invoice already marked `paid` — that is the
+   * entitlement-granting defect itself, encoded as a requirement. The behaviour
+   * is now role-dependent, and both branches are asserted:
+   *
+   *   customer → 402 PAYMENT_REQUIRED, no subscription/order/invoice written
+   *   admin    → 201, and the invoice it raises is `pending`, not `paid`,
+   *              because no money has been collected
+   */
+  it("prevents a customer from self-activating a paid plan via POST /api/subscriptions", async () => {
+    const clientUser = await db.user.findFirst({
+      where: { isActive: true, role: { name: { in: ["CLIENT", "VIEWER", "RESELLER", "SUPPORT"] } } },
+      orderBy: { createdAt: "desc" },
+      include: { role: true },
+    });
+    expect(clientUser, "a non-administrative account is required for this test").toBeTruthy();
+
+    const before = {
+      subscriptions: await db.subscription.count({ where: { userId: clientUser!.id } }),
+      orders: await db.order.count({ where: { userId: clientUser!.id } }),
+      invoices: await db.invoice.count({ where: { userId: clientUser!.id } }),
+    };
 
     const req = await buildAuthRequest("http://localhost:3000/api/subscriptions", clientUser!.email, {
+      method: "POST",
+      body: { planSlug: "premium", billingCycle: "monthly" },
+    });
+    const res = await postSubscription(req);
+    expect(res.status).toBe(402);
+    const body = await res.json();
+    expect(body.error.code).toBe("PAYMENT_REQUIRED");
+    expect(body.success).toBe(false);
+
+    // Nothing was written: not a cancelled predecessor, not an order, not an invoice.
+    expect(await db.subscription.count({ where: { userId: clientUser!.id } })).toBe(before.subscriptions);
+    expect(await db.order.count({ where: { userId: clientUser!.id } })).toBe(before.orders);
+    expect(await db.invoice.count({ where: { userId: clientUser!.id } })).toBe(before.invoices);
+  });
+
+  it("records an administrative plan assignment as an unpaid receivable", async () => {
+    const admin = await db.user.findFirst({
+      where: { isActive: true, role: { name: { in: ["SUPER_ADMIN", "ADMIN"] } } },
+      include: { role: true },
+    });
+    expect(admin, "an administrative account is required for this test").toBeTruthy();
+
+    const req = await buildAuthRequest("http://localhost:3000/api/subscriptions", admin!.email, {
       method: "POST",
       body: { planSlug: "premium", billingCycle: "monthly" },
     });
@@ -148,13 +193,18 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.data.subscription.status).toBe("active");
-    expect(body.data.invoice.status).toBe("paid");
-    expect(body.data.order.status).toBe("completed");
+    expect(body.data.source).toBe("admin_grant");
+    expect(body.data.amountCents).toBeGreaterThan(0);
+    expect(body.data.invoiceId).toBeTruthy();
 
-    createdIds.subscriptions.push(body.data.subscription.id);
-    createdIds.orders.push(body.data.order.id);
-    createdIds.invoices.push(body.data.invoice.id);
+    createdIds.subscriptions.push(body.data.subscriptionId);
+    createdIds.orders.push(body.data.orderId);
+    createdIds.invoices.push(body.data.invoiceId);
+
+    // The grant is honest about money: the invoice exists, and it is not paid.
+    const invoice = await db.invoice.findUnique({ where: { id: body.data.invoiceId } });
+    expect(invoice?.status).toBe("pending");
+    expect(invoice?.paidAt).toBeNull();
   });
 
   it("operates end-to-end Digital Marketing workflows via /api/marketing", async () => {
