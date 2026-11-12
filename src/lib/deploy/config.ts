@@ -1,6 +1,7 @@
 import { z } from "zod";
 import path from "node:path";
 import type { DeployConfig, DetectionResult, ServiceManager } from "./types";
+import { assertReservedServiceName } from "./host-settings";
 
 /**
  * Commands are NEVER shell strings. They are parsed into argv and the executable
@@ -146,6 +147,10 @@ export function validateDeployConfig(raw: unknown): DeployConfig {
   if (parsed.serviceName && !isSafeServiceName(parsed.serviceName)) {
     throw new UnsafeCommandError("Unsafe serviceName");
   }
+  // SEC-11: a platform unit name is never a valid tenant service name, on any
+  // path. Ports are checked at the tenant-write boundary instead, because
+  // detection legitimately proposes the port an app declares for itself.
+  assertReservedServiceName(parsed.serviceName ?? null);
   return parsed as DeployConfig;
 }
 

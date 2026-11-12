@@ -24,6 +24,7 @@ import {
   allocateNextAvailablePort,
   assertTenantPortAllowed,
 } from "@/lib/deploy/server-spec";
+import { assertBaselineDeploySettings, HostLevelSettingError } from "@/lib/deploy/host-settings";
 
 const OperatorRequestSchema = z.object({
   command: z
@@ -506,6 +507,9 @@ export async function POST(request: NextRequest) {
       const usedPorts = await collectUsedPorts();
       if (params.port !== undefined) {
         assertTenantPortAllowed(Number(params.port));
+        // SEC-11: refuse the platform's full reserved port set, not just the
+        // historically documented control-plane port.
+        assertBaselineDeploySettings({ port: Number(params.port), serviceName: null });
       }
 
       const plan = await architectAutoDeployPlan({

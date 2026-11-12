@@ -20,6 +20,7 @@ import {
   generateShareableProjectBriefYaml,
   type PortRegistryEntry,
 } from "@/lib/deploy/server-spec";
+import { assertBaselineDeploySettings, HostLevelSettingError } from "@/lib/deploy/host-settings";
 import { evaluateUbuntuCisBaseline } from "@/lib/security/ubuntu-cis-baseline";
 import {
   AUTO_DEPLOY_BLUEPRINTS,
@@ -311,9 +312,22 @@ export async function POST(request: NextRequest) {
     }
 
     const validatedConfig = validateDeployConfig(parsed.deployConfig);
+    // SEC-11: reserved platform ports and unit names are refused here, before
+    // any provisioning. assertTenantPortAllowed only knew about the control
+    // plane's documented port; this checks the full reserved set.
     try {
       assertTenantPortAllowed(validatedConfig.port);
+      assertBaselineDeploySettings({
+        port: validatedConfig.port,
+        serviceName: validatedConfig.serviceName ?? null,
+      });
     } catch (portErr) {
+      if (portErr instanceof HostLevelSettingError) {
+        return NextResponse.json(
+          apiError(portErr.message, "RESERVED_PORT", { field: portErr.field }, 400),
+          { status: 400 },
+        );
+      }
       return NextResponse.json(
         apiError(
           portErr instanceof Error ? portErr.message : "Reserved or invalid port",
