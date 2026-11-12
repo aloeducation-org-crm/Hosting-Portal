@@ -1,5 +1,7 @@
 # Phase 0 — Verified Baseline Audit — ALO Hosting Portal
 
+> **Corrections:** a later audit at `c5c81fdd` corrects several statements in this document (production status, tenant isolation, build isolation, billing). See section 4 of [`docs/audit/PHASE-0-MASTER-AUDIT-2026-11-11.md`](audit/PHASE-0-MASTER-AUDIT-2026-11-11.md).
+
 **Date:** 2026-11-11 (UTC)
 **Branch:** `arena/997e5761-hosting-portal` (based on `origin/main` @ `80318b4`)
 **Scope:** repository audit + operational-readiness assessment + prioritized roadmap.
