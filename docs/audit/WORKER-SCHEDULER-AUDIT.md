@@ -9,7 +9,7 @@
 |---|---|---|---|---|
 | Inline deploy worker | inside the Next.js process (`DEPLOY_INLINE_WORKER`) | `deployments` rows | the panel process | Implemented, tested |
 | Job orchestrator (bundled) | `scripts/orchestrator-worker.ts` → `.next/standalone/automation-worker.cjs`, run by `deploy/systemd/alo-automation-worker.service` | `operation_jobs` rows | **systemd unit + Compose service + CI gate** | Implemented, tested, **supervised** |
-| Standalone deploy worker | `scripts/deploy-worker.ts` | `deployments` rows | **none shipped** | Implemented, **unsupervised** — the one real gap |
+| Standalone deploy worker | `scripts/deploy-worker.ts` → `.next/standalone/deploy-worker.cjs`, run by `deploy/systemd/alo-deploy-worker.service` | `deployments` rows | **systemd unit + Compose service + CI cross-check** | Implemented, **supervised** (REL-03, closed) |
 | Agent task polling | the agent itself, `ALO_POLL_MS` | `agent_tasks` rows | systemd unit in `deploy/systemd` | Implemented |
 | Cron endpoint | `/api/cron`, `/api/automation/cron` | — | external caller required | Implemented, **no caller shipped** |
 | Alert evaluation | `/api/monitoring/collect` | alert rules | **no scheduler** | Read-only evaluation only |
@@ -29,9 +29,12 @@ repeating it showed that is **wrong for the orchestrator**:
 - `deploy/README-hosting-engine.md` documents enabling it, and CI verifies the
   standalone entrypoint exists.
 
-**The remaining gap is narrower and is REL-03: `scripts/deploy-worker.ts` has no
-shipped unit.** It exists as a script and is the only worker an operator must
-start by hand. That is the task in `docs/audit/EXECUTION-CHECKLIST.md` §6.
+**REL-03 closed that gap.** `scripts/deploy-worker.ts` now ships with
+`deploy/systemd/alo-deploy-worker.service`, a Compose `deploy-worker` service, and
+a CI step that cross-checks every unit's `ExecStart` target against the build
+output. The script itself gained the supervision contract the orchestrator worker
+already had: SIGTERM/SIGINT drain, a heartbeat file rewritten each tick and every
+15 s, a clamped poll interval, and no `process.exit()` on a failed tick.
 
 The prior audit's statement is preserved here as a correction rather than quietly
 edited, because an audit that overstates a gap is as damaging as one that
@@ -119,10 +122,9 @@ expired or re-assigned, and a verified signature over the complete document.
 
 ## 7. Recommendations, in order
 
-1. Ship a systemd unit for `scripts/deploy-worker.ts`, modelled on
-   `alo-automation-worker.service` (same user, `Restart=always`, memory cap,
-   `RuntimeDirectory` heartbeat, `TimeoutStopSec` sized to the build budget).
-   **Next task (REL-03).**
+1. ~~Ship a systemd unit for `scripts/deploy-worker.ts`.~~ **Done (REL-03).**
+   Remaining follow-up: an alert-evaluation timer (§7 item 2) so a dead worker
+   pages someone rather than waiting to be noticed.
 2. Add an alert-evaluation timer that calls `/api/monitoring/collect`, and prove
    one delivery to a real channel.
 3. Publish RPO/RTO once an off-host backup destination exists.

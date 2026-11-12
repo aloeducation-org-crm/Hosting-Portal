@@ -42,7 +42,7 @@ runner.
 | SEC-06 | Unverified accounts must not act; RESELLER must not be self-selected | **PASS** | `src/lib/account-status.ts`; `src/proxy.ts`; `tests/account-verification.test.ts` (21) |
 | SEC-13 | Health must distinguish failure classes; uptime must be real | **PASS** | `src/lib/health.ts`; `tests/health-reporting.test.ts` (21) |
 | SEC-12 | Production must refuse the fixture database | **PASS** | `src/lib/db.ts` `resolveDatabaseUrl`; same test file |
-| SEC-11 | Deployment settings affecting shared host resources must not be customer-editable | **NOT STARTED** | Prior audit: Read. Next task below. |
+| SEC-11 | Deployment settings affecting shared host resources must not be customer-editable | **PASS** | `src/lib/deploy/host-settings.ts`; enforced in `validateDeployConfig`, the PATCH route, both AI routes and `restartExternalService`; `tests/deploy-host-settings.test.ts` (30) |
 | SEC-04 | Release control: `main` protection, required reviewers, runner scope | **BLOCKED** | GitHub repository settings are outside the repository; owner action. |
 | SEC-08 | Public repository carries a fixture DB, internal addressing, a public IPv4 | **BLOCKED** | Owner decision on visibility and redaction. Partially mitigated by SEC-12. |
 | SEC-09 | Two secrets in history to rotate if ever used | **BLOCKED** | Rotation is an owner action on the platform, not a code change. |
@@ -53,7 +53,7 @@ runner.
 |---|---|---|---|
 | REL-01 | Deploy engine: real clone → detect → build → package → activate → verify → rollback | **PASS** (static sites, local) | pre-existing `tests/deploy-e2e.test.ts`, still green after SEC-01 |
 | REL-02 | Health distinguishes unreachable vs stale schema | **PASS** | SEC-13 above |
-| REL-03 | Workers supervised by a process manager | **PARTIAL** | Orchestrator **is** supervised: `deploy/systemd/alo-automation-worker.service` + Compose `automation-worker` + CI entrypoint check + heartbeat file. Unsupervised: `scripts/deploy-worker.ts` only. Earlier "none shipped" claim was wrong and is corrected in `WORKER-SCHEDULER-AUDIT.md`. Next task below. |
+| REL-03 | Workers supervised by a process manager | **PASS** | Orchestrator: `alo-automation-worker.service` + Compose + CI check (pre-existing, earlier "none shipped" claim was wrong). Deploy worker: `alo-deploy-worker.service` + Compose `deploy-worker` + CI target cross-check + SIGTERM drain/heartbeat. `tests/deploy-worker-supervision.test.ts` (26). |
 | REL-04 | Agent task lifecycle has a start transition and duplicate-execution guard | **PASS** | `POST /api/agents/tasks/start`; `startTask()`; SEC-07 tests |
 | REL-05 | Off-host backup target + evidenced restore | **BLOCKED** | No off-host destination exists; requires storage credentials. |
 | REL-06 | Server application runtimes (Node/Python/PHP) actually run | **FAIL** by design | Detection exists; service manager is `none` pending operator wiring. Documented, not fixed here. |
@@ -99,11 +99,8 @@ runner.
 
 In priority order. Each is small enough to complete and verify in one pass.
 
-1. **SEC-11** — make deployment settings that affect shared host resources
-   operator-only rather than customer-editable, and test it.
-2. **REL-03** — ship a supervised unit for `scripts/deploy-worker.ts`
-   (the orchestrator already has `alo-automation-worker.service`), modelled on
-   that unit, with a heartbeat file and a readiness probe.
+1. ~~**SEC-11**~~ — done (`afa09cd`), 30 tests.
+2. ~~**REL-03**~~ — done, 26 tests.
 3. **REL-05** — implement an off-host backup destination interface with a
    filesystem implementation and a restore verification job; the off-host
    credential itself stays BLOCKED.

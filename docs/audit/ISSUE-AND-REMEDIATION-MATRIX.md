@@ -20,7 +20,7 @@
 | SEC-08 | Repo hygiene | Public repo carries fixture DB, internal addressing, IPv4 literal | 10 tracked files | **BLOCKED** | P0 | Owner decision on visibility + redaction | Partially mitigated by SEC-12 (runtime refusal) |
 | SEC-09 | Secrets | Two secrets in Git history | Git history | **BLOCKED** | P0 | Rotate both; never reuse | Rotation is an owner action |
 | SEC-10 | Command execution | No arbitrary remote shell | `helpers/*` allowlist; agent allowlist | **PASS** `[prior]` | P0 | Typed, allowlisted, argv-only | `tests/server-agent.test.ts` |
-| SEC-11 | Deploy settings | Shared-host-affecting settings not customer-editable | not yet reviewed | **FAIL** | P1 | Settings-by-settings review with the deploy owner; operator-only for host-level knobs | Pending — next task |
+| SEC-11 | Deploy settings | Shared-host-affecting settings not customer-editable | `src/lib/deploy/host-settings.ts`; enforced at 4 call sites incl. `restartExternalService` | **PASS** `[0.5]` | P1 | Reserved values refused for everyone; changes to port/serviceName/serviceManager require SUPER_ADMIN/ADMIN/DEVOPS | `tests/deploy-host-settings.test.ts` (30), mutation-checked |
 | SEC-12 | Configuration | Production must refuse the fixture database | `src/lib/db.ts` `resolveDatabaseUrl` | **PASS** `[0.5]` | P1 | `process.exit(1)` when prod + no `DATABASE_URL` | `tests/health-reporting.test.ts` |
 | SEC-13 | Health | Distinguish unreachable from schema-behind; real uptime; no injection | `src/lib/health.ts` | **PASS** `[0.5]` | P1 | Reason enum, sanitised detail, `requireIdentifier()`, module-load uptime | `tests/health-reporting.test.ts` (21) |
 | SEC-14 | Privilege model | Panel is root-equivalent via 18 sudo grants | `deploy/sudoers/alo-hosting-deploy` | **FAIL** `[prior]` | P0 | Move helpers behind the agent; add `NoNewPrivileges` where possible | Architectural — cannot be closed in a containment pass; every customer-reachable path is checked first |
@@ -37,7 +37,7 @@
 | DB-04 | Backup | Off-host backup target + evidenced **database** restore drill | `/api/backups`; `alo-site-backup`/`alo-site-restore` (site files, checksum-verified) | **BLOCKED** | P1 | Provide storage credentials; implement destination interface | Site restore is real and checksum-verified; the **database** drill returns `NOT_IMPLEMENTED` (REL-05) |
 | REL-01 | Deploy engine | clone → detect → build → package → activate → verify → rollback | deploy engine | **PASS** `[prior]` | P1 | — | `tests/deploy-e2e.test.ts` |
 | REL-02 | Health | Unreachable vs stale schema | SEC-13 | **PASS** `[0.5]` | P1 | — | `tests/health-reporting.test.ts` |
-| REL-03 | Workers | Supervised by a process manager | orchestrator: unit+Compose+CI; deploy-worker: none | **PARTIAL** `[0.5]` | P1 | Ship `deploy-worker` unit modelled on `alo-automation-worker.service` | No test can assert a unit is installed; CI checks the entrypoint exists |
+| REL-03 | Workers | Supervised by a process manager | `alo-automation-worker.service`, `alo-deploy-worker.service`, both Compose services, CI unit-target cross-check | **PASS** `[0.5]` | P1 | — | `tests/deploy-worker-supervision.test.ts` (26) incl. a real `systemd-analyze verify` |
 | REL-04 | Agent tasks | Start transition + duplicate-execution guard | `POST /api/agents/tasks/start` | **PASS** `[0.5]` | P1 | — | `tests/agent-task-signing.test.ts` |
 | REL-05 | Backup/DR | Off-host destination + evidenced restore | — | **BLOCKED** | P1 | Storage credentials + restore drill | Requires a host and a destination |
 | REL-06 | Server runtimes | Node/Python/PHP actually run | detection yes; service manager `none` | **FAIL** `[0.5]` | P2 | Service-manager adapter with health checking | Pending |
@@ -83,12 +83,6 @@ owner decision on visibility; redact on any future history rewrite. *Test:*
 *Impact:* if either was ever live, it is public. *Remediation:* rotate both.
 *Test:* n/a — rotation is an operational act.
 
-**SEC-11 — FAIL (P1).** *Root cause:* deployment settings were modelled as
-customer-editable without a per-setting review of which affect shared host
-resources. *Impact:* a customer could change a host-level value. *Remediation:*
-settings-by-settings review; operator-only for host knobs. *Test:* pending, and it
-is the next task.
-
 **SEC-14 — FAIL (P0, architectural).** *Root cause:* the panel must `sudo` into
 root-owned helpers to manage sites, so it is root-equivalent. *Impact:* a panel
 compromise is a host compromise. *Remediation:* move helpers behind the agent.
@@ -124,11 +118,14 @@ finding; no number is invented to fill the gap.
 
 | Status | Count |
 |---|---|
-| **PASS** | 26 |
-| **PARTIAL** | 12 |
-| **FAIL** | 6 |
+| **PASS** | 28 |
+| **PARTIAL** | 11 |
+| **FAIL** | 5 |
 | **BLOCKED** | 8 |
 | **Total matrix rows** | 52 |
+
+(Deliberately recounted after closing SEC-11 and REL-03 — the numbers are parsed
+from the table each time, never carried forward.)
 | **NOT APPLICABLE** | (Firebase/Google Drive, and any vendor not referenced by code) |
 
 Counts verified by parsing the table itself, not by hand-tallying (the first draft
@@ -136,6 +133,6 @@ said 6 BLOCKED; the table has 8 — SEC-04, SEC-08, SEC-09, DB-04, REL-05, BILL-
 INT-02, INT-04).
 
 Of the 6 FAIL rows: SEC-14 and SEC-15 are architectural at the privilege boundary,
-SEC-11 is the imminently scheduled next task, REL-06 needs a service manager,
-and FE-02 / TEST-02 are missing tooling (no E2E suite, no coverage provider) —
-not broken code.
+REL-06 needs a service manager, and FE-02 / TEST-02 are missing tooling (no E2E
+suite, no coverage provider) — not broken code. SEC-11 and REL-03 were FAIL and
+PARTIAL in the first draft of this matrix and have since been closed.
