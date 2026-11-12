@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import nodeCrypto from "node:crypto";
 import { parseCommand, tokenize, validateDeployConfig, UnsafeCommandError, filterBuildEnv } from "../src/lib/deploy/config";
 import { redact, collectSecrets, redactCommand } from "../src/lib/deploy/redact";
 import { verifyGitHubSignature } from "../src/lib/deploy/signature";
@@ -79,7 +80,9 @@ describe("log redaction", () => {
 
 describe("webhook signature", () => {
   const body = JSON.stringify({ ref: "refs/heads/main" });
-  const crypto = require("node:crypto") as typeof import("node:crypto");
+  // Static import: a require() here is both a lint error and a needless
+  // CommonJS dependency in an ESM test file.
+  const crypto = nodeCrypto;
   const signature = `sha256=${crypto.createHmac("sha256", "s3cret").update(body).digest("hex")}`;
 
   it("accepts a valid HMAC-SHA256 signature", () => {

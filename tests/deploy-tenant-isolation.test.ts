@@ -22,6 +22,7 @@ import {
   tokenForProject,
   assertRepositoryAllowedForSource,
   listUsableConnections,
+  canAdministerDeployLayer,
   GitAuthorizationError,
   type GitConnectionRecord,
 } from "../src/lib/deploy/connections";
@@ -217,18 +218,16 @@ describe("SEC-02 no route resolves a connection by id directly", () => {
       const source = fs.readFileSync(file, "utf8");
       return /gitConnection\.findUnique|gitConnection\.findFirst|gitConnection\.findMany/.test(source);
     });
-    // Allowed exceptions, each justified: the connection lifecycle routes own
-    // the record itself (connect callback creates it, disconnect revokes it).
-    const allowed = [
-      path.join("src/app/api/github/disconnect/route.ts"),
-    ];
+    // No exceptions. The disconnect route used to be one (it hand-rolled the
+    // ownership check and excluded DEVOPS); it now goes through the same helper,
+    // so adding a new exemption requires deleting this assertion on purpose.
+    const allowed: string[] = [];
     const unexpected = offenders.filter((file) => !allowed.some((a) => file.endsWith(a)));
     expect(unexpected).toEqual([]);
   });
 
   it("keeps the ownership predicate in exactly one module", () => {
-    const engineSources = files.filter((f) => !f.endsWith(path.join("api", "github", "disconnect", "route.ts")));
-    const duplicateRule = engineSources.filter((file) => {
+    const duplicateRule = files.filter((file) => {
       const source = fs.readFileSync(file, "utf8");
       return /connectedById\s*!==\s*user\.id/.test(source);
     });
@@ -243,5 +242,41 @@ describe("SEC-02 import path requires an authorized caller", () => {
     expect(source).toMatch(/requireConnectionAccess\(user, connectionId/);
     // The old unowned signature must not come back.
     expect(source).not.toMatch(/export async function accessToken\(\s*connectionId\?/);
+  });
+});
+
+describe("SEC-02: disconnect uses the shared rule, not a hand-rolled copy", () => {
+  const routeSource = fs.readFileSync(
+    path.join(ROOT, "src/app/api/github/disconnect/route.ts"),
+    "utf8",
+  );
+
+  it("authorizes through requireConnectionAccess", () => {
+    expect(routeSource).toContain("requireConnectionAccess");
+    expect(routeSource).toContain("@/lib/deploy/connections");
+  });
+
+  it("no longer carries its own role list", () => {
+    // The hand-rolled check was `!["SUPER_ADMIN", "ADMIN"].includes(user.role)`,
+    // which excluded DEVOPS. If it comes back, this fails.
+    expect(routeSource).not.toMatch(/\[\s*"SUPER_ADMIN"\s*,\s*"ADMIN"\s*\]/);
+    expect(routeSource).not.toMatch(/connectedById\s*!==\s*user\.id/);
+  });
+
+  it("DEVOPS can administer the deploy layer, which the old list denied", () => {
+    // The behaviour the migration fixed, asserted against the real predicate.
+    expect(canAdministerDeployLayer("DEVOPS")).toBe(true);
+    expect(canAdministerDeployLayer("ADMIN")).toBe(true);
+    expect(canAdministerDeployLayer("SUPER_ADMIN")).toBe(true);
+    expect(canAdministerDeployLayer("RESELLER")).toBe(false);
+    expect(canAdministerDeployLayer("CLIENT")).toBe(false);
+    expect(canAdministerDeployLayer(null)).toBe(false);
+  });
+
+  it("a revoked connection is refused consistently, not with a 400 from one route", () => {
+    // findUnique used to return the row regardless of status, so disconnect
+    // answered "Connection not found" (400) for a revoked row while every other
+    // route answered CONNECTION_REVOKED (409).
+    expect(routeSource).not.toContain('badRequest("Connection not found")');
   });
 });
