@@ -5,6 +5,7 @@ import { redact } from "@/lib/deploy/redact";
 import { configFromDetection, resolveConfig, validateDeployConfig } from "@/lib/deploy/config";
 import { verifyDeployment, startStaticServer, projectRoot, currentReleaseDir } from "@/lib/deploy/service";
 import { agentOnline, dispatchTask } from "@/lib/agents/agent";
+import { createAuditLog } from "@/lib/audit";
 import { defineWorker, fail, ok, WorkerError, type WorkerDefinition, type WorkerContext } from "./contracts";
 import { activeProfile, validateProfileConfig } from "./profiles";
 
@@ -35,6 +36,8 @@ async function projectWithWebsite(projectId: string) {
 }
 
 async function nodeForProject(projectId: string, profileKey?: string) {
+  // Kept for the node profile verification path; deployment node selection now
+  // lives in prepareDeployment + the central scheduler (./scheduler.ts).
   if (profileKey) {
     const version = await activeProfile(profileKey);
     if (!version) throw new WorkerError("WAITING_EXTERNAL", `Node profile ${profileKey} has no verified active version`, false);
@@ -44,6 +47,12 @@ async function nodeForProject(projectId: string, profileKey?: string) {
     const agent = await db.serverAgent.findUnique({ where: { id: config.agentId }, include: { server: true } });
     if (!agent || !agentOnline(agent)) throw new WorkerError("AGENT_UNAVAILABLE", `Node agent ${config.agentId} is not online`, false);
     return { agentId: agent.id, publicIp: config.publicIp ?? agent.server?.ip ?? null };
+  }
+  const project = await db.gitProject.findUnique({ where: { id: projectId }, select: { agentId: true } });
+  if (project?.agentId) {
+    const agent = await db.serverAgent.findUnique({ where: { id: project.agentId }, include: { server: true } });
+    if (!agent || !agentOnline(agent)) throw new WorkerError("AGENT_UNAVAILABLE", `Assigned node agent ${project.agentId} is not online`, false);
+    return { agentId: agent.id, publicIp: agent.server?.ip ?? process.env.DEPLOY_PUBLIC_IP ?? null };
   }
   const defaultAgent = process.env.AUTOMATION_DEFAULT_AGENT_ID;
   if (defaultAgent) {
@@ -55,11 +64,76 @@ async function nodeForProject(projectId: string, profileKey?: string) {
   return { agentId: null, publicIp: process.env.DEPLOY_PUBLIC_IP ?? null };
 }
 
+/**
+ * How privileged (gated) agent commands are authorized for one dispatch.
+ *
+ * - `"job"` (default) — only the orchestrator job's own recorded approval
+ *   authorizes gated commands. No approval → the task waits for a human.
+ * - `"requester"` — the authenticated actor who requested this work (they must
+ *   already hold the command's scopes; dispatchTask enforces that separately)
+ *   is recorded as the approver. Used by the remote deployment engine: the
+ *   human who clicked Deploy authorized exactly this deployment's activation.
+ * - `"policy:…"` — a named operator policy (e.g. the bounded self-healing
+ *   recovery verbs) auto-authorizes the command, with the policy identity
+ *   recorded on the task row and in the audit log.
+ *
+ * Argument validation, capability grants and audit trails are identical in all
+ * three modes; this only decides whose name is on the approval line.
+ */
+export type AgentAuthorization = "job" | "requester" | `policy:${string}`;
+
+/** The recovery verbs the self-healing workflow documents as preapproved. */
+const RECOVERY_POLICY_VERBS = new Set(["app.restart", "service.restart", "deploy.rollback"]);
+const AUTONOMOUS_RECOVERY_DEFAULT = true;
+
+function autonomousRecoveryEnabled(): boolean {
+  const raw = (process.env.AUTOMATION_AUTONOMOUS_RECOVERY ?? "").trim().toLowerCase();
+  if (raw === "") return AUTONOMOUS_RECOVERY_DEFAULT;
+  return !["false", "0", "off", "no"].includes(raw);
+}
+
+/**
+ * Policy approval for the bounded self-healing recovery verbs, when the
+ * operator has not disabled autonomous recovery. Returns null when the policy
+ * does not cover the command (the dispatch then needs a human approval).
+ */
+export function recoveryPolicyApproval(
+  ctx: Pick<WorkerContext, "approval">,
+  command: string,
+): { by: string; at: Date } | null {
+  if (ctx.approval?.by && ctx.approval?.at) return null; // a human already approved this job
+  if (!RECOVERY_POLICY_VERBS.has(command) || !autonomousRecoveryEnabled()) return null;
+  return { by: "policy:self-heal", at: new Date() };
+}
+
 /** Dispatch one allowlisted agent command and wait for its durable result. */
-export async function runAgent(ctx: WorkerContext, agentId: string, command: string, args: Record<string, string | number | boolean>, timeoutMs = 120_000) {
+export async function runAgent(
+  ctx: WorkerContext,
+  agentId: string,
+  command: string,
+  args: Record<string, string | number | boolean>,
+  authorization: AgentAuthorization = "job",
+  timeoutMs = 120_000,
+) {
   const agent = await db.serverAgent.findUnique({ where: { id: agentId } });
   if (!agent || !agentOnline(agent)) throw new WorkerError("AGENT_UNAVAILABLE", `Agent ${agentId} is offline; ${command} was not dispatched`, false);
-  const task = await dispatchTask({ agentId, command, args, jobId: ctx.jobId, correlationId: ctx.correlationId, actorEmail: ctx.actor?.email, actorScopes: ctx.actor?.scopes ?? [], approvedBy: ctx.approval?.by, approvedAt: ctx.approval?.at });
+  let approvedBy: string | undefined = ctx.approval?.by ?? undefined;
+  let approvedAt: Date | undefined = ctx.approval?.at ?? undefined;
+  if (authorization === "requester" && ctx.actor?.email && (ctx.actor.scopes?.length ?? 0) > 0) {
+    approvedBy = ctx.actor.email;
+    approvedAt = new Date();
+  } else if (authorization.startsWith("policy:")) {
+    if (!RECOVERY_POLICY_VERBS.has(command) || !autonomousRecoveryEnabled()) {
+      throw new WorkerError(
+        "WAITING_APPROVAL",
+        `Policy authorization "${authorization}" does not cover "${command}" (only the bounded recovery verbs ${[...RECOVERY_POLICY_VERBS].join(", ")} can be policy-authorized, and only when AUTOMATION_AUTONOMOUS_RECOVERY is enabled)`,
+        false,
+      );
+    }
+    approvedBy = authorization;
+    approvedAt = new Date();
+  }
+  const task = await dispatchTask({ agentId, command, args, jobId: ctx.jobId, correlationId: ctx.correlationId, actorEmail: ctx.actor?.email, actorScopes: ctx.actor?.scopes ?? [], approvedBy, approvedAt });
   if (task.status === "REFUSED") throw new WorkerError("REFUSED_BY_ALLOWLIST", task.refuseReason ?? "Agent refused command", false);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -78,7 +152,6 @@ export async function runAgent(ctx: WorkerContext, agentId: string, command: str
 async function prepareDeployment(input: PlatformInput, ctx: WorkerContext) {
   if (!input.projectId || !input.commitSha) throw new WorkerError("VALIDATION_FAILED", "projectId and commitSha are required", false);
   const { project, website } = await projectWithWebsite(input.projectId);
-  const node = await nodeForProject(input.projectId, input.profileKey);
   const stored = validateDeployConfig(parse(project.config, {}));
   const importDetection = parse<any>(project.detection, null);
   let config = stored;
@@ -100,20 +173,124 @@ async function prepareDeployment(input: PlatformInput, ctx: WorkerContext) {
     const instances = await db.databaseInstance.count({ where: { websiteId: website.id, deletedAt: null } });
     if (instances === 0) throw new WorkerError("WAITING_EXTERNAL", "Repository requires a database, but no provisioned database instance is attached. Database provisioning adapter is not configured.", false);
   }
-  // Remote agent deployment is not wired into the local release engine yet.
-  if (node.agentId) throw new WorkerError("NOT_IMPLEMENTED", "A verified node is selected, but remote release execution is not implemented for this engine. No deployment was reported as successful.", false);
+
+  // ── Node selection ────────────────────────────────────────────────────────
+  // Resolution order: an operator-pinned profileKey, then the project's
+  // already-assigned node, then a fresh scheduling decision. Local execution is
+  // only used when no node is assigned AND local execution is enabled.
+  const runtime: "node" | "static" = config.startCmd ? "node" : "static";
+  let agentId: string | null = null;
+  let publicIp: string | null = process.env.DEPLOY_PUBLIC_IP ?? null;
+  let scheduling: string[] = [];
+
+  if (input.profileKey) {
+    const version = await activeProfile(input.profileKey);
+    if (!version) throw new WorkerError("WAITING_EXTERNAL", `Node profile ${profileKeySafe(input.profileKey)} has no verified active version`, false);
+    const profile = await db.automationProfile.findUnique({ where: { id: version.profileId } });
+    if (profile?.kind !== "node") throw new WorkerError("VALIDATION_FAILED", "profileKey must reference a node profile", false);
+    const profileConfig = validateProfileConfig("node", parse(version.config, {})) as { agentId: string; publicIp?: string };
+    const agent = await db.serverAgent.findUnique({ where: { id: profileConfig.agentId }, include: { server: true } });
+    if (!agent || !agentOnline(agent)) throw new WorkerError("AGENT_UNAVAILABLE", `Node agent ${profileConfig.agentId} is not online`, false);
+    agentId = agent.id;
+    publicIp = profileConfig.publicIp ?? agent.server?.ip ?? null;
+    scheduling.push(`node pinned by profile ${profileKeySafe(input.profileKey)} (${agent.name})`);
+  } else if (project.agentId) {
+    const agent = await db.serverAgent.findUnique({ where: { id: project.agentId }, include: { server: true } });
+    if (!agent || !agentOnline(agent)) throw new WorkerError("AGENT_UNAVAILABLE", `Assigned node agent ${project.agentId} is offline; deploy again to reschedule or pick another node`, false);
+    agentId = agent.id;
+    publicIp = agent.server?.ip ?? process.env.DEPLOY_PUBLIC_IP ?? null;
+    scheduling.push(`reused assigned node ${agent.name}`);
+    } else {
+      const { selectNode } = await import("./scheduler");
+      const decision = await selectNode({ runtime });
+      if (decision) {
+        agentId = decision.agentId;
+        publicIp = decision.candidate.serverId
+          ? (await db.server.findUnique({ where: { id: decision.candidate.serverId }, select: { ip: true } }))?.ip ?? publicIp
+          : publicIp;
+        scheduling = decision.rationale;
+        await db.gitProject.update({ where: { id: project.id }, data: { agentId: decision.agentId } });
+        await createAuditLog({
+          actorId: ctx.actor?.id,
+          actorEmail: ctx.actor?.email,
+          actorRole: ctx.actor?.role,
+          action: "NODE_SCHEDULED",
+          resourceType: "GitProject",
+          resourceId: project.id,
+          result: "SUCCESS",
+          metadata: { agentId: decision.agentId, agentName: decision.candidate.name, runtime, score: Number(decision.score.toFixed(2)), considered: decision.considered, rationale: decision.rationale },
+        });
+      } else if (process.env.AUTOMATION_DEFAULT_AGENT_ID) {
+        // Explicit operator default, kept for compatibility: still checked for
+        // online status and the deployment capability set.
+        const agent = await db.serverAgent.findUnique({ where: { id: process.env.AUTOMATION_DEFAULT_AGENT_ID }, include: { server: true } });
+        const { requiredDeploymentCapabilities } = await import("./scheduler");
+        const caps = parse<string[]>(agent?.capabilities ?? "[]", []);
+        if (!agent || !agentOnline(agent) || !requiredDeploymentCapabilities(runtime).every((c) => caps.includes(c))) {
+          throw new WorkerError("AGENT_UNAVAILABLE", `Default node agent is not online or lacks the deployment capabilities for a ${runtime} runtime`, false);
+        }
+        agentId = agent.id;
+        publicIp = agent.server?.ip ?? publicIp;
+        scheduling.push(`operator default node ${agent.name}`);
+      } else if (process.env.DEPLOY_LOCAL_EXECUTION === "false") {
+        throw new WorkerError(
+          "WAITING_EXTERNAL",
+          "No enrolled node satisfies the deployment requirements (online + required capabilities) and local deployment execution is disabled. Enroll a compute node with the deployment capability set, then retry.",
+          false,
+        );
+      } else {
+        scheduling.push("no eligible node; using the panel's local release engine");
+      }
+    }
+
   const existing = await db.deployment.findFirst({ where: { projectId: project.id, commitHash: input.commitSha, status: { in: ["PENDING", "RUNNING", "SUCCESS"] } }, orderBy: { createdAt: "desc" } });
-  if (existing) return ok({ deploymentId: existing.id, projectId: project.id, websiteId: website.id, port: config.port, publicIp: node.publicIp, agentId: node.agentId, reused: true }, `Reusing deployment ${existing.id} (${existing.status})`, { evidence: `deploymentId=${existing.id}` });
+  if (existing) return ok({ deploymentId: existing.id, projectId: project.id, websiteId: website.id, port: config.port, publicIp, agentId, reused: true, scheduling }, `Reusing deployment ${existing.id} (${existing.status})`, { evidence: `deploymentId=${existing.id}` });
   const deployment = await db.deployment.create({ data: { websiteId: website.id, projectId: project.id, status: "PENDING", stage: "queued", source: "git", trigger: "manual", commitHash: input.commitSha, branch: project.productionBranch, configSnapshot: JSON.stringify(config), actorId: ctx.actor?.id } });
-  await db.deploymentLog.create({ data: { deploymentId: deployment.id, level: "INFO", message: `queued by central automation job ${ctx.jobId}` } });
+  await db.deploymentLog.create({ data: { deploymentId: deployment.id, level: "INFO", message: `queued by central automation job ${ctx.jobId}${agentId ? ` on node agent ${agentId.slice(0, 8)}` : " on the local release engine"}` } });
+  if (scheduling.length) await db.deploymentLog.create({ data: { deploymentId: deployment.id, level: "INFO", message: `node selection: ${scheduling.join("; ").slice(0, 900)}` } });
   await db.gitProject.update({ where: { id: project.id }, data: { config: JSON.stringify(config), lastCommitSha: input.commitSha, lastDeployStatus: "QUEUED" } });
-  return ok({ deploymentId: deployment.id, projectId: project.id, websiteId: website.id, port: config.port, publicIp: node.publicIp, agentId: node.agentId }, `Deployment ${deployment.id} queued for verified release engine`, { evidence: `deploymentId=${deployment.id}; commit=${input.commitSha}` });
+  return ok({ deploymentId: deployment.id, projectId: project.id, websiteId: website.id, port: config.port, publicIp, agentId, scheduling }, `Deployment ${deployment.id} queued for ${agentId ? "remote node release engine" : "local release engine"}`, { evidence: `deploymentId=${deployment.id}; commit=${input.commitSha}; agentId=${agentId ?? "local"}` });
 }
 
-async function checkProject(projectId: string) {
+function profileKeySafe(key: string): string {
+  return key.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 100);
+}
+
+/**
+ * Health-check one project. Remote (agent-assigned) projects are probed
+ * through their node agent — the panel cannot reach the node's loopback —
+ * using the same dual verification as the remote release engine: a real HTTP
+ * probe plus the release identity marker.
+ */
+async function checkProject(projectId: string, ctx?: WorkerContext) {
   const { project, website } = await projectWithWebsite(projectId);
   const latest = await db.deployment.findFirst({ where: { projectId, status: "SUCCESS", verifiedCommitSha: { not: null } }, orderBy: { createdAt: "desc" } });
   if (!latest?.verifiedCommitSha) return { healthy: false, reason: "no verified release", projectId };
+
+  if (project.agentId && ctx) {
+    const config = validateDeployConfig(parse(project.config, {}));
+    try {
+      const { verifyRemoteRelease } = await import("@/lib/deploy/remote");
+      const result = await verifyRemoteRelease(
+        ctx,
+        project.agentId,
+        website.domain,
+        { port: config.port, healthPath: config.healthPath },
+        latest.verifiedCommitSha,
+        latest.id,
+        "job",
+      );
+      await db.website.update({ where: { id: website.id }, data: { healthStatus: result.ok ? "HEALTHY" : "DOWN" } });
+      await db.healthCheck.upsert({ where: { websiteId: website.id }, create: { websiteId: website.id, publicHttp: result.ok, localHttp: result.ok, overallStatus: result.ok ? "HEALTHY" : "DOWN", checkedAt: new Date() }, update: { publicHttp: result.ok, localHttp: result.ok, overallStatus: result.ok ? "HEALTHY" : "DOWN", checkedAt: new Date() } });
+      return { healthy: result.ok, reason: result.reason, projectId, httpStatus: result.httpStatus, commitSha: result.marker?.commitSha ?? null, checkedVia: "node-agent" };
+    } catch (error) {
+      const reason = redact(error instanceof Error ? error.message : String(error));
+      await db.website.update({ where: { id: website.id }, data: { healthStatus: "DOWN" } });
+      await db.healthCheck.upsert({ where: { websiteId: website.id }, create: { websiteId: website.id, publicHttp: false, localHttp: false, overallStatus: "DOWN", checkedAt: new Date() }, update: { publicHttp: false, localHttp: false, overallStatus: "DOWN", checkedAt: new Date() } });
+      return { healthy: false, reason: `agent health probe failed: ${reason}`, projectId, checkedVia: "node-agent" };
+    }
+  }
+
   const baseUrl = project.healthUrl || `http://127.0.0.1:${project.port ?? 3100}`;
   const result = await verifyDeployment({ baseUrl, healthPath: project.healthPath || "/", expectedSha: latest.verifiedCommitSha, expectedDeploymentId: latest.id, attempts: 2, delayMs: 200 });
   await db.website.update({ where: { id: website.id }, data: { healthStatus: result.ok ? "HEALTHY" : "DOWN" } });
@@ -149,7 +326,7 @@ export const platformWorker: WorkerDefinition<PlatformInput, unknown> = defineWo
       const results = [];
       for (const p of projects) {
         ctx.signal.throwIfAborted();
-        const result = await checkProject(p.id); results.push(result);
+        const result = await checkProject(p.id, ctx); results.push(result);
         if (!result.healthy) {
           const { triggerEvent, SYSTEM_ACTOR } = await import("./workflows");
           await triggerEvent("application.health.failed", { projectId: p.id, reason: result.reason }, SYSTEM_ACTOR, `health:${p.id}:${Math.floor(Date.now() / 300_000)}`);
@@ -166,19 +343,38 @@ export const platformWorker: WorkerDefinition<PlatformInput, unknown> = defineWo
     }
     if (input.action === "diagnose") {
       if (!input.projectId) throw new WorkerError("VALIDATION_FAILED", "projectId required", false);
-      const { project } = await projectWithWebsite(input.projectId);
+      const { project, website } = await projectWithWebsite(input.projectId);
       const evidence = input.evidence ?? {};
       const deployments = (evidence.deployments ?? []) as Array<{ status?: string; failureStage?: string }>;
       const failed = deployments.find((d) => d.status === "FAILED" || d.status === "ROLLED_BACK");
       const previous = await db.deployment.findFirst({ where: { projectId: project.id, status: "SUCCESS", verifiedCommitSha: { not: null } }, orderBy: { createdAt: "desc" } });
+      // Remote (agent-assigned) projects recover through their node agent:
+      // the bounded restart verb for process-level failures, rollback when the
+      // latest deployment itself failed.
+      if (project.agentId) {
+        if (failed && previous) return ok({ action: "rollback", projectId: project.id, domain: website.domain, agentId: project.agentId, rootCause: `Latest deployment failed at ${failed.failureStage ?? "unknown stage"}`, permittedAction: "restore previous verified release through the node agent (deploy.rollback)" }, "Deterministic diagnosis selected agent rollback", { evidence: `previousDeployment=${previous.id}` });
+        return ok({ action: "restart", command: "app.restart", projectId: project.id, domain: website.domain, agentId: project.agentId, unit: `alo-${website.domain}`, rootCause: "Application health probe failed on its compute node", permittedAction: "app.restart through the node's allowlisted agent (policy-authorized recovery verb)" }, "Deterministic diagnosis selected agent process restart", { evidence: `agentId=${project.agentId.slice(0, 8)}` });
+      }
       if (failed && previous) return ok({ action: "rollback", projectId: project.id, rootCause: `Latest deployment failed at ${failed.failureStage ?? "unknown stage"}`, permittedAction: "restore previous verified release" }, "Deterministic diagnosis selected verified rollback", { evidence: `previousDeployment=${previous.id}` });
       if (project.serviceManager === "static" && project.port) return ok({ action: "restart-static", projectId: project.id, rootCause: "Static release health probe failed", permittedAction: "restart platform-owned static listener" }, "Deterministic diagnosis selected bounded static restart", { evidence: `port=${project.port}` });
-      if (project.serviceName && project.serviceManager !== "static") return ok({ action: "restart", projectId: project.id, unit: project.serviceName, agentId: process.env.AUTOMATION_DEFAULT_AGENT_ID ?? null, rootCause: "Application health probe failed", permittedAction: "service.restart through allowlisted agent (approval required)" }, "Deterministic diagnosis selected allowlisted service restart", { evidence: `unit=${project.serviceName}` });
+      if (project.serviceName && project.serviceManager !== "static") return ok({ action: "restart", command: "service.restart", projectId: project.id, unit: project.serviceName, agentId: process.env.AUTOMATION_DEFAULT_AGENT_ID ?? null, rootCause: "Application health probe failed", permittedAction: "service.restart through allowlisted agent (approval required)" }, "Deterministic diagnosis selected allowlisted service restart", { evidence: `unit=${project.serviceName}` });
       return ok({ action: "escalate", projectId: project.id, rootCause: "No safe automated recovery is available", evidence }, "Escalating with collected evidence; no destructive action was taken", { evidence: "no permitted recovery handler" });
     }
     if (input.action === "restart-static") {
       if (!input.projectId) throw new WorkerError("VALIDATION_FAILED", "projectId required", false);
-      const { project } = await projectWithWebsite(input.projectId);
+      const { project, website } = await projectWithWebsite(input.projectId);
+      // Remote static sites: restart the node's supervised static server
+      // through the agent (policy-authorized recovery verb), then re-verify.
+      if (project.agentId) {
+        const config = validateDeployConfig(parse(project.config, {}));
+        const latest = await db.deployment.findFirst({ where: { projectId: project.id, status: "SUCCESS", verifiedCommitSha: { not: null } }, orderBy: { createdAt: "desc" } });
+        await runAgent(ctx, project.agentId, "app.restart", { domain: website.domain }, "policy:self-heal", 60_000);
+        if (!latest?.verifiedCommitSha) throw new WorkerError("VERIFICATION_REQUIRED", "Restarted listener but no verified release identity exists", false);
+        const { verifyRemoteRelease } = await import("@/lib/deploy/remote");
+        const verified = await verifyRemoteRelease(ctx, project.agentId, website.domain, { port: config.port, healthPath: config.healthPath }, latest.verifiedCommitSha, latest.id, "job");
+        if (!verified.ok) return fail("RECOVERY_VERIFICATION_FAILED", verified.reason, { data: { projectId: project.id } });
+        return ok({ projectId: project.id, domain: website.domain, commitSha: verified.marker?.commitSha, checkedVia: "node-agent" }, "Static listener restarted on its node and live release verified", { evidence: `http=${verified.httpStatus}` });
+      }
       if (project.serviceManager !== "static" || !project.port) throw new WorkerError("VALIDATION_FAILED", "Only platform-owned static listeners can be restarted by this handler", false);
       const active = await currentReleaseDir(project.id);
       if (!active) throw new WorkerError("NO_ACTIVE_RELEASE", "No active release to restart", false);
@@ -199,11 +395,19 @@ export const platformWorker: WorkerDefinition<PlatformInput, unknown> = defineWo
     }
     if (input.action === "configure-proxy") {
       if (!input.domain || !input.port || !input.agentId) throw new WorkerError("VALIDATION_FAILED", "domain, port and agentId are required", false);
-      const proxy = await runAgent(ctx, input.agentId, "domain.add", { domain: input.domain, type: "node", port: input.port }, 60_000);
-      const probe = await runAgent(ctx, input.agentId, "health.probe", { url: `http://127.0.0.1:${input.port}/` }, 30_000);
+      const proxy = await runAgent(ctx, input.agentId, "domain.add", { domain: input.domain, type: "node", port: input.port }, "job", 60_000);
+      // Verify through the proxy itself, not just the upstream: probe the
+      // node's edge listener with the site's Host header so the check proves
+      // the domain actually routes to the application. The node reports its
+      // edge's actual HTTP port (it may not be 80 on high-port hosts).
+      const reported = Number((proxy.data as { edgeHttpPort?: number | string }).edgeHttpPort ?? 0);
+      const edgePort = reported >= 1 && reported <= 65535 ? reported : Number(process.env.DEPLOY_EDGE_HTTP_PORT || 80);
+      const probe = await runAgent(ctx, input.agentId, "health.probe", { url: `http://127.0.0.1:${edgePort}/`, host: input.domain }, "job", 30_000);
       const httpStatus = Number((probe.data as { httpStatus?: number }).httpStatus ?? 0);
-      if (httpStatus < 200 || httpStatus >= 400) return fail("PROXY_VERIFICATION_FAILED", `Caddy fragment created but local probe returned HTTP ${httpStatus}`, { data: { taskId: proxy.taskId } });
-      return ok({ domain: input.domain, port: input.port, taskId: proxy.taskId, httpStatus }, "Reverse-proxy fragment created, Caddy reloaded, and local upstream probe verified", { evidence: `agentTaskId=${proxy.taskId}; http=${httpStatus}` });
+      if (httpStatus < 200 || httpStatus >= 400) {
+        return fail("PROXY_VERIFICATION_FAILED", `Proxy fragment created but probing the edge listener with Host ${input.domain} returned HTTP ${httpStatus}`, { data: { taskId: proxy.taskId, edgePort } });
+      }
+      return ok({ domain: input.domain, port: input.port, edgePort, taskId: proxy.taskId, httpStatus }, "Reverse proxy configured (Caddy fragment or ALO Edge route) and the domain was verified through the proxy", { evidence: `agentTaskId=${proxy.taskId}; edgeHttp=${httpStatus}` });
     }
     if (input.action === "ssl-renewal-sweep") {
       const expiring = await db.domain.findMany({ where: { sslEnabled: true, certificateExpiry: { lte: new Date(Date.now() + 30 * 86400_000) } }, include: { website: true }, take: 50 });
@@ -212,8 +416,8 @@ export const platformWorker: WorkerDefinition<PlatformInput, unknown> = defineWo
         const agentId = process.env.AUTOMATION_DEFAULT_AGENT_ID;
         if (!agentId) { results.push({ domain: domain.domain, status: "WAITING_EXTERNAL" }); continue; }
         try {
-          const r = await runAgent(ctx, agentId, "ssl.renew", { domain: domain.domain });
-          const info = await runAgent(ctx, agentId, "ssl.info", { domain: domain.domain });
+          const r = await runAgent(ctx, agentId, "ssl.renew", { domain: domain.domain }, "job");
+          const info = await runAgent(ctx, agentId, "ssl.info", { domain: domain.domain }, "job");
           const data = info.data as { notAfter?: string; issuer?: string };
           const notAfter = data.notAfter ? new Date(data.notAfter) : null;
           if (!notAfter || Number.isNaN(notAfter.getTime()) || notAfter.getTime() <= Date.now()) throw new WorkerError("VERIFICATION_REQUIRED", "Renewal task succeeded but installed certificate is not valid", false);
@@ -230,13 +434,15 @@ export const platformWorker: WorkerDefinition<PlatformInput, unknown> = defineWo
       const websites = input.action === "backup-site" && input.projectId ? [(await projectWithWebsite(input.projectId)).website] : await db.website.findMany({ where: { deletedAt: null, currentReleasePath: { not: null } }, take: 50 });
       const results = [];
       for (const website of websites) {
-        const agentId = input.agentId ?? process.env.AUTOMATION_DEFAULT_AGENT_ID;
+        // Backups run on the node that actually holds the site's release tree.
+        const project = await db.gitProject.findUnique({ where: { websiteId: website.id }, select: { agentId: true } });
+        const agentId = project?.agentId ?? input.agentId ?? process.env.AUTOMATION_DEFAULT_AGENT_ID ?? null;
         if (!agentId) { results.push({ websiteId: website.id, status: "WAITING_EXTERNAL", reason: "no enrolled backup agent" }); continue; }
         try {
-          const created = await runAgent(ctx, agentId, "backup.database", { domain: website.domain }, 20 * 60_000);
+          const created = await runAgent(ctx, agentId, "backup.database", { domain: website.domain }, "job", 20 * 60_000);
           const data = created.data as { path?: string; sha256?: string; size?: number };
           if (!data.path || !data.sha256) throw new WorkerError("VERIFICATION_REQUIRED", "Backup helper did not return artifact path and checksum", false);
-          const verified = await runAgent(ctx, agentId, "backup.verify", { path: data.path }, 10 * 60_000);
+          const verified = await runAgent(ctx, agentId, "backup.verify", { path: data.path }, "job", 10 * 60_000);
           const stdout = String((verified.data as { stdoutHead?: string }).stdoutHead ?? "");
           if (!stdout.includes(data.sha256)) throw new WorkerError("VERIFICATION_REQUIRED", "Backup checksum verification did not match", false);
           const backup = await db.backup.create({ data: { websiteId: website.id, filename: data.path.split("/").pop() ?? "backup.tar.gz", filepath: data.path, fileSize: BigInt(data.size ?? 0), checksum: data.sha256, status: "COMPLETED", backupType: "SCHEDULED", metadata: JSON.stringify({ agentId, taskId: created.taskId, verified: true }) } });

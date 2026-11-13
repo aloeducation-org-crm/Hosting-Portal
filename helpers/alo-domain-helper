@@ -8,6 +8,9 @@ set -euo pipefail
 
 CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
 SITE_BASE="/srv/alo-sites"
+EDGE_SITES_DIR="/etc/alo-hosting/edge/sites"
+EDGE_APP_USER="alo-panel"
+EDGE_PM2_HOME="/opt/alo-hosting/pm2"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 log_err() { printf '[alo-domain-helper] ERROR: %s\n' "$*" >&2; }
@@ -60,6 +63,49 @@ action_add() {
   validate_domain "$domain"
 
   local site_dir="${SITE_BASE}/${domain}"
+
+  # ── ALO Edge backend (hosts without Caddy) ────────────────────────────────
+  # The platform's own reverse proxy (deploy/node-kit/alo-edge.mjs) reads JSON
+  # fragments and routes by Host header to a loopback upstream. It exists so a
+  # managed node does not depend on Caddy/nginx being preinstalled.
+  if ! command -v caddy >/dev/null 2>&1; then
+    if [[ -z "$port" ]]; then
+      die "add" "The ALO Edge backend requires an upstream port (type ${site_type}, no port given)"
+    fi
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1024 || port > 65535 )); then
+      die "add" "Invalid upstream port: ${port}"
+    fi
+    mkdir -p "$EDGE_SITES_DIR"
+    local edge_file="${EDGE_SITES_DIR}/${domain}.json"
+    if [[ -f "$edge_file" ]]; then
+      die "add" "Edge fragment already exists for ${domain}"
+    fi
+    cat > "$edge_file" <<EDGECONF
+{
+  "domain": "${domain}",
+  "upstream": "127.0.0.1:${port}",
+  "tls": true,
+  "managedBy": "alo-domain-helper",
+  "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EDGECONF
+    chown root:"${EDGE_APP_USER}" "$edge_file"
+    chmod 0640 "$edge_file"
+    log_info "Edge fragment created at ${edge_file} (upstream 127.0.0.1:${port})"
+    # The edge re-reads fragments per request (mtime cache); SIGHUP also makes
+    # it pick up newly installed TLS material immediately.
+    runuser -u "${EDGE_APP_USER}" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
+      pm2 signal SIGHUP alo-edge >/dev/null 2>&1 || log_info "SIGHUP to alo-edge not delivered (it will pick up the fragment from its config cache)"
+    # Report the edge's actual HTTP port (it writes it to state.json) so the
+    # control plane probes the listener that really serves this domain.
+    local edge_http_port
+    edge_http_port=$(jq -r '.httpPort // empty' "${EDGE_SITES_DIR}/../state.json" 2>/dev/null || true)
+    [[ "$edge_http_port" =~ ^[0-9]+$ ]] || edge_http_port="${ALO_EDGE_HTTP_PORT:-80}"
+    json_out "{\"success\":true,\"step\":\"add\",\"domain\":\"${domain}\",\"type\":\"${site_type}\",\"backend\":\"alo-edge\",\"edgeConfig\":\"${edge_file}\",\"upstream\":\"127.0.0.1:${port}\",\"edgeHttpPort\":${edge_http_port}}"
+    return 0
+  fi
+
+  # ── Caddy backend (original path) ─────────────────────────────────────────
   local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
 
   if [[ -f "$caddy_file" ]]; then
@@ -143,8 +189,17 @@ action_remove() {
 
   local caddy_file="${CADDY_CONFIG_DIR}/${domain}.caddy"
 
+  # Edge backend: remove the managed fragment and signal the proxy.
   if [[ ! -f "$caddy_file" ]]; then
-    die "remove" "Caddy config not found for ${domain}"
+    local edge_file="${EDGE_SITES_DIR}/${domain}.json"
+    if [[ -f "$edge_file" ]]; then
+      rm -f "$edge_file"
+      runuser -u "${EDGE_APP_USER}" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
+        pm2 signal SIGHUP alo-edge >/dev/null 2>&1 || true
+      json_out "{\"success\":true,\"step\":\"remove\",\"domain\":\"${domain}\",\"backend\":\"alo-edge\"}"
+      return 0
+    fi
+    die "remove" "No managed site configuration found for ${domain}"
   fi
 
   rm -f "$caddy_file"

@@ -34,7 +34,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const AGENT_VERSION = "1.2.0";
+export const AGENT_VERSION = "1.3.0";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -81,6 +81,13 @@ const EMAIL_ADDR = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/;
 const DNS_TYPES = new Set(["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA"]);
 const DNS_NAME = /^(?:@|[A-Za-z0-9_][A-Za-z0-9._-]{0,119})$/;
 const DNS_VALUE = /^[A-Za-z0-9._:@/=+\- ]{1,255}$/;
+const DEPLOYMENT_ID = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/;
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+const HEALTH_PATH = /^\/[A-Za-z0-9/._-]{0,100}$/;
+// Either a validated start command (node ecosystem) or a relative static
+// output root without "..", e.g. "." or "dist" or "public".
+const START_CMD_OR_ROOT =
+  /^(?:(?:npm|npx|yarn|pnpm|bun|node)(?:\s+[A-Za-z0-9._:@/=-]+)*|[A-Za-z0-9._][A-Za-z0-9._/-]{0,199})$/;
 
 const validDomain = (d) =>
   typeof d === "string" && d.length >= 3 && d.length <= 253 && !d.includes("..") && DOMAIN_NAME.test(d);
@@ -92,6 +99,15 @@ const validBuildCmd = (c) =>
   typeof c === "string" && c.length >= 3 && c.length <= 200 && !c.includes("..") && BUILD_CMD.test(c);
 const validDnsName = (n) => typeof n === "string" && !n.includes("..") && DNS_NAME.test(n);
 const validDnsValue = (v) => typeof v === "string" && DNS_VALUE.test(v);
+const validSiteReleasePath = (a) =>
+  typeof a.releasePath === "string" &&
+  a.releasePath.length <= 300 &&
+  !a.releasePath.includes("..") &&
+  SITE_RELEASE_PATH.test(a.releasePath) &&
+  a.releasePath.startsWith(`/srv/alo-sites/${a.domain}/releases/`);
+const validPort = (p) => typeof p === "number" && Number.isInteger(p) && p >= 1024 && p <= 65535;
+const validStartCmdOrRoot = (c) =>
+  typeof c === "string" && c.length >= 1 && c.length <= 300 && !c.includes("..") && START_CMD_OR_ROOT.test(c);
 
 export const AGENT_ALLOWLIST = {
   "metrics.collect": {
@@ -126,7 +142,13 @@ export const AGENT_ALLOWLIST = {
     executable: null, // handled internally with fetch()
     risk: "READ_ONLY",
     timeoutMs: 20_000,
-    validate: (a) => typeof a.url === "string" && isPrivateTarget(a.url),
+    validate: (a) =>
+      typeof a.url === "string" &&
+      isPrivateTarget(a.url) &&
+      (a.host === undefined ||
+        a.host === null ||
+        (typeof a.host === "string" && validDomain(a.host))),
+    // host: optional Host header for probing a name-based reverse proxy.
   },
   "disk.usage": {
     executable: "df",
@@ -216,6 +238,39 @@ export const AGENT_ALLOWLIST = {
       validDomain(a.domain) &&
       (a.buildCmd === undefined || a.buildCmd === null || validBuildCmd(a.buildCmd)),
   },
+  "deploy.build-release": {
+    // Builds inside a specific (not yet active) release directory, so a build
+    // never touches the live release before verification.
+    executable: "alo-deploy-helper",
+    argv: (a) => ["build-release", String(a.domain), String(a.releasePath), String(a.buildCmd)],
+    sudo: true,
+    risk: "REVERSIBLE",
+    timeoutMs: 10 * 60_000,
+    validate: (a) => validDomain(a.domain) && validSiteReleasePath(a) && validBuildCmd(a.buildCmd),
+  },
+  "deploy.marker": {
+    // Verifies the release tree IS the pinned commit, then writes the release
+    // identity marker used for live verification.
+    executable: "alo-deploy-helper",
+    argv: (a) => ["marker", String(a.domain), String(a.releasePath), String(a.deploymentId), String(a.commitSha)],
+    sudo: true,
+    risk: "REVERSIBLE",
+    timeoutMs: 60_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      validSiteReleasePath(a) &&
+      typeof a.deploymentId === "string" &&
+      DEPLOYMENT_ID.test(a.deploymentId) &&
+      typeof a.commitSha === "string" &&
+      COMMIT_SHA.test(a.commitSha),
+  },
+  "deploy.read-marker": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["read-marker", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
   "deploy.switch": {
     executable: "alo-deploy-helper",
     argv: (a) => ["switch", String(a.domain), String(a.releasePath)],
@@ -243,6 +298,44 @@ export const AGENT_ALLOWLIST = {
     argv: (a) => ["list-releases", String(a.domain)],
     risk: "READ_ONLY",
     timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  // ── Supervised application runtime (alo-app-helper / node runtime kit) ────
+  "app.up": {
+    executable: "alo-app-helper",
+    argv: (a) => [
+      "up",
+      String(a.domain),
+      String(a.port),
+      String(a.type),
+      String(a.commandOrRoot),
+      String(a.healthPath ?? "/"),
+    ],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 120_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      validPort(a.port) &&
+      (a.type === "node" || a.type === "static") &&
+      validStartCmdOrRoot(a.commandOrRoot) &&
+      (a.healthPath === undefined ||
+        a.healthPath === null ||
+        (typeof a.healthPath === "string" && HEALTH_PATH.test(a.healthPath))),
+  },
+  "app.restart": {
+    executable: "alo-app-helper",
+    argv: (a) => ["restart", String(a.domain)],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 60_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "app.status": {
+    executable: "alo-app-helper",
+    argv: (a) => ["status", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 30_000,
     validate: (a) => validDomain(a.domain),
   },
   // ── SSL / TLS (alo-ssl-helper) ────────────────────────────────────────────
@@ -280,6 +373,19 @@ export const AGENT_ALLOWLIST = {
     timeoutMs: 15_000,
     validate: () => true,
   },
+  "ssl.verify-tls": {
+    // Real TLS handshake against the local edge listener with SNI, proving the
+    // proxy terminates TLS with the expected (non-expired) certificate.
+    executable: "alo-ssl-helper",
+    argv: (a) => ["verify-tls", String(a.domain), ...(a.port ? [String(a.port)] : [])],
+    risk: "READ_ONLY",
+    timeoutMs: 30_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      (a.port === undefined ||
+        a.port === null ||
+        (typeof a.port === "number" && Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535)),
+  },
   // ── DNS (alo-dns-helper) ──────────────────────────────────────────────────
   "domain.add": {
     executable: "alo-domain-helper",
@@ -304,7 +410,10 @@ export const AGENT_ALLOWLIST = {
       String(a.priority ?? 0),
     ],
     sudo: true,
-    risk: "PRIVILEGED",
+    // Adding one record to the platform-managed local zone is reversible (the
+    // matching dns.delete can undo it) and does not by itself affect a live
+    // service. Removal stays DESTRUCTIVE.
+    risk: "REVERSIBLE",
     timeoutMs: 15_000,
     validate: (a) =>
       validDomain(a.domain) &&
@@ -662,15 +771,26 @@ export async function executeTask(task, secrets = []) {
       if (!isPrivateTarget(url)) {
         return { status: "REFUSED", refuseReason: `Refusing to probe ${url}: only loopback and private addresses are allowed`, exitCode: null };
       }
+      if (args.host !== undefined && args.host !== null && !validDomain(String(args.host))) {
+        return { status: "REFUSED", refuseReason: `Invalid Host header: ${String(args.host).slice(0, 100)}`, exitCode: null };
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), entry.timeoutMs);
       try {
-        const res = await fetch(url, { signal: controller.signal, redirect: "error" });
+        const headers = {};
+        if (args.host) headers.host = String(args.host);
+        const res = await fetch(url, { signal: controller.signal, redirect: "error", headers });
         const body = (await res.text()).slice(0, 2000);
         return {
           status: "SUCCEEDED",
           exitCode: 0,
-          result: { url, httpStatus: res.status, latencyMs: Date.now() - started, commit: (body.match(/\b[0-9a-f]{40}\b/) || [null])[0] },
+          result: {
+            url,
+            host: args.host ? String(args.host) : null,
+            httpStatus: res.status,
+            latencyMs: Date.now() - started,
+            commit: (body.match(/\b[0-9a-f]{40}\b/) || [null])[0],
+          },
           durationMs: Date.now() - started,
         };
       } finally {

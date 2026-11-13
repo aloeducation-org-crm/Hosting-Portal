@@ -2188,6 +2188,10 @@ model GitProject {
   serviceManager    String   @default("static") // static | pm2 | systemd | none
   serviceName       String?
   releaseRoot       String?  // absolute path on the deploy host
+  // Enrolled compute node (ServerAgent) this project is assigned to. Null means
+  // the panel's own local release engine. Set by the central scheduler the
+  // first time a deployment is prepared, or pinned by an operator.
+  agentId           String?
   port              Int?
   webhookSecretEnc  String?  // AES-256-GCM ciphertext
   webhookId         String?  // GitHub hook id, for disconnect
