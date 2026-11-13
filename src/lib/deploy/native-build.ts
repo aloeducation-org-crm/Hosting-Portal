@@ -99,7 +99,7 @@ export async function detectNativeBuildPlan(
   const configurePreset = selectConfigurePreset(configurePresets.map((p) => p.name), platform);
   const selectedBuild = configurePreset
     ? buildPresets.find((p) => p.configurePreset === configurePreset) ??
-      buildPresets.find((p => p.name === configurePreset || p.name === `${configurePreset}-ci`))
+      buildPresets.find((p) => p.name === configurePreset || p.name === `${configurePreset}-ci`)
     : undefined;
   const buildPreset = selectedBuild?.name ?? null;
   const selectedTest = configurePreset

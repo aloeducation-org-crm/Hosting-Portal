@@ -14,7 +14,7 @@ FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx prisma generate
+RUN npm run db:generate
 RUN npm run build && npm run build:worker
 
 FROM base AS runner

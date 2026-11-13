@@ -24,8 +24,8 @@ succeeded=0
 previous=""
 
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "commit SHA is not a full 40-character Git SHA"
-[[ -d "$PAYLOAD/.next/standalone" && -s "$PAYLOAD/.next/standalone/server.js" && -s "$PAYLOAD/.next/standalone/automation-worker.cjs" ]] \
-  || fail "standalone server or automation worker bundle missing in $PAYLOAD"
+[[ -d "$PAYLOAD/.next/standalone" && -s "$PAYLOAD/.next/standalone/server.js" && -s "$PAYLOAD/.next/standalone/automation-worker.cjs" && -s "$PAYLOAD/.next/standalone/deploy-worker.cjs" ]] \
+  || fail "standalone server, automation worker, or deploy worker bundle missing in $PAYLOAD"
 [[ -d "$PAYLOAD/.next/static" && -d "$PAYLOAD/public" && -f "$PAYLOAD/prisma/schema.prisma" ]] \
   || fail "release payload is incomplete (static, public, or Prisma schema missing)"
 [[ -f "$ROOT/scripts/init-production-db.sh" ]] || fail "database bootstrap helper missing from checkout"
@@ -165,6 +165,9 @@ activated=1
 log "activated release $SHA; restarting systemd service"
 sudo -n /usr/bin/systemctl restart alo-hosting-panel
 sudo -n /usr/bin/systemctl restart alo-automation-worker
+if systemctl list-unit-files alo-deploy-worker.service 2>/dev/null | grep -q "alo-deploy-worker\.service"; then
+  sudo -n /usr/bin/systemctl restart alo-deploy-worker
+fi
 
 healthy=0
 for attempt in $(seq 1 30); do

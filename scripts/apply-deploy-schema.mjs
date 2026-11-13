@@ -412,9 +412,9 @@ function releaseLock() {
  */
 const REQUIRED_SCHEMA = {
   git_connections: ["id", "accountLogin", "tokenEncrypted"],
-  git_projects: ["id", "websiteId", "repository", "config", "port"],
+  git_projects: ["id", "websiteId", "repository", "config", "port", "agentId"],
   webhook_deliveries: ["id", "deliveryId", "signatureValid", "result"],
-  deployments: ["id", "stage", "verifiedCommitSha", "configSnapshot"],
+  deployments: ["id", "stage", "verifiedCommitSha", "configSnapshot", "executedByAgentId"],
   hosting_sites: ["id", "domainName", "sslStatus", "vhostPath", "serverId"],
   servers: ["id", "hostname", "ipAddress", "cpuUsage", "memoryUsage", "diskUsage"],
   audit_logs: ["id", "action", "actorEmail", "resourceType", "resourceId", "timestamp", "operationJobId"],

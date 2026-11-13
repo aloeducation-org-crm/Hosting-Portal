@@ -30,6 +30,7 @@ When `NODE_ENV=production` (outside `next build`), `src/lib/env.ts` inspects fou
 | `APP_URL` | Yes (Prod) | `http://localhost:3101` | Canonical public URL (`https://hosting.alolabs.net` in production) |
 | `NEXTAUTH_URL` | Yes (Prod) | `http://localhost:3101` | NextAuth callback base URL (must match `APP_URL` in production) |
 | `DATABASE_URL` | Yes | `file:./db/custom.db` | LibSQL / SQLite connection URL. **Use an absolute path** (e.g., `file:/var/lib/alo-hosting-panel/custom.db` or `file:/opt/alo-hosting/db/custom.db`) when running `.next/standalone/server.js` so working-directory differences cannot split the DB file |
+| `DATABASE_BUSY_TIMEOUT_MS` | No | `5000` | SQLite `PRAGMA busy_timeout` applied to pooled `libsql` connections (`0`–`60000` ms) so concurrent panel/worker writes wait instead of failing with `SQLITE_BUSY` |
 | `CORS_ALLOWED_ORIGINS` | No | `""` (same-origin only) | Comma-separated exact origins allowed on `/api/*` (wildcard `*` is never permitted) |
 | `CROSS_ORIGIN_OPENER_POLICY` | No | `same-origin` | Value for `Cross-Origin-Opener-Policy` response header |
 | `CROSS_ORIGIN_RESOURCE_POLICY` | No | `same-site` | Value for `Cross-Origin-Resource-Policy` response header |

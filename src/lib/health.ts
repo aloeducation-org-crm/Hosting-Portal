@@ -72,7 +72,8 @@ const SCHEMA_PROBES: Array<{ table: string; columns: string[] }> = [
   { table: "servers", columns: ["ipAddress", "cpuUsage", "memoryUsage", "diskUsage"] },
   { table: "hosting_sites", columns: ["domainName", "sslStatus", "vhostPath", "serverId"] },
   { table: "audit_logs", columns: ["action", "resourceType", "result"] },
-  { table: "git_projects", columns: ["repository", "productionBranch", "cloneUrl"] },
+  { table: "git_projects", columns: ["repository", "productionBranch", "cloneUrl", "agentId"] },
+  { table: "deployments", columns: ["status", "stage", "verifiedCommitSha", "executedByAgentId"] },
 ];
 
 /**

@@ -77,8 +77,13 @@ describe("SEC-11: reserved platform service names", () => {
 
   it("keeps the reserved list aligned with the shipped units", () => {
     // Guards against adding a unit to deploy/systemd without reserving its name.
-    expect(RESERVED_SERVICE_NAMES).toContain("alo-hosting-panel");
-    expect(RESERVED_SERVICE_NAMES).toContain("alo-automation-worker");
+    const unitFiles = fs
+      .readdirSync(path.resolve("deploy/systemd"))
+      .filter((f) => f.endsWith(".service"))
+      .map((f) => f.replace(/\.service$/, ""));
+    for (const unit of unitFiles) {
+      expect(RESERVED_SERVICE_NAMES).toContain(unit);
+    }
   });
 });
 
