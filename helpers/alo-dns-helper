@@ -51,6 +51,11 @@ ensure_zone() {
     echo "{\"domain\":\"$domain\",\"records\":[]}" | jq . > "$zf" 2>/dev/null || \
       echo "{\"domain\":\"$domain\",\"records\":[]}" > "$zf"
   fi
+  # Zone records are the DNS data this platform serves — not secrets. The
+  # agent's read-only verification (dns.verify/dns.list) runs unprivileged, so
+  # the zone must stay readable by every user the panel deploys as.
+  chmod 0755 "$ZONE_DIR" 2>/dev/null || true
+  chmod 0644 "$zf" 2>/dev/null || true
   echo "$zf"
 }
 
@@ -175,6 +180,7 @@ case "$COMMAND" in
     ZONE_VALUE=""
     ZF="$(zone_file "$DOMAIN")"
     if [[ -f "$ZF" ]]; then
+      chmod 0644 "$ZF" 2>/dev/null || true
       ZONE_VALUE=$(jq -r --arg t "$TYPE" --arg n "$NAME" \
         '.records[] | select(.type == $t and .name == $n) | .value' "$ZF" 2>/dev/null | head -1 || echo "")
     fi

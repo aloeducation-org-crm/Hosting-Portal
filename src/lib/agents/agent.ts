@@ -95,16 +95,34 @@ export const AGENT_APPROVAL_TTL_MS = 60 * 60_000;
  * belong to (`SIGNATURE_MAX_SKEW_MS`); after that the timestamp check rejects
  * the request anyway, so pruning keeps the table bounded.
  */
+// Pruning expired nonces on every request amplifies writes (one DELETE per
+// poll per agent); ~5% of requests is plenty to keep the table bounded.
+let nonceSweepCounter = 0;
+
+/** Prune expired nonces. Exported so maintenance jobs and tests can run it on demand. */
+export async function sweepExpiredRequestNonces(now = Date.now()): Promise<number> {
+  const result = await db.agentNonce.deleteMany({ where: { expiresAt: { lt: new Date(now) } } }).catch(() => ({ count: 0 }));
+  return result.count;
+}
+
 export async function consumeRequestNonce(agentId: string, nonce: string, now = Date.now()): Promise<boolean> {
   try {
     await db.agentNonce.create({
       data: { agentId, nonce: nonce.slice(0, 128), expiresAt: new Date(now + SIGNATURE_MAX_SKEW_MS) },
     });
-  } catch {
+  } catch (error) {
     // P2002: this (agent, nonce) pair was already consumed — a replay.
-    return false;
+    // Anything else (lock timeout, disk error, …) must NOT be reported as a
+    // replay: that would smear an infrastructure failure onto the agent's
+    // security record. Fail loudly so the caller answers with an honest 5xx
+    // and the agent retries with a fresh nonce.
+    const code = (error as { code?: string; name?: string })?.code ?? (error as { error?: { code?: string } })?.error?.code;
+    if (code === "P2002") return false;
+    throw error instanceof Error ? error : new Error(String(error));
   }
-  await db.agentNonce.deleteMany({ where: { expiresAt: { lt: new Date(now) } } }).catch(() => ({ count: 0 }));
+  if ((nonceSweepCounter = (nonceSweepCounter + 1) % 20) === 0) {
+    await sweepExpiredRequestNonces(now);
+  }
   return true;
 }
 
@@ -461,6 +479,14 @@ export interface DispatchInput {
   command: string;
   args?: Record<string, unknown>;
   jobId?: string;
+  /**
+   * Ordinal of this dispatch within the current job execution. Two different
+   * calls of the same command with the same args inside one job (a recovery
+   * flow brackets a rollback with deploy.list reads; a verify loop re-probes
+   * health with identical args) must not collide on the deterministic task
+   * id, or the second call silently reuses the first call's cached result.
+   */
+  dispatchSeq?: number;
   correlationId?: string;
   actorEmail?: string;
   actorScopes?: string[];
@@ -511,9 +537,17 @@ export async function dispatchTask(input: DispatchInput): Promise<DispatchedTask
   const gated = decision.entry.risk === "PRIVILEGED" || decision.entry.risk === "DESTRUCTIVE";
   const approvalFresh = Boolean(input.approvedBy && input.approvedAt && Date.now() - input.approvedAt.getTime() <= AGENT_APPROVAL_TTL_MS);
   // A crash after dispatch but before the job records taskId must not create a
-  // second host command. The orchestrator job id is the dispatch idempotency key.
+  // second host command. The orchestrator job id is the dispatch idempotency
+  // key — but the key must also distinguish two different calls of the same
+  // command with the same args within one job (recovery flows bracket a
+  // rollback with deploy.list reads; verify loops re-probe with identical
+  // args), or the second call returns the first call's stale result without
+  // ever reaching the host. The per-execution dispatchSeq does both: replays
+  // of the same deterministic code path realign with the tasks the earlier
+  // attempt created, while distinct calls get distinct tasks.
+  const seqSegment = input.dispatchSeq && input.dispatchSeq > 0 ? `${input.dispatchSeq}:` : "";
   const taskId = input.jobId
-    ? createHash("sha256").update(`agent-task:${input.jobId}:${agent.id}:${decision.entry.command}:${JSON.stringify(input.args ?? {})}`).digest("hex").slice(0, 64)
+    ? createHash("sha256").update(`agent-task:${input.jobId}:${seqSegment}${agent.id}:${decision.entry.command}:${JSON.stringify(input.args ?? {})}`).digest("hex").slice(0, 64)
     : undefined;
   const existing = taskId ? await db.agentTask.findUnique({ where: { id: taskId } }) : null;
   const task = existing ?? await db.agentTask.create({

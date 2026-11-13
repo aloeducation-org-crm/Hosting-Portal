@@ -15,6 +15,7 @@ CERT_ARCHIVE="/etc/letsencrypt/archive"
 # the Let's Encrypt layout so an internal-CA certificate can never be confused
 # with a publicly-trusted one.
 INTERNAL_TLS_BASE="/etc/alo-hosting/tls"
+EDGE_STATE_FILE="/etc/alo-hosting/edge/state.json"
 INTERNAL_CA_DIR="${INTERNAL_TLS_BASE}/ca"
 EDGE_APP_USER="alo-panel"
 EDGE_PM2_HOME="/opt/alo-hosting/pm2"
@@ -30,6 +31,22 @@ die() {
   local msg="$2"
   json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
   exit 1
+}
+
+# Signal the edge proxy to reload its config/TLS cache. pm2's `signal`
+# subcommand is not available in every pm2 release, so the preferred path is the
+# PID the edge itself publishes in state.json (per-node, no process-manager
+# dependency); pm2 remains the fallback.
+signal_edge_reload() {
+  local edge_pid
+  edge_pid=$(jq -r '.pid // empty' "${EDGE_STATE_FILE}" 2>/dev/null || true)
+  if [[ "$edge_pid" =~ ^[0-9]+$ ]] && kill -0 "$edge_pid" 2>/dev/null; then
+    kill -HUP "$edge_pid" 2>/dev/null || true
+    return 0
+  fi
+  runuser -u "${EDGE_APP_USER}" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
+      pm2 signal SIGHUP alo-edge >/dev/null 2>&1 || true
+  return 0
 }
 
 validate_domain() {
@@ -72,7 +89,17 @@ issue_internal_cert() {
   local cert_dir="${INTERNAL_TLS_BASE}/${domain}"
 
   if [[ -d "$cert_dir" && -f "${cert_dir}/privkey.pem" ]]; then
-    die "issue" "Internal certificate already exists for ${domain}. Use renew first."
+    # Idempotent: an existing unexpired internal cert is returned as success so
+    # retried lifecycle workflows do not fail on their own earlier work.
+    local existing_after existing_not_after
+    existing_not_after=$(openssl x509 -in "${cert_dir}/cert.pem" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+    if [[ -n "$existing_not_after" ]] && (( $(date -d "$existing_not_after" +%s 2>/dev/null || echo 0) > $(date +%s) )); then
+      local existing_issuer
+      existing_issuer=$(openssl x509 -in "${cert_dir}/cert.pem" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+      json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"mode\":\"internal-ca\",\"issuer\":\"${existing_issuer}\",\"notAfter\":\"${existing_not_after}\",\"certPath\":\"${cert_dir}\",\"idempotent\":true,\"message\":\"Unexpired internal certificate already installed; returning it\"}"
+      return 0
+    fi
+    die "issue" "Existing internal certificate for ${domain} is expired; use renew"
   fi
 
   ensure_internal_ca
@@ -98,14 +125,19 @@ EXT
 
   cat "$cert_file" "${INTERNAL_CA_DIR}/ca.crt" > "${cert_dir}/fullchain.pem"
   chown -R root:"${EDGE_APP_USER}" "$cert_dir"
-  chmod 0750 "$cert_dir"
-  chmod 0640 "$cert_file" "${cert_dir}/fullchain.pem" "${INTERNAL_CA_DIR}/ca.crt" 2>/dev/null || true
-  chmod 0600 "$key_file"
+  # The certificate and its chain are public material (any TLS client receives
+  # them); only the private key is secret. The unprivileged agent verifies
+  # issued certificates with ssl.info, so the public files must stay readable
+  # for every user, and the directories traversable.
+  chmod 0755 "$INTERNAL_TLS_BASE" "$cert_dir"
+  chmod 0644 "$cert_file" "${cert_dir}/fullchain.pem" "${INTERNAL_CA_DIR}/ca.crt" 2>/dev/null || true
+  # Group-readable for the edge proxy user only: it must read the key to
+  # terminate TLS, but no other non-root user may.
+  chmod 0640 "$key_file"
   chown root:"${EDGE_APP_USER}" "$key_file"
 
   # The edge proxy picks up TLS material on SIGHUP.
-  runuser -u "${EDGE_APP_USER}" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
-    pm2 signal SIGHUP alo-edge >/dev/null 2>&1 || log_info "SIGHUP to alo-edge not delivered"
+  signal_edge_reload || log_info "SIGHUP to alo-edge not delivered"
 
   local issuer not_before not_after
   issuer=$(openssl x509 -in "$cert_file" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
@@ -140,12 +172,23 @@ action_issue() {
 
   validate_domain "$domain"
 
-  # Check if certificate already exists
+  # Existing certificates make issue idempotent, not an error: a retried
+  # lifecycle workflow must succeed against its own earlier work.
   if [[ -d "${CERT_BASE}/${domain}" ]]; then
-    die "issue" "Certificate already exists for ${domain}. Use renew or revoke first."
+    local cert_path="${CERT_BASE}/${domain}"
+    local not_after issuer
+    not_after=$(openssl x509 -in "${cert_path}/cert.pem" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+    issuer=$(openssl x509 -in "${cert_path}/cert.pem" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+    if [[ -n "$not_after" ]] && (( $(date -d "$not_after" +%s 2>/dev/null || echo 0) > $(date +%s) )); then
+      install_acme_cert_for_edge "$domain" 2>/dev/null || true
+      json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"issuer\":\"${issuer}\",\"notAfter\":\"${not_after}\",\"certPath\":\"${cert_path}\",\"idempotent\":true,\"message\":\"Unexpired certificate already exists; returning it\"}"
+      return 0
+    fi
+    die "issue" "Existing certificate for ${domain} is expired; use renew"
   fi
   if [[ -d "${INTERNAL_TLS_BASE}/${domain}" && -f "${INTERNAL_TLS_BASE}/${domain}/privkey.pem" ]]; then
-    die "issue" "Internal certificate already exists for ${domain}. Use renew first."
+    issue_internal_cert "$domain"
+    return 0
   fi
 
   if ! acme_available "$domain"; then
@@ -234,11 +277,11 @@ install_acme_cert_for_edge() {
     || cat "${src_dir}/cert.pem" > "${dst_dir}/fullchain.pem"
   cp "${src_dir}/privkey.pem" "${dst_dir}/privkey.pem"
   chown -R root:"${EDGE_APP_USER}" "$dst_dir"
-  chmod 0750 "$dst_dir"
-  chmod 0640 "${dst_dir}/fullchain.pem"
-  chmod 0600 "${dst_dir}/privkey.pem"
+  chmod 0755 "$INTERNAL_TLS_BASE" "$dst_dir"
+  chmod 0644 "${dst_dir}/fullchain.pem"
+  chmod 0640 "${dst_dir}/privkey.pem"
   runuser -u "$EDGE_APP_USER" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
-    pm2 signal SIGHUP alo-edge >/dev/null 2>&1 || log_info "SIGHUP to alo-edge not delivered"
+    signal_edge_reload || log_info "SIGHUP to alo-edge not delivered"
   log_info "ACME certificate installed for the ALO Edge at ${dst_dir}"
 }
 

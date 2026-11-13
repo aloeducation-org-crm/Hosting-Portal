@@ -598,6 +598,12 @@ model Deployment {
   projectId         String?
   deliveryId        String?
   branch            String?
+  // Node agent that owns this deployment's execution. Null = the panel's local
+  // release engine. A deployment is only reusable for a new run of the same
+  // commit when it executed on the node the project is assigned to NOW —
+  // reassigning a project to another node must redeploy, not report the old
+  // node's verified state as this node's.
+  executedByAgentId String?
   commitMessage     String?
   commitAuthor      String?
   trigger           String?   // webhook | manual | rollback

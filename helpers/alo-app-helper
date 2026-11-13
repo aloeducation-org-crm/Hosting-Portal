@@ -69,7 +69,7 @@ validate_start_command() {
   if [[ "$cmd" =~ [\$\`\;\&\|\<\>\(\)\{\}] ]]; then
     die "arg-validation" "Start command contains forbidden characters"
   fi
-  if [[ ! "$cmd" =~ ^(npm|npx|yarn|pnpm|bun|node)(\s|$) ]]; then
+  if [[ ! "$cmd" =~ ^(npm|npx|yarn|pnpm|bun|node)([[:space:]]|$) ]]; then
     die "arg-validation" "Start command must start with npm, npx, yarn, pnpm, bun or node"
   fi
 }
@@ -88,6 +88,33 @@ pm2_as_app_user() {
     HOME="/opt/alo-hosting-portal" \
     "$PM2_BIN" "$@"
   return $?
+}
+
+# Ensure the PM2 daemon is alive before issuing a command. Normally the pm2 CLI
+# spawns it on demand; some minimal/container hosts reject that spawn (EACCES
+# from a hardened runtime) even though the daemon itself runs fine when started
+# directly. Starting God Daemon ourselves and waiting for the socket makes every
+# host work, and is a no-op when the daemon is already alive.
+ensure_pm2_daemon() {
+  pm2_as_app_user jlist >/dev/null 2>&1 && return 0
+  local pm2_real daemon_js i
+  pm2_real="$(readlink -f "$PM2_BIN" 2>/dev/null || echo "")"
+  [[ -n "$pm2_real" ]] || return 1
+  daemon_js="$(dirname "$(dirname "$pm2_real")")/lib/Daemon.js"
+  [[ -f "$daemon_js" ]] || return 1
+  # Neutral cwd: the daemon inherits ours; a 0700 caller home would break
+  # every app spawn with EACCES on chdir.
+  ( cd / && runuser -u "$APP_USER" -- env \
+    PM2_HOME="$PM2_HOME_DIR" \
+    PATH="/usr/local/bin:/usr/bin:/bin" \
+    HOME="/opt/alo-hosting-portal" \
+    setsid "$NODE_BIN" "$daemon_js" </dev/null >>"$PM2_HOME_DIR/pm2.log" 2>&1 & )
+  for i in $(seq 1 20); do
+    pm2_as_app_user jlist >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  log_err "PM2 daemon did not become reachable at $PM2_HOME_DIR"
+  return 1
 }
 
 pm2_json() {
@@ -151,6 +178,7 @@ CONFIG
     chmod 0640 "$CONFIG_FILE"
     chown root:"$APP_GROUP" "$CONFIG_FILE"
 
+    ensure_pm2_daemon || die "up" "PM2 daemon is not reachable at $PM2_HOME_DIR"
     if [[ "$TYPE" == "static" ]]; then
       pm2_as_app_user start "$NODE_BIN" --name "$SERVICE_NAME" \
         -- "$STATIC_SERVER" --site "$SITE_DIR" --root "$CMD_OR_ROOT" --port "$PORT" >/dev/null \
@@ -177,6 +205,7 @@ CONFIG
     DOMAIN="${1:?Usage: restart <domain>}"
     validate_domain "$DOMAIN"
     SERVICE_NAME="alo-$DOMAIN"
+    ensure_pm2_daemon || die "restart" "PM2 daemon is not reachable at $PM2_HOME_DIR"
     if ! pm2_as_app_user restart "$SERVICE_NAME" --update-env >/dev/null 2>&1; then
       die "restart" "pm2 could not restart $SERVICE_NAME (not running?)"
     fi

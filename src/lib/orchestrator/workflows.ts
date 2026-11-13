@@ -144,21 +144,25 @@ export async function ensureBuiltinWorkflows(): Promise<void> {
   for (const builtin of BUILTIN_WORKFLOWS) {
     const definition = validateWorkflowDefinition(builtin.definition);
     const existing = await db.automationWorkflow.findUnique({ where: { key: builtin.key } });
+    if (!existing) {
+      // Plain create: Prisma implements upsert as an interactive transaction,
+      // and this runs on every engine tick — the transaction churn wedged the
+      // SQLite adapter under load. Steady-state ticks must not write at all.
+      await db.automationWorkflow.create({ data: { key: builtin.key, name: builtin.name, description: builtin.description, definition: json(definition), trigger: builtin.trigger, eventName: builtin.eventName ?? null, intervalSeconds: builtin.intervalSeconds ?? null, enabled: true, nextRunAt: builtin.trigger === "schedule" ? new Date() : null } }).catch((error) => {
+        // A concurrent tick may have created it first; that outcome is fine.
+        if ((error as { code?: string })?.code !== "P2002") throw error;
+      });
+      continue;
+    }
     // A platform-owned builtin (no administrator author) is refreshed when the
     // compiled-in definition changes, and the version bump records that the
     // definition moved. A workflow an administrator authored (createdById set)
     // is never overwritten.
     const refresh =
-      existing &&
-      existing.createdById === null &&
-      existing.definition !== json(definition)
+      existing.createdById === null && existing.definition !== json(definition)
         ? { definition: json(definition), version: { increment: 1 }, description: builtin.description }
-        : {};
-    await db.automationWorkflow.upsert({
-      where: { key: builtin.key },
-      create: { key: builtin.key, name: builtin.name, description: builtin.description, definition: json(definition), trigger: builtin.trigger, eventName: builtin.eventName ?? null, intervalSeconds: builtin.intervalSeconds ?? null, enabled: true, nextRunAt: builtin.trigger === "schedule" ? new Date() : null },
-      update: refresh,
-    });
+        : null;
+    if (refresh) await db.automationWorkflow.update({ where: { key: builtin.key }, data: refresh });
   }
 }
 
@@ -254,7 +258,11 @@ export async function advanceRun(runId: string, orch: Orchestrator): Promise<voi
     const def = definition.steps.find((s) => s.key === step.key)!;
     const deps = run.steps.filter((s) => def.dependsOn.includes(s.key));
     if (deps.some((d) => ["FAILED", "CANCELLED", "WAITING_EXTERNAL"].includes(d.status))) { await db.automationStep.update({ where: { id: step.id }, data: { status: "SKIPPED", error: "Dependency did not complete" } }); changed = true; continue; }
-    if (deps.some((d) => d.status !== "SUCCEEDED")) continue;
+    // A SKIPPED dependency is a terminal, deterministic outcome (its `when`
+    // condition was not met), not an unfinished one — join steps that depend
+    // on alternative branches (e.g. self-heal's restart|rollback|restart-static)
+    // must advance once the taken branch finished, or the run can never end.
+    if (deps.some((d) => d.status !== "SUCCEEDED" && d.status !== "SKIPPED")) continue;
     const stored = parse<{ input: Record<string, unknown>; when: z.infer<typeof conditionSchema> | null; lockKey: string | null; executionActor: "requester" | "platform"; requiresApproval: boolean | null; maxAttempts: number | null; timeoutMs: number | null }>(step.inputTemplate, { input: {}, when: null, lockKey: null, executionActor: "requester", requiresApproval: null, maxAttempts: null, timeoutMs: null });
     if (!conditionPasses(stored.when, scope)) { await db.automationStep.update({ where: { id: step.id }, data: { status: "SKIPPED", finishedAt: new Date() } }); changed = true; continue; }
     const input = renderDeep(stored.input, scope) as Record<string, unknown>;

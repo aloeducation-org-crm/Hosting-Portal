@@ -40,6 +40,12 @@ const OVERRIDES = {
   DEPLOY_EDGE_HTTPS_PORT: "8443",
   ALO_EDGE_HTTP_PORT: "8080",
   ALO_EDGE_HTTPS_PORT: "8443",
+  // The acceptance sandbox intercepts TLS with a proxy CA that Node's bundled
+  // store does not know; without this the panel cannot reach api.github.com.
+  NODE_EXTRA_CA_CERTS: "/etc/ssl/certs/ca-certificates.crt",
+  // Placeholder is enough in this sandbox: the egress proxy authenticates
+  // GitHub API calls itself. On a real host set a real token.
+  GITHUB_TOKEN: "sandbox-proxy-managed",
 };
 
 const RANDOM_SECRETS = ["NEXTAUTH_SECRET", "JWT_SECRET", "APP_ENCRYPTION_KEY", "INTERNAL_SECRET", "CSRF_SECRET", "CRON_SECRET"];

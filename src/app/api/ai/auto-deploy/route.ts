@@ -472,6 +472,24 @@ export async function POST(request: NextRequest) {
               autoDeploy: parsed.autoDeployOnPush,
               requiresApproval: false,
               config: JSON.stringify(validatedConfig),
+              // The operator explicitly chose the framework, runtime and start
+              // command in this request — that IS the confirmed detection. Store
+              // it so the lifecycle's detect step uses the operator's decision
+              // instead of re-detecting from the raw manifests (a generic Node
+              // repo without a lockfile is ambiguous by design).
+              detection: JSON.stringify({
+                workloadCategory: parsed.workloadCategory,
+                language: "javascript",
+                framework: parsed.framework,
+                runtime: parsed.runtime,
+                confidence: "high",
+                installCmd: validatedConfig.installCmd,
+                buildCmd: validatedConfig.buildCmd,
+                startCmd: validatedConfig.startCmd,
+                outputDir: validatedConfig.outputDir,
+                ambiguous: false,
+                warnings: [],
+              }),
               detectionStatus: "confirmed",
               healthPath: validatedConfig.healthPath,
               serviceManager: validatedConfig.serviceManager,

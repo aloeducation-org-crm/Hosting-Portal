@@ -177,6 +177,54 @@ MARKER
     echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RESOLVED\",\"deploymentId\":\"$DEPLOYMENT_ID\",\"commitSha\":\"$COMMIT_SHA\",\"markerPath\":\"$MARKER_FILE\",\"markedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
     ;;
 
+  manifest)
+    # Bounded, read-only manifest of the ACTIVE release: {relative path:
+    # contents} for text files. The control plane's security scan runs where
+    # the release is not locally present (remote-node deployments), so the
+    # node ships a capped manifest instead. Skips dependency/build dirs,
+    # binaries and oversized files; hard limits keep the payload small.
+    DOMAIN="${1:?Usage: manifest <domain>}"
+    validate_domain "$DOMAIN"
+    CURRENT="$SITE_BASE/$DOMAIN/current"
+    if [[ ! -e "$CURRENT" ]]; then
+      die "manifest" "No current release for $DOMAIN"
+    fi
+    ROOT_DIR=$(readlink -f "$CURRENT")
+    if [[ ! -d "$ROOT_DIR" ]]; then
+      die "manifest" "Current release for $DOMAIN is not a directory"
+    fi
+
+    MAX_FILES=400
+    MAX_FILE_BYTES=262144
+    MAX_TOTAL_BYTES=8388608
+    SKIP_PATTERN='node_modules|/\.git|\.next|/dist|/build|/coverage|/\.turbo|__pycache__'
+
+    FILES_JSON="{}"
+    SCANNED=0
+    TOTAL=0
+    TRUNCATED=false
+    while IFS= read -r -d '' file; do
+      [[ "$SCANNED" -ge "$MAX_FILES" || "$TOTAL" -ge "$MAX_TOTAL_BYTES" ]] && { TRUNCATED=true; break; }
+      REL_PATH="${file#"$ROOT_DIR"/}"
+      SIZE=$(stat -c %s "$file" 2>/dev/null || echo 0)
+      if [[ "$SIZE" -gt "$MAX_FILE_BYTES" ]]; then
+        continue
+      fi
+      # Skip binaries: a NUL byte in the first kilobyte means it is not text.
+      # (The pattern is passed as\\x00 because a literal NUL cannot appear in
+      # an argv string.)
+      if head -c 1024 "$file" | grep -qP '\\x00' 2>/dev/null; then
+        continue
+      fi
+      ENTRY=$(jq -cn --arg k "$REL_PATH" --rawfile v "$file" '{($k): $v}')
+      FILES_JSON=$(jq -cn --argjson obj "$FILES_JSON" --argjson add "$ENTRY" '$obj + $add')
+      SCANNED=$((SCANNED + 1))
+      TOTAL=$((TOTAL + SIZE))
+    done < <(find "$ROOT_DIR" -type f -regextype posix-extended -not -regex ".*($SKIP_PATTERN).*" -print0 2>/dev/null | sort -z)
+
+    json_out "{\"success\":true,\"step\":\"manifest\",\"domain\":\"$DOMAIN\",\"root\":\"$ROOT_DIR\",\"scanned\":$SCANNED,\"totalBytes\":$TOTAL,\"truncated\":$TRUNCATED,\"files\":$FILES_JSON}"
+    ;;
+
   read-marker)
     DOMAIN="${1:?Usage: read-marker <domain>}"
     validate_domain "$DOMAIN"

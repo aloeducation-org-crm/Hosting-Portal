@@ -31,10 +31,12 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypt
 import { execFile } from "node:child_process";
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 
-export const AGENT_VERSION = "1.3.0";
+export const AGENT_VERSION = "1.3.4";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -269,6 +271,13 @@ export const AGENT_ALLOWLIST = {
     argv: (a) => ["read-marker", String(a.domain)],
     risk: "READ_ONLY",
     timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "deploy.manifest": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["manifest", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 60_000,
     validate: (a) => validDomain(a.domain),
   },
   "deploy.switch": {
@@ -682,6 +691,57 @@ function round(n) {
 }
 
 /**
+ * Raw HTTP probe for requests fetch() cannot express. undici treats Host as a
+ * forbidden header name and silently drops it, which defeats probing a
+ * name-based reverse proxy (the edge routes by Host); node:http honours an
+ * explicit host header. Resolves with a fetch-like { status, text } response;
+ * a 3xx answer rejects, matching fetch(..., { redirect: "error" }).
+ */
+function probeWithHttpClient(rawUrl, headers, signal) {
+  return new Promise((resolve, reject) => {
+    let target;
+    try {
+      target = new URL(rawUrl);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      reject(new Error(`unsupported probe protocol: ${target.protocol}`));
+      return;
+    }
+    const client = target.protocol === "https:" ? https : http;
+    const req = client.request(
+      {
+        hostname: target.hostname,
+        port: target.port || (target.protocol === "https:" ? 443 : 80),
+        path: target.pathname + target.search,
+        method: "GET",
+        headers,
+        signal,
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          res.resume();
+          reject(new Error(`probe was redirected (HTTP ${status})`));
+          return;
+        }
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          resolve({ status, url: rawUrl, redirected: false, text: async () => body });
+        });
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
  * Static hardware/OS inventory, read from the OS itself — never from a value
  * the panel supplied. Sent with every heartbeat and returned by the
  * `system.inventory` task.
@@ -704,7 +764,13 @@ export function run(executable, args, timeoutMs, useSudo = false) {
   return new Promise((resolve, reject) => {
     const cmd = useSudo ? "sudo" : executable;
     const argv = useSudo ? ["-n", executable, ...args] : args;
-    const child = execFile(cmd, argv, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C" } }, (error, stdout, stderr) => {
+    // The installer puts the platform helpers in /usr/local/sbin, but the
+    // agent inherits whatever PATH its launching shell had — which may not
+    // include sbin directories (e.g. when started from a user session).
+    // Resolve helpers through the standard system paths first so binary
+    // lookup does not depend on the caller's environment.
+    const stablePath = ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", process.env.PATH].filter(Boolean).join(":");
+    const child = execFile(cmd, argv, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: { PATH: stablePath, HOME: process.env.HOME, LANG: "C" } }, (error, stdout, stderr) => {
       resolve({ code: error && typeof error.code === "number" ? error.code : error ? 1 : 0, stdout: stdout ?? "", stderr: stderr ?? "", error: error ? String(error.message).slice(0, 300) : null });
     });
     child.on("error", (e) => reject(e));
@@ -777,9 +843,16 @@ export async function executeTask(task, secrets = []) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), entry.timeoutMs);
       try {
+        // fetch() (undici) silently strips the Host header — it is a forbidden
+        // header name there — which defeats the whole point of probing a
+        // name-based reverse proxy with a custom Host. node:http honours an
+        // explicit host header, so probes with one go through the raw client.
         const headers = {};
         if (args.host) headers.host = String(args.host);
-        const res = await fetch(url, { signal: controller.signal, redirect: "error", headers });
+        const res = args.host
+          ? await probeWithHttpClient(url, headers, controller.signal)
+          : await fetch(url, { signal: controller.signal, redirect: "error" });
+        if (res.redirected) throw new Error(`probe redirected to ${res.url}`);
         const body = (await res.text()).slice(0, 2000);
         return {
           status: "SUCCEEDED",
@@ -822,6 +895,39 @@ export async function executeTask(task, secrets = []) {
       } catch {
         parsedData = undefined;
       }
+    } else {
+      // Helper contract: the result is the LAST JSON object printed on
+      // stdout. Some helpers legitimately emit progress first (git prints
+      // "Cloning into ..." during deploy.clone), so whole-output parsing is
+      // not enough — scan back for the final balanced JSON object.
+      const lines = trimmedOut.split("\n");
+      let start = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim().startsWith("{")) { start = i; break; }
+      }
+      if (start >= 0) {
+        const candidate = lines.slice(start).join("\n");
+        try {
+          const value = JSON.parse(sanitize(candidate, secrets));
+          if (value && typeof value === "object" && !Array.isArray(value)) parsedData = value;
+        } catch {
+          parsedData = undefined;
+        }
+      }
+    }
+    // A failed helper reports through its stdout JSON contract (stderr is
+    // usually empty), while execFile's error message only carries the argv —
+    // "Command failed: sudo -n alo-deploy-helper rollback …" with no reason.
+    // Surface the helper's own diagnostic so failures are diagnosable
+    // upstream instead of every rejection looking identical.
+    let errorText;
+    if (succeeded) {
+      errorText = out.error ? sanitize(out.error, secrets) : undefined;
+    } else {
+      const parsedReason = parsedData && typeof parsedData.error === "string" && parsedData.error.trim() ? parsedData.error.trim() : "";
+      const fallbackReason = (out.stderr || "").trim() || trimmedOut || (out.error ? String(out.error).split("\n")[0] : "");
+      const reason = parsedReason || fallbackReason;
+      errorText = sanitize(`exit code ${out.code}${reason ? `: ${reason.slice(0, 500)}` : ""}`, secrets);
     }
     return {
       status: succeeded ? "SUCCEEDED" : "FAILED",
@@ -833,7 +939,7 @@ export async function executeTask(task, secrets = []) {
         ...(parsedData !== undefined ? { data: parsedData } : {}),
       },
       logs: sanitize(`${out.stdout || ""}\n${out.stderr || ""}`.trim(), secrets),
-      error: out.error ? sanitize(out.error, secrets) : succeeded ? undefined : sanitize((out.stderr || "").slice(0, 500), secrets) || `exit code ${out.code}`,
+      error: errorText,
       durationMs: Date.now() - started,
     };
   } catch (error) {

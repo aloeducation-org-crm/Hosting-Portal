@@ -322,10 +322,22 @@ export async function verifyRemoteRelease(
   agentId: string,
   domain: string,
   config: Pick<DeployConfig, "port" | "healthPath">,
-  expectedSha: string,
-  expectedDeploymentId: string,
+  /**
+   * Commit identity (or accepted set of identities) the serving release
+   * marker must carry. A set is used on the rollback path, where the restored
+   * release may be any release this platform has historically verified.
+   */
+  expectedSha: string | string[],
+  /**
+   * Deployment identity the marker must carry. Null on the rollback path: a
+   * restored release directory keeps the marker written by the deployment
+   * that BUILT it, which is by definition not the newest deployment row —
+   * pinning there would fail every legitimate rollback.
+   */
+  expectedDeploymentId: string | null,
   authorization: AgentAuthorization,
 ): Promise<RemoteVerifyResult> {
+  const acceptedShas = Array.isArray(expectedSha) ? expectedSha : [expectedSha];
   let lastStatus: number | null = null;
   let lastReason = "health endpoint never returned 2xx";
   for (let i = 1; i <= REMOTE_VERIFY_ATTEMPTS; i++) {
@@ -344,10 +356,14 @@ export async function verifyRemoteRelease(
       if (httpStatus >= 200 && httpStatus < 400) {
         const markerTask = await runAgent(ctx, agentId, "deploy.read-marker", { domain }, authorization, 30_000);
         const marker = markerTask.data as { deploymentId?: string; commitSha?: string };
-        if (marker?.commitSha === expectedSha && marker?.deploymentId === expectedDeploymentId) {
+        if (
+          marker?.commitSha &&
+          acceptedShas.includes(marker.commitSha) &&
+          (expectedDeploymentId === null || marker?.deploymentId === expectedDeploymentId)
+        ) {
           return { ok: true, httpStatus, marker, reason: "verified", attempts: i };
         }
-        lastReason = `release marker mismatch (live=${marker?.commitSha ?? "none"} expected=${expectedSha})`;
+        lastReason = `release marker mismatch (live=${marker?.commitSha ?? "none"} expected=${acceptedShas.join("|")})`;
       } else {
         lastReason = `health endpoint returned HTTP ${httpStatus}`;
       }

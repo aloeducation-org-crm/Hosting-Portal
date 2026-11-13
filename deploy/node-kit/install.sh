@@ -74,14 +74,21 @@ mkdir -p "$SITES_BASE" "$ETC_BASE/apps" "$ETC_BASE/edge/sites" "$ETC_BASE/tls" "
 chown root:root "$SITES_BASE" && chmod 0755 "$SITES_BASE"
 chown root:root "$ETC_BASE" && chmod 0755 "$ETC_BASE"
 chown root:"$APP_USER" "$ETC_BASE/apps" "$ETC_BASE/edge" "$ETC_BASE/edge/sites" "$ETC_BASE/tls" "$LOG_DIR"
-chmod 0750 "$ETC_BASE/apps" "$ETC_BASE/edge" "$ETC_BASE/edge/sites" "$ETC_BASE/tls" "$LOG_DIR"
+# edge/sites and tls hold routing fragments and public certificates — served
+# data, not secrets — so they stay world-traversable for the unprivileged
+# agent's read-only verification. Private keys inside are 0600 root-only.
+chmod 0750 "$ETC_BASE/apps" "$LOG_DIR"
+chmod 0755 "$ETC_BASE/edge" "$ETC_BASE/edge/sites" "$ETC_BASE/tls"
 # Port-discovery file the edge rewrites (root:alo-panel 0640 so the
 # unprivileged edge can update contents but not the file itself).
 if [ ! -f "$ETC_BASE/edge/state.json" ]; then
   printf '{\n  "httpPort": %s,\n  "httpsPort": %s,\n  "updatedAt": "pre-created by installer"\n}\n' "$EDGE_HTTP_PORT" "$EDGE_HTTPS_PORT" > "$ETC_BASE/edge/state.json"
 fi
 chown root:"$APP_USER" "$ETC_BASE/edge/state.json"
-chmod 0640 "$ETC_BASE/edge/state.json"
+# The edge's listening ports are public information (they are why clients can
+# connect at all); the unprivileged agent reads this file to verify the
+# listener, and the edge (group APP_USER) rewrites it with its live PID/ports.
+chmod 0664 "$ETC_BASE/edge/state.json"
 chown -R "$APP_USER:$APP_USER" "$PM2_HOME_DIR"
 chmod 0750 "$PM2_HOME_DIR"
 
@@ -110,7 +117,7 @@ if ! command -v pm2 >/dev/null; then
   npm install -g --silent pm2 || fail "npm install -g pm2 failed"
   log "installed PM2 globally"
 else
-  log "PM2 already installed ($(pm2 --version))"
+  log "PM2 already installed ($(PM2_HOME="$PM2_HOME_DIR" pm2 --version))"
 fi
 
 # The edge binds 80/443 as the unprivileged alo-panel user. The standard,
@@ -133,6 +140,32 @@ run_pm2() {
 }
 
 # ── start edge + daemon ─────────────────────────────────────────────────────
+# The pm2 CLI normally spawns its own daemon, but hardened/container hosts can
+# reject that spawn (EACCES) while the daemon itself runs fine when started
+# directly. Start God Daemon ourselves and wait for it, then talk to it.
+ensure_edge_daemon() {
+  run_pm2 jlist >/dev/null 2>&1 && return 0
+  local pm2_real daemon_js i
+  pm2_real="$(readlink -f "$(command -v pm2)" 2>/dev/null || echo "")"
+  [[ -n "$pm2_real" ]] || return 1
+  daemon_js="$(dirname "$(dirname "$pm2_real")")/lib/Daemon.js"
+  [[ -f "$daemon_js" ]] || return 1
+  # Neutral cwd: the daemon inherits ours, and a caller's 0700 home would
+  # make every later app spawn fail with EACCES on chdir.
+  ( cd / && runuser -u "$APP_USER" -- env \
+    PM2_HOME="$PM2_HOME_DIR" \
+    PATH="/usr/local/bin:/usr/bin:/bin" \
+    HOME="$APP_HOME" \
+    setsid node "$daemon_js" </dev/null >>"$PM2_HOME_DIR/pm2.log" 2>&1 & )
+  for i in $(seq 1 20); do
+    run_pm2 jlist >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  return 1
+}
+ensure_edge_daemon || fail "PM2 daemon did not become reachable"
+log "PM2 daemon reachable"
+
 if ! run_pm2 jlist 2>/dev/null | grep -q '"alo-edge"'; then
   runuser -u "$APP_USER" -- env \
     PM2_HOME="$PM2_HOME_DIR" \
@@ -143,7 +176,7 @@ if ! run_pm2 jlist 2>/dev/null | grep -q '"alo-edge"'; then
     ALO_EDGE_BIND="${ALO_EDGE_BIND:-0.0.0.0}" \
     ALO_EDGE_SITES_DIR="${ALO_EDGE_SITES_DIR:-$ETC_BASE/edge/sites}" \
     ALO_EDGE_TLS_BASE="${ALO_EDGE_TLS_BASE:-$ETC_BASE/tls}" \
-    pm2 start /usr/local/bin/alo-edge.mjs --name alo-edge >/dev/null || fail "failed to start alo-edge"
+    pm2 start /usr/local/bin/alo-edge.mjs --name alo-edge --cwd / >/dev/null || fail "failed to start alo-edge"
   run_pm2 save >/dev/null 2>&1 || true
   log "started alo-edge under PM2 (http :$EDGE_HTTP_PORT, https :$EDGE_HTTPS_PORT)"
 else

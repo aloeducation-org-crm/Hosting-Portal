@@ -415,6 +415,19 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     scopes: ["server:read"],
   },
   {
+    command: "deploy.manifest",
+    label: "Read the active release manifest",
+    description:
+      "Returns a bounded manifest of /srv/alo-sites/<domain>/current — relative paths and contents of text files (dependency/build dirs, binaries and oversized files skipped; hard file/byte caps). Used by the control plane's security scan for remote-node deployments. Read-only.",
+    executable: "alo-deploy-helper",
+    argv: (a) => ["manifest", String(a.domain)],
+    argsSchema: recordOf({ domain: domainName }),
+    risk: "READ_ONLY",
+    timeoutMs: 60_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
     command: "deploy.switch",
     label: "Switch active site release",
     description:

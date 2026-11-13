@@ -133,6 +133,38 @@ describe("workflow administration", () => {
     expect(stored.verified).toBe(false);
   });
 
+  it("advances a join step whose alternative branches were skipped (self-heal shape)", async () => {
+    const actor = await adminActor();
+    // Same shape as the builtin self-heal workflow: diagnose, three mutually
+    // exclusive recovery branches gated by `when`, and a verify join that
+    // depends on all of them. Regression: a SKIPPED dependency used to count
+    // as unsatisfied, so the join could never run and the run never ended.
+    const definition = {
+      version: 1,
+      steps: [
+        { key: "diagnose", label: "Diagnose", handler: "PLATFORM_OPS", input: { action: "node-health" } },
+        { key: "restart", label: "Restart", handler: "PLATFORM_OPS", dependsOn: ["diagnose"], when: { path: "input.recovery", operator: "equals", value: "restart" }, input: { action: "node-health" } },
+        { key: "rollback", label: "Rollback", handler: "PLATFORM_OPS", dependsOn: ["diagnose"], when: { path: "input.recovery", operator: "equals", value: "rollback" }, input: { action: "node-health" } },
+        { key: "restart-static", label: "Restart static", handler: "PLATFORM_OPS", dependsOn: ["diagnose"], when: { path: "input.recovery", operator: "equals", value: "restart-static" }, input: { action: "node-health" } },
+        { key: "verify", label: "Verify", handler: "PLATFORM_OPS", dependsOn: ["restart", "rollback", "restart-static"], input: { action: "node-health" } },
+      ],
+    };
+    const workflow = await createWorkflow({ key: "center-join", name: "Join", definition }, actor);
+    const run = await startWorkflow({ workflowId: workflow.id, input: { recovery: "rollback" }, actor, trigger: "manual" });
+    // diagnose, then the taken branch, then the join step.
+    for (let i = 0; i < 3; i++) await orchestrator.runNext(`center-join-${i}`, { kinds: ["PLATFORM_OPS"], lockKey: `workflow:${run.id}` });
+    const completed = await db.automationRun.findUniqueOrThrow({ where: { id: run.id }, include: { steps: { orderBy: { ordinal: "asc" } } } });
+    expect(completed.status).toBe("SUCCEEDED");
+    expect(completed.verified).toBe(true);
+    expect(Object.fromEntries(completed.steps.map((s) => [s.key, s.status]))).toMatchObject({
+      diagnose: "SUCCEEDED",
+      restart: "SKIPPED",
+      rollback: "SUCCEEDED",
+      "restart-static": "SKIPPED",
+      verify: "SUCCEEDED",
+    });
+  });
+
   it("cancels pending work through the admin API and records an audit", async () => {
     const actor = await adminActor();
     const workflow = await createWorkflow({ key: "center-cancel", name: "Cancel", definition: healthyDefinition }, actor);

@@ -35,6 +35,7 @@ import { validateDeployConfig } from "@/lib/deploy/config";
 import { readMarker, currentReleaseDir } from "@/lib/deploy/service";
 import { defineWorker, fail, ok, unverified, WorkerError, type JobFinding, type WorkerDefinition, type Scope } from "./contracts";
 import { findAllowlistEntry } from "@/lib/agents/allowlist";
+import { agentOnline } from "@/lib/agents/agent";
 
 const execFileAsync = promisify(execFile);
 
@@ -503,14 +504,43 @@ registerWorker(
         await ctx.progress(30, `scanning ${Object.keys(input.files).length} supplied manifest(s)`);
         for (const [name, content] of Object.entries(input.files)) inspect(name, content);
       } else {
-        const root = await resolveScanRoot(input);
-        await ctx.progress(20, `scanning ${root}`);
-        for await (const rel of walk(root, 400)) {
-          const filePath = path.join(/*turbopackIgnore: true*/ root, rel);
-          const content = await fs.readFile(/*turbopackIgnore: true*/ filePath, "utf8").catch(() => null);
-          if (content === null) continue;
-          inspect(rel, content);
-          if (scanned >= 400) break;
+        // Remote-node deployments keep their release on the node, not on the
+        // control plane — there is no local tree to walk. When the project is
+        // assigned to an online agent, the node ships a bounded manifest of
+        // its active release (deploy.manifest) and the same scan runs over
+        // that. A node without a readable release is a real blocker, reported
+        // as such.
+        let remoteFiles: Record<string, string> | null = null;
+        let remoteRoot: string | null = null;
+        const localRoot = input.projectId ? await currentReleaseDir(input.projectId).catch(() => null) : null;
+        if (!localRoot && input.projectId) {
+          const project = await db.gitProject.findUnique({ where: { id: input.projectId }, select: { agentId: true, websiteId: true } });
+          const website = project?.websiteId ? await db.website.findUnique({ where: { id: project.websiteId }, select: { domain: true } }) : null;
+          if (project?.agentId && website?.domain) {
+            const agent = await db.serverAgent.findUnique({ where: { id: project.agentId } });
+            if (agent && agentOnline(agent)) {
+              const { runAgent } = await import("./platform-workers");
+              await ctx.progress(15, `fetching release manifest from node ${agent.name}`);
+              const manifest = await runAgent(ctx, project.agentId, "deploy.manifest", { domain: website.domain }, "job", 90_000);
+              const data = manifest.data as { files?: Record<string, string>; root?: string; truncated?: boolean };
+              remoteFiles = data.files ?? {};
+              remoteRoot = data.root ?? null;
+            }
+          }
+        }
+        if (remoteFiles) {
+          await ctx.progress(30, `scanning ${Object.keys(remoteFiles).length} file(s) from node release ${remoteRoot ?? ""}`);
+          for (const [name, content] of Object.entries(remoteFiles)) inspect(name, content);
+        } else {
+          const root = await resolveScanRoot(input);
+          await ctx.progress(20, `scanning ${root}`);
+          for await (const rel of walk(root, 400)) {
+            const filePath = path.join(/*turbopackIgnore: true*/ root, rel);
+            const content = await fs.readFile(/*turbopackIgnore: true*/ filePath, "utf8").catch(() => null);
+            if (content === null) continue;
+            inspect(rel, content);
+            if (scanned >= 400) break;
+          }
         }
       }
 
@@ -896,7 +926,9 @@ registerWorker(
     execution: "EXTERNAL",
     maxRisk: "PRIVILEGED",
     requiredScopes: ["domain:read", "domain:write"],
-    retrySafe: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls"].includes(input.action),
+    // issue/renew are idempotent in the ssl helper (unexpired existing certs
+    // are returned as success), so a retried workflow cannot double-issue.
+    retrySafe: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls", "issue-certificate", "renew"].includes(input.action),
     riskForInput: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls"].includes(input.action) ? "READ_ONLY" : "PRIVILEGED",
     scopesForInput: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls"].includes(input.action) ? ["domain:read"] : ["domain:read", "domain:write"],
     defaultMaxAttempts: 2,
@@ -959,7 +991,7 @@ registerWorker(
         return ok({ domain: input.domain, ...cert }, "Live TLS certificate observed and validated", { evidence: `notAfter=${cert.notAfter.toISOString()}` });
       }
       // issue-certificate | renew through an enrolled ACME agent.
-      const agentId = input.agentId ?? process.env.AUTOMATION_DEFAULT_AGENT_ID;
+      const agentId = input.agentId || process.env.AUTOMATION_DEFAULT_AGENT_ID;
       if (!agentId) throw new WorkerError("NOT_CONFIGURED", "Certificate issuance/renewal requires an enrolled server agent (agentId or AUTOMATION_DEFAULT_AGENT_ID). No certificate was issued.", false);
       if (!domain) throw new WorkerError("NOT_FOUND", "Domain is not attached to a project", false);
       if (!domain.dnsVerified) throw new WorkerError("WAITING_EXTERNAL", "DNS ownership must be verified before certificate issuance", false);
@@ -1041,15 +1073,47 @@ registerWorker(
           // verify health + release identity through the agent. app.restart is
           // one of the preapproved recovery verbs.
           await runAgent(ctx, remoteProject.agentId, "app.restart", { domain: website.domain }, "policy:self-heal", 60_000);
-          const latest = await db.deployment.findFirst({ where: { projectId: input.projectId, status: "SUCCESS", verifiedCommitSha: { not: null } }, orderBy: { createdAt: "desc" } });
-          if (latest?.verifiedCommitSha) {
+          // A restored release directory keeps the marker written by the
+          // deployment that BUILT it — by definition not the newest deployment
+          // row — so verify against the commit identities this platform has
+          // actually verified for the project, without pinning the deployment.
+          const verifiedRows = await db.deployment.findMany({
+            where: { projectId: input.projectId, status: "SUCCESS", verifiedCommitSha: { not: null } },
+            select: { verifiedCommitSha: true },
+            orderBy: { createdAt: "desc" },
+            take: 20,
+          });
+          const acceptedShas = [...new Set(verifiedRows.map((row) => row.verifiedCommitSha).filter((sha): sha is string => Boolean(sha)))];
+          if (acceptedShas.length > 0) {
             const { verifyRemoteRelease } = await import("@/lib/deploy/remote");
-            const verified = await verifyRemoteRelease(ctx, remoteProject.agentId, website.domain, { port: config.port, healthPath: config.healthPath }, latest.verifiedCommitSha, latest.id, "job");
+            const verified = await verifyRemoteRelease(ctx, remoteProject.agentId, website.domain, { port: config.port, healthPath: config.healthPath }, acceptedShas, null, "job");
             if (!verified.ok) {
               return fail("ROLLBACK_UNVERIFIED", `Rollback to ${afterRelease} did not pass verification (${verified.reason})`, { data: { projectId: input.projectId, beforeRelease, afterRelease } });
             }
+            // Record the rollback as the project's newest verified state —
+            // the local engine does the same — so future health checks
+            // compare against the restored release instead of the deployment
+            // that was rolled away from.
+            const rollbackDeployment = await db.deployment.create({
+              data: {
+                websiteId: website.id,
+                projectId: input.projectId,
+                trigger: "rollback",
+                source: "rollback",
+                status: "SUCCESS",
+                stage: "done",
+                startedAt: new Date(),
+                finishedAt: new Date(),
+                commitHash: verified.marker?.commitSha ?? null,
+                verifiedCommitSha: verified.marker?.commitSha ?? null,
+              },
+            });
+            // The executedByAgentId column is read/written with raw SQL
+            // because the generated client predates the column (see
+            // prepareDeployment for the same convention).
+            await db.$executeRawUnsafe("UPDATE deployments SET executedByAgentId = ? WHERE id = ?", remoteProject.agentId, rollbackDeployment.id).catch(() => {});
             await db.website.update({ where: { id: website.id }, data: { currentReleasePath: afterRelease, healthStatus: "HEALTHY" } });
-            return ok({ projectId: input.projectId, before: beforeRelease, after: afterRelease, commitSha: verified.marker?.commitSha, checkedVia: "node-agent" }, `Rolled back to ${afterRelease} on the node and re-verified the live release`, { evidence: `rollbackTaskId=${rollback.taskId}; commit=${verified.marker?.commitSha ?? "n/a"}` });
+            return ok({ projectId: input.projectId, before: beforeRelease, after: afterRelease, commitSha: verified.marker?.commitSha, rollbackDeploymentId: rollbackDeployment.id, checkedVia: "node-agent" }, `Rolled back to ${afterRelease} on the node and re-verified the live release`, { evidence: `rollbackTaskId=${rollback.taskId}; commit=${verified.marker?.commitSha ?? "n/a"}` });
           }
           return ok({ projectId: input.projectId, before: beforeRelease, after: afterRelease, verifiedIdentity: false }, `Rolled back to ${afterRelease}; no stored verified release identity to compare against`, { evidence: `rollbackTaskId=${rollback.taskId}` });
         }
