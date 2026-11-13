@@ -169,10 +169,26 @@ try {
   const { createClient } = await import("@libsql/client");
   const schema = read("prisma/schema.prisma");
   const models = [...schema.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)].map((m) => ({ name: m[1], body: m[2] }));
+  const modelNames = new Set(models.map((m) => m.name));
   const tables = models.map((m) => m.body.match(/@@map\("([^"]+)"\)/)?.[1] ?? m.name);
   const client = createClient({ url: `file:${abs("db/custom.db")}` });
   const present = new Set((await client.execute("SELECT name FROM sqlite_master WHERE type='table'")).rows.map((r) => String(r.name)));
   check(`all ${tables.length} Prisma tables exist in db/custom.db`, tables.every((t) => present.has(t)), tables.filter((t) => !present.has(t)).join(", "));
+  const missingColumns = [];
+  for (const m of models) {
+    const table = m.body.match(/@@map\("([^"]+)"\)/)?.[1] ?? m.name;
+    if (!present.has(table)) continue;
+    const cols = new Set((await client.execute(`PRAGMA table_info("${table.replace(/"/g, '""')}")`)).rows.map((r) => String(r.name)));
+    for (const rawLine of m.body.split("\n")) {
+      const line = rawLine.replace(/\/\/.*$/, "").trim();
+      if (!line || line.startsWith("@") || line.includes("@relation")) continue;
+      const parts = line.split(/\s+/);
+      if (parts.length < 2 || parts[1].endsWith("[]") || modelNames.has(parts[1].replace(/[?\[\]]/g, ""))) continue;
+      const col = line.match(/@map\("([^"]+)"\)/)?.[1] ?? parts[0];
+      if (!cols.has(col)) missingColumns.push(`${table}.${col}`);
+    }
+  }
+  check("all Prisma scalar columns exist in db/custom.db", missingColumns.length === 0, missingColumns.join(", "));
   const integrity = await client.execute("PRAGMA integrity_check");
   check("SQLite integrity_check is ok", integrity.rows[0]?.integrity_check === "ok");
   client.close();

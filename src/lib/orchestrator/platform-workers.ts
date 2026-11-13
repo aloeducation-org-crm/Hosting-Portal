@@ -259,23 +259,17 @@ async function prepareDeployment(input: PlatformInput, ctx: WorkerContext) {
 
   // Reuse only a deployment that executed on the node the project is assigned
   // to right now (null = local engine). A project reassigned to another node
-  // gets a fresh deployment instead of inheriting the old node's verified
-  // state. The executedByAgentId column is read/written with raw SQL because
-  // the generated client in this environment predates the column; the schema
-  // (prisma/schema.prisma) is its source of truth and a regenerated client
-  // exposes it as a normal field.
+  // gets a fresh deployment instead of inheriting the old node's verified state.
   const candidates = await db.deployment.findMany({ where: { projectId: project.id, commitHash: input.commitSha, status: { in: ["PENDING", "RUNNING", "SUCCESS"] } }, orderBy: { createdAt: "desc" }, take: 10 });
   let existing: typeof candidates[number] | null = null;
   for (const candidate of candidates) {
-    const rows = await db.$queryRawUnsafe<{ executedByAgentId: string | null }[]>("SELECT executedByAgentId FROM deployments WHERE id = ?", candidate.id);
-    const executedBy = rows[0]?.executedByAgentId ?? null;
+    const executedBy = candidate.executedByAgentId ?? null;
     // Executed on this node -> reusable. Never executed anywhere (PENDING,
     // unassigned) -> safe to adopt for whichever node is assigned now.
     if ((executedBy ?? null) === (agentId ?? null) || (candidate.status === "PENDING" && executedBy === null)) { existing = candidate; break; }
   }
   if (existing) return ok({ deploymentId: existing.id, projectId: project.id, websiteId: website.id, port: config.port, publicIp, agentId, reused: true, scheduling }, `Reusing deployment ${existing.id} (${existing.status})`, { evidence: `deploymentId=${existing.id}` });
-  const deployment = await db.deployment.create({ data: { websiteId: website.id, projectId: project.id, status: "PENDING", stage: "queued", source: "git", trigger: "manual", commitHash: input.commitSha, branch: project.productionBranch, configSnapshot: JSON.stringify(config), actorId: ctx.actor?.id } });
-  if (agentId) await db.$executeRawUnsafe("UPDATE deployments SET executedByAgentId = ? WHERE id = ?", agentId, deployment.id).catch(() => {});
+  const deployment = await db.deployment.create({ data: { websiteId: website.id, projectId: project.id, status: "PENDING", stage: "queued", source: "git", trigger: "manual", commitHash: input.commitSha, branch: project.productionBranch, executedByAgentId: agentId ?? null, configSnapshot: JSON.stringify(config), actorId: ctx.actor?.id } });
   await db.deploymentLog.create({ data: { deploymentId: deployment.id, level: "INFO", message: `queued by central automation job ${ctx.jobId}${agentId ? ` on node agent ${agentId.slice(0, 8)}` : " on the local release engine"}` } });
   if (scheduling.length) await db.deploymentLog.create({ data: { deploymentId: deployment.id, level: "INFO", message: `node selection: ${scheduling.join("; ").slice(0, 900)}` } });
   await db.gitProject.update({ where: { id: project.id }, data: { config: JSON.stringify(config), lastCommitSha: input.commitSha, lastDeployStatus: "QUEUED" } });

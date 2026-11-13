@@ -278,9 +278,9 @@ const MANIFEST_NAMES = new Set([
   "Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yaml", "index.html",
   "artisan", "manage.py", ".nvmrc", ".node-version", ".python-version", "runtime.txt",
   ".env.example", ".env.sample", ".env.template", "nest-cli.json", "vite.config.ts", "vite.config.js",
-  "vite.config.mjs", "next.config.ts", "next.config.js", "next.config.mjs", "next.config.mjs",
+  "vite.config.mjs", "next.config.ts", "next.config.js", "next.config.mjs",
   "CMakeLists.txt", "CMakePresets.json", ".gitmodules",
-  "tsconfig.json", "Procfile", "app.yaml", "package.json", "README.md",
+  "tsconfig.json", "Procfile", "app.yaml", "README.md",
 ]);
 
 /**

@@ -93,4 +93,25 @@ describe("native CMake build planning", () => {
   it("returns null for projects without a root CMakeLists.txt", async () => {
     await expect(detectNativeBuildPlan(reader({ "package.json": "{}" }), "linux")).resolves.toBeNull();
   });
+
+  it("executes the registered NATIVE_BUILD_PLAN worker handler with OBS manifests", async () => {
+    const { getWorker } = await import("../src/lib/orchestrator/workers");
+    const worker = getWorker("NATIVE_BUILD_PLAN");
+    expect(worker).toBeDefined();
+    expect(worker?.maxRisk).toBe("READ_ONLY");
+    expect(worker?.requiredScopes).toEqual(["repo:read"]);
+
+    const parsed = worker!.inputSchema.parse({ files: obsFixture, platform: "linux" });
+    const result = await worker!.handler(parsed, {
+      jobId: "test-native-plan",
+      correlationId: "corr-native-plan",
+      signal: new AbortController().signal,
+      progress: async () => {},
+      onlineAgents: async () => [],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.verified).toBe(true);
+    expect(result.evidence).toContain("configurePreset=ubuntu");
+    expect(result.evidence).toContain("buildPreset=ubuntu-ci");
+  });
 });

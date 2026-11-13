@@ -49,6 +49,7 @@ export const DEPLOY_SETTINGS_OPERATOR_ROLES: readonly string[] = [
 export const RESERVED_SERVICE_NAMES: readonly string[] = [
   "alo-hosting-panel",
   "alo-automation-worker",
+  "alo-deploy-worker",
   "alo-server-hosting",
   "alo-port-8080-validator",
   ALO_SERVER_SPEC.controlPlane.pm2App, // "alo-hosting"

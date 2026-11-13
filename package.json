@@ -29,6 +29,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@hookform/resolvers": "^4",
     "@libsql/client": "^0.18.0",
+    "libsql": "0.5.29",
     "@prisma/adapter-libsql": "^6.19.3",
     "@prisma/client": "6.19.3",
     "@radix-ui/react-accordion": "^1",

@@ -46,11 +46,15 @@ const workers = new Map<string, WorkerDefinition<any, any>>();
  * Resolve the least-privileged GitHub token for a connection id.
  * Returns `token: null` (never throws) so callers can report an honest
  * "credential not configured" result instead of crashing the job.
+ * A deleted or revoked connection never falls back to the platform token
+ * (SEC-02: revoking a connection must immediately stop builds/discovery on it).
  */
 async function tokenForConnection(connectionId: string | null | undefined) {
   if (!connectionId) return resolveToken(null);
   const connection = await db.gitConnection.findUnique({ where: { id: connectionId } });
-  if (!connection) return resolveToken(null);
+  if (!connection || connection.status !== "active") {
+    return { mode: "none" as const, token: null, label: connection ? "revoked connection" : "missing connection" };
+  }
   return resolveToken({
     mode: connection.mode,
     installationId: connection.installationId,
@@ -1168,6 +1172,7 @@ registerWorker(
               data: {
                 websiteId: website.id,
                 projectId: input.projectId,
+                executedByAgentId: remoteProject.agentId,
                 trigger: "rollback",
                 source: "rollback",
                 status: "SUCCESS",
@@ -1178,10 +1183,6 @@ registerWorker(
                 verifiedCommitSha: verified.marker?.commitSha ?? null,
               },
             });
-            // The executedByAgentId column is read/written with raw SQL
-            // because the generated client predates the column (see
-            // prepareDeployment for the same convention).
-            await db.$executeRawUnsafe("UPDATE deployments SET executedByAgentId = ? WHERE id = ?", remoteProject.agentId, rollbackDeployment.id).catch(() => {});
             await db.website.update({ where: { id: website.id }, data: { currentReleasePath: afterRelease, healthStatus: "HEALTHY" } });
             return ok({ projectId: input.projectId, before: beforeRelease, after: afterRelease, commitSha: verified.marker?.commitSha, rollbackDeploymentId: rollbackDeployment.id, checkedVia: "node-agent" }, `Rolled back to ${afterRelease} on the node and re-verified the live release`, { evidence: `rollbackTaskId=${rollback.taskId}; commit=${verified.marker?.commitSha ?? "n/a"}` });
           }
