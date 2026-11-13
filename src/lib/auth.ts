@@ -72,6 +72,16 @@ export type AuthUser = {
   name?: string | null;
   role: string;
   permissions: string[];
+  /**
+   * Whether the account's email address has been verified (SEC-06).
+   *
+   * Surfaced on the session object so `src/proxy.ts` can enforce the
+   * verification policy for every `/api` path in one place. Optional so existing
+   * callers and test fixtures that build a partial AuthUser keep compiling;
+   * `undefined` is treated as unverified by the policy, which is the safe
+   * direction.
+   */
+  emailVerified?: boolean;
 };
 
 export function isAdminRole(role?: string | null): boolean {
@@ -171,6 +181,8 @@ export async function requireSession(request: NextRequest): Promise<AuthUser> {
     name: user.name,
     role: user.role.name,
     permissions: user.role.permissions.map((rp) => rp.permission.name),
+    // Prisma stores the verification *timestamp* (DateTime?), not a boolean.
+    emailVerified: user.emailVerified !== null,
   };
 }
 

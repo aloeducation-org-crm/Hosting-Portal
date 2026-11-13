@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     if (cloneUrlOverride && process.env.DEPLOY_ALLOW_LOCAL_SOURCE !== "true") {
       return badRequest("Local source override is not enabled on this host");
     }
-    const result = await importRepository({ ...parsed.data, userId: user.id, cloneUrlOverride });
+    const result = await importRepository({ ...parsed.data, userId: user.id, user, cloneUrlOverride });
     let automationRunId: string | null = null;
     if (result.project.lastCommitSha) {
       const { triggerEvent, actorForUser } = await import("@/lib/orchestrator/workflows");

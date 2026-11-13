@@ -80,11 +80,78 @@ export function signPayload(secret: string, body: string, timestamp: string, non
     .digest("hex");
 }
 
+/**
+ * The complete task document an agent is allowed to execute.
+ *
+ * Deliberately a closed set of scalar fields with no nested passthrough: the
+ * agent rejects a payload containing any key outside this list, so adding a new
+ * capability requires changing this type, the route, and the agent together —
+ * a change a reviewer can see. `args` is the only free-form field and it is the
+ * one the per-command argument schema validates.
+ */
+export interface SignedTaskDocument {
+  id: string;
+  command: string;
+  args: string | null;
+  timeoutMs: number | null;
+  correlationId: string | null;
+  jobId: string | null;
+}
+
+export const SIGNED_TASK_FIELDS = ["id", "command", "args", "timeoutMs", "correlationId", "jobId"] as const;
+
+/**
+ * Build the canonical document string that is signed.
+ *
+ * Field order is fixed (not object-insertion order) so the agent can reproduce
+ * it byte-for-byte from parsed JSON with no shared serialisation library. Values
+ * are JSON-encoded individually and joined, which keeps `null` distinguishable
+ * from the string "null" and makes the encoding independent of key order.
+ */
+export function canonicalTaskDocument(task: SignedTaskDocument): string {
+  return JSON.stringify(SIGNED_TASK_FIELDS.map((field) => [field, task[field]]));
+}
+
+/**
+ * Sign the complete task document for an agent.
+ *
+ * Uses the same HMAC construction as request authentication
+ * (`signPayload`: sha256 over `timestamp.nonce.sha256(body)`), so the agent
+ * needs one verifier rather than two, and the secret it already holds is the
+ * only key material involved.
+ */
+export function signTaskEnvelope(
+  secret: string,
+  task: { id: string; command: string; args: string | null; timeoutMs: number | null; correlationId?: string | null; jobId?: string | null },
+  timestamp: string,
+  nonce: string,
+): { task: SignedTaskDocument; signature: string; timestamp: string; nonce: string } {
+  const document: SignedTaskDocument = {
+    id: task.id,
+    command: task.command,
+    args: task.args ?? null,
+    timeoutMs: task.timeoutMs ?? null,
+    correlationId: task.correlationId ?? null,
+    jobId: task.jobId ?? null,
+  };
+  const body = canonicalTaskDocument(document);
+  return { task: document, signature: signPayload(secret, body, timestamp, nonce), timestamp, nonce };
+}
+
 /** Signature validity window. Exported so the nonce TTL matches it exactly. */
 export const SIGNATURE_MAX_SKEW_MS = 5 * 60_000;
 
 /** How long a recorded human approval of an agent task stays valid. */
 export const AGENT_APPROVAL_TTL_MS = 60 * 60_000;
+
+/**
+ * Upper bound on how long an allowlisted command may run on a host.
+ *
+ * Taken from the allowlist rather than hardcoded so adding a longer-running
+ * command cannot silently make the expiry pass below too short. Ten minutes is
+ * the longest timeout any current entry declares.
+ */
+export const MAX_TASK_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Consume a request nonce: single use, per agent.
@@ -734,11 +801,67 @@ export async function claimTask(agentId: string, now = Date.now()) {
 export async function expireStaleTasks() {
   const now = Date.now();
   const cutoff = new Date(now - TASK_CLAIM_TTL_MS);
+  /**
+   * SEC-07: expiry used to match `status in (PENDING, ASSIGNED)` on `createdAt`
+   * alone. `ASSIGNED` is the state of a task that is *running* — and the
+   * agent-side allowlisted command timeout can be up to
+   * `MAX_TASK_TIMEOUT_MS`, which is longer than this claim window. A task that
+   * was executing correctly was therefore flipped to TIMED_OUT underneath the
+   * agent, and the result it posted afterwards overwrote that, so the dashboard
+   * showed a spurious timeout on long-running work.
+   *
+   * The claim window now applies only to work that has **not started**:
+   *   PENDING  → nobody claimed it (`createdAt` is still the clock that matters)
+   *   ASSIGNED → the agent has it but has not reported a start yet, so the same
+   *              window applies from `dispatchedAt`
+   * A RUNNING row is expired separately, against the task's own timeout.
+   */
   const res = await db.agentTask.updateMany({
-    where: { status: { in: ["PENDING", "ASSIGNED"] }, createdAt: { lt: cutoff } },
+    where: {
+      status: "PENDING",
+      createdAt: { lt: cutoff },
+    },
     data: { status: "TIMED_OUT", finishedAt: new Date(), error: "No agent claimed this task within the claim window" },
   });
-  if (res.count > 0) logger.warn({ count: res.count }, "expired stale agent tasks");
+  const staleDispatch = await db.agentTask.updateMany({
+    where: {
+      status: "ASSIGNED",
+      dispatchedAt: { lt: cutoff },
+    },
+    data: { status: "TIMED_OUT", finishedAt: new Date(), error: "Agent claimed this task but never started it" },
+  });
+  const expired = res.count + staleDispatch.count;
+  if (expired > 0) logger.warn({ count: expired }, "expired stale agent tasks");
+
+  /**
+   * A RUNNING task is only expired once its own `timeoutMs` has elapsed (plus a
+   * grace period for the result POST to arrive). `timeoutMs` is a nullable
+   * column, so a null falls back to the maximum allowed task timeout rather than
+   * to the short claim window — under-expiring is recoverable, prematurely
+   * declaring a live command dead is not.
+   */
+  const running = await db.agentTask.findMany({
+    where: { status: "RUNNING", startedAt: { not: null } },
+    select: { id: true, startedAt: true, timeoutMs: true },
+    take: 500,
+  });
+  const graceMs = 60_000;
+  const overrun = running.filter((task) => {
+    const budget = (task.timeoutMs ?? MAX_TASK_TIMEOUT_MS) + graceMs;
+    return task.startedAt !== null && now - task.startedAt.getTime() > budget;
+  });
+  if (overrun.length) {
+    await db.agentTask.updateMany({
+      where: { id: { in: overrun.map((t) => t.id) } },
+      data: {
+        status: "TIMED_OUT",
+        finishedAt: new Date(),
+        error: "Task exceeded its execution timeout and the agent never reported a result",
+      },
+    });
+    logger.warn({ count: overrun.length }, "expired overrunning agent tasks");
+  }
+  const allExpired = expired + overrun.length;
 
   // An approval older than its window is revoked, so the task becomes
   // unclaimable again and shows up in the dashboard as waiting for a human.
@@ -760,7 +883,23 @@ export async function expireStaleTasks() {
       metadata: { count: staleApprovals.count, ttlMs: AGENT_APPROVAL_TTL_MS },
     }).catch(() => {});
   }
-  return res.count;
+  return allExpired;
+}
+
+/**
+ * Mark a claimed task as started.
+ *
+ * The agent calls this immediately before executing, so an overlong command can
+ * be distinguished from a task that was claimed and abandoned. Returns 0 when the
+ * task is no longer claimable (someone else expired it first), which the agent
+ * treats as "do not execute".
+ */
+export async function startTask(taskId: string, agentId: string, now = new Date()): Promise<boolean> {
+  const claimed = await db.agentTask.updateMany({
+    where: { id: taskId, agentId, status: "ASSIGNED" },
+    data: { status: "RUNNING", startedAt: now },
+  });
+  return claimed.count === 1;
 }
 
 export async function recordTaskResult(

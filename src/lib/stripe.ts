@@ -17,6 +17,22 @@ export interface CheckoutSessionResult {
   mode: "live" | "free_tier";
 }
 
+/**
+ * Raised when a paid checkout is requested but no payment provider can be
+ * reached. SEC-03: this used to return a synthetic `checkoutUrl` pointing at a
+ * success page, so the caller believed checkout had succeeded and the success
+ * page would activate a plan that was never paid for. A provider that is not
+ * configured is a BLOCKED integration, not a free tier.
+ */
+export class PaymentProviderUnavailableError extends Error {
+  code = "PAYMENT_PROVIDER_UNAVAILABLE";
+  status = 503;
+  constructor(message = "Payment provider is not configured on this platform") {
+    super(message);
+    this.name = "PaymentProviderUnavailableError";
+  }
+}
+
 export function isStripeConfigured(): boolean {
   return Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY.startsWith("sk_"));
 }
@@ -24,12 +40,19 @@ export function isStripeConfigured(): boolean {
 export async function createBillingCheckoutSession(
   input: CheckoutSessionInput
 ): Promise<CheckoutSessionResult> {
-  if (!isStripeConfigured() || input.priceCents === 0) {
+  // A zero-price plan needs no checkout at all: entitlement is granted locally.
+  if (input.priceCents === 0) {
     return {
-      sessionId: `cs_alo_${Date.now()}`,
-      checkoutUrl: `${input.successUrl}?session_id=cs_alo_${Date.now()}&plan=${encodeURIComponent(input.planName)}`,
+      sessionId: `free_${Date.now()}`,
+      checkoutUrl: `${input.successUrl}?plan=${encodeURIComponent(input.planName)}&mode=free`,
       mode: "free_tier",
     };
+  }
+  // A paid plan without a provider is a hard stop. Never fabricate a session.
+  if (!isStripeConfigured()) {
+    throw new PaymentProviderUnavailableError(
+      "Paid plans cannot be purchased because no payment provider is configured on this platform.",
+    );
   }
 
   const params = new URLSearchParams();

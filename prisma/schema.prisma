@@ -90,6 +90,7 @@ enum WorkerKind {
   WORKFLOW_STEP
   PLATFORM_OPS
   AI_DIAGNOSIS
+  NATIVE_BUILD_PLAN
 }
 
 enum RiskLevel {

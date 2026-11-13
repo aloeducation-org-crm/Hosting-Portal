@@ -30,6 +30,7 @@ import { db } from "@/lib/db";
 import { redact } from "@/lib/deploy/redact";
 import { validateRepositoryName, getCommit, resolveToken, fetchRepoManifests } from "@/lib/deploy/github";
 import { detectFramework, memoryReader } from "@/lib/deploy/detect";
+import { detectNativeBuildPlan } from "@/lib/deploy/native-build";
 import { runDeployment, rollbackProject } from "@/lib/deploy/engine";
 import { validateDeployConfig } from "@/lib/deploy/config";
 import { readMarker, currentReleaseDir } from "@/lib/deploy/service";
@@ -294,6 +295,75 @@ function projectManifestsFromDetection(stored: Record<string, unknown>): Record<
   }
   return files;
 }
+
+// ─── Native CMake build planning ───────────────────────────────────────────
+// Read-only planning only. Native execution requires a separately enrolled,
+// isolated runner and is deliberately not routed through the web deploy engine.
+
+const nativeBuildPlanInput = z.object({
+  projectId: z.string().min(1).optional(),
+  files: z.record(z.string(), z.string()).optional(),
+  platform: z.enum(["linux", "windows", "macos"]).default("linux"),
+}).refine((value) => Boolean(value.projectId || value.files), {
+  message: "projectId or files is required",
+});
+
+registerWorker(
+  defineWorker<z.infer<typeof nativeBuildPlanInput>, unknown>({
+    kind: "NATIVE_BUILD_PLAN",
+    label: "Native application build planning",
+    description:
+      "Reads CMake manifests, selects safe platform presets, detects submodules and emits a build plan. Does not execute source code or claim a native build succeeded.",
+    execution: "LOCAL",
+    maxRisk: "READ_ONLY",
+    requiredScopes: ["repo:read"],
+    retrySafe: true,
+    defaultMaxAttempts: 2,
+    defaultTimeoutMs: 60_000,
+    inputSchema: nativeBuildPlanInput,
+    async handler(input, ctx) {
+      await ctx.progress(15, "reading native build manifests");
+      let files = input.files;
+
+      if (!files) {
+        const project = await db.gitProject.findUnique({ where: { id: input.projectId! } });
+        if (!project) throw new WorkerError("NOT_FOUND", `Project ${input.projectId} not found`);
+        const token = await tokenForConnection(project.connectionId).catch(() => resolveToken(null));
+        if (!token.token) {
+          return unverified(
+            { projectId: project.id, repository: project.repository, platform: input.platform },
+            "A GitHub credential is required to read this repository. No native build was started.",
+          );
+        }
+        const fetched = await fetchRepoManifests(token.token, project.repository, project.productionBranch);
+        files = fetched.files;
+      }
+
+      const plan = await detectNativeBuildPlan(memoryReader(files), input.platform);
+      if (!plan) {
+        return unverified(
+          { platform: input.platform },
+          "No root CMakeLists.txt was found. This planner currently handles CMake projects only.",
+        );
+      }
+
+      await ctx.progress(85, `CMake project detected; plan status ${plan.status}`);
+      if (plan.status !== "READY_FOR_RUNNER") {
+        return unverified(
+          plan,
+          "Native build plan needs configuration. No commands were executed.",
+          { findings: plan.blockers.map((blocker) => ({ severity: "warning" as const, title: blocker })) },
+        );
+      }
+
+      return ok(
+        plan,
+        `Prepared a ${input.platform} CMake build plan. No native runner was invoked and no artifact was produced.`,
+        { evidence: `configurePreset=${plan.configurePreset}; buildPreset=${plan.buildPreset}; submodules=${plan.submodules.length}` },
+      );
+    },
+  }),
+);
 
 // ─── 3. Build & test ────────────────────────────────────────────────────────
 // Delegates to the verified deployment engine: isolated mkdtemp build, exact

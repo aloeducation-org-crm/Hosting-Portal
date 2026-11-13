@@ -561,6 +561,16 @@ export function sanitize(text, extraSecrets = []) {
 
 // ─── Signing ────────────────────────────────────────────────────────────────
 
+/**
+ * Replay window for a signed control-plane message.
+ *
+ * Must match `SIGNATURE_MAX_SKEW_MS` in src/lib/agents/agent.ts. It is duplicated
+ * here rather than imported because this file is deployed standalone and
+ * deliberately has no dependency on the application source tree; the parity test
+ * in tests/agent-task-signing.test.ts fails if the two drift.
+ */
+export const SIGNATURE_MAX_SKEW_MS = 5 * 60_000;
+
 export function sign(secret, body, timestamp, nonce) {
   return createHmac("sha256", secret)
     .update(`${timestamp}.${nonce}.${createHash("sha256").update(body).digest("hex")}`)
@@ -572,6 +582,89 @@ export function verify(secret, body, timestamp, nonce, signature) {
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(String(signature || ""), "utf8");
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * The control plane URL must be HTTPS unless it is a loopback address.
+ *
+ * SEC-07: the agent accepted a plain-http panel URL anywhere, and the enrollment
+ * response carries the agent's new signing secret. Over plain http on any real
+ * network that secret is on the wire in clear text, which is equivalent to
+ * handing over the agent's identity. Loopback is exempt so `--panel
+ * http://127.0.0.1:3051` keeps working for a collocated panel and for tests.
+ *
+ * Opt out with ALO_ALLOW_INSECURE_PANEL=1 only for a documented, private,
+ * already-encrypted hop (for example a WireGuard tunnel to the panel).
+ */
+export function assertPanelTransport(panelUrl) {
+  let url;
+  try {
+    url = new URL(panelUrl);
+  } catch {
+    throw new Error(`ALO_PANEL_URL is not a valid URL: ${String(panelUrl).slice(0, 40)}`);
+  }
+  if (url.protocol === "https:") return;
+  if (url.protocol !== "http:") throw new Error(`ALO_PANEL_URL must be http(s); got ${url.protocol}`);
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const loopback = host === "localhost" || host === "::1" || host === "0.0.0.0" || host.startsWith("127.");
+  if (loopback) return;
+  if (process.env.ALO_ALLOW_INSECURE_PANEL === "1") return;
+  throw new Error(
+    "Refusing to send agent credentials over plain http to a non-loopback panel. " +
+      "Use https:// for ALO_PANEL_URL, or set ALO_ALLOW_INSECURE_PANEL=1 for a private, already-encrypted hop.",
+  );
+}
+
+/**
+ * Verify the signature the control plane attached to a claimed task.
+ *
+ * SEC-07: `verify()` existed in this file and was never called, so a compromised
+ * or spoofed control-plane response — or anything able to answer on the panel
+ * URL — could hand the agent a task it never issued. The document is rebuilt
+ * from the received task field-by-field in the fixed order below, which is the
+ * same order `canonicalTaskDocument` uses server-side, then compared in constant
+ * time.
+ *
+ * Returns `{ ok: true, task }` with a *rebuilt* task rather than the received
+ * object, so the caller cannot accidentally execute a field that was not part of
+ * the signed document.
+ */
+export const SIGNED_TASK_FIELDS = Object.freeze(["id", "command", "args", "timeoutMs", "correlationId", "jobId"]);
+
+export function canonicalTaskDocument(task) {
+  return JSON.stringify(SIGNED_TASK_FIELDS.map((field) => [field, task[field] ?? null]));
+}
+
+export function verifyClaimedTask(envelope, secret) {
+  if (!envelope || typeof envelope !== "object") return { ok: false, reason: "no envelope" };
+  const { task, signature, timestamp, nonce } = envelope;
+  if (!table_isPlainObject(task)) return { ok: false, reason: "task is not an object" };
+  if (typeof signature !== "string" || typeof timestamp !== "string" || typeof nonce !== "string") {
+    return { ok: false, reason: "signed envelope is incomplete" };
+  }
+  const extra = Object.keys(task).filter((key) => !SIGNED_TASK_FIELDS.includes(key));
+  if (extra.length) return { ok: false, reason: `task carries unsigned fields: ${extra.join(", ")}` };
+  if (typeof task.id !== "string" || !task.id) return { ok: false, reason: "task id missing" };
+  if (typeof task.command !== "string" || !task.command) return { ok: false, reason: "task command missing" };
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > SIGNATURE_MAX_SKEW_MS) {
+    return { ok: false, reason: "task timestamp outside the replay window" };
+  }
+  const rebuilt = {
+    id: task.id,
+    command: task.command,
+    args: task.args ?? null,
+    timeoutMs: task.timeoutMs ?? null,
+    correlationId: task.correlationId ?? null,
+    jobId: task.jobId ?? null,
+  };
+  const body = canonicalTaskDocument(rebuilt);
+  if (!verify(secret, body, timestamp, nonce, signature)) return { ok: false, reason: "task signature mismatch" };
+  return { ok: true, task: rebuilt };
+}
+
+function table_isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function post(panelUrl, route, bodyObject, credentials) {
@@ -995,8 +1088,49 @@ export async function heartbeatOnce(cfg, state) {
 export async function pollAndRunOnce(cfg, state) {
   const res = await post(cfg.panelUrl, "/api/agents/tasks/claim", {}, { agentKey: state.agentKey, secret: state.secret });
   if (!res.ok) return { ran: 0, error: `HTTP ${res.status}` };
-  const task = res.json?.data?.task;
-  if (!task) return { ran: 0 };
+  const payload = res.json?.data;
+  if (!payload?.task) return { ran: 0 };
+
+  // SEC-07: never execute a task the panel did not sign with this agent's secret.
+  // The refusal is reported back as a REFUSED result (signed like any other
+  // request) so the operator sees it in the task history instead of the task
+  // silently disappearing.
+  const verified = verifyClaimedTask(
+    { task: payload.task, signature: payload.signature, timestamp: payload.timestamp, nonce: payload.nonce },
+    state.secret,
+  );
+  if (!verified.ok) {
+    const refused = {
+      status: "REFUSED",
+      exitCode: null,
+      refuseReason: `task rejected by agent: ${verified.reason}`,
+      logs: "",
+    };
+    await post(
+      cfg.panelUrl,
+      "/api/agents/tasks/result",
+      { taskId: payload.task.id, ...refused },
+      { agentKey: state.agentKey, secret: state.secret },
+    ).catch(() => null);
+    return { ran: 0, refused: verified.reason };
+  }
+  const task = verified.task;
+
+  // Claim check before execution (SEC-07). If the control plane has already
+  // expired or re-assigned this task, executing it now would be a duplicate run
+  // of an allowlisted command — possibly a destructive one.
+  const start = await post(
+    cfg.panelUrl,
+    "/api/agents/tasks/start",
+    { taskId: task.id },
+    { agentKey: state.agentKey, secret: state.secret },
+  ).catch(() => null);
+  if (start && start.ok === false) {
+    return { ran: 0, refused: `start was rejected (HTTP ${start.status})` };
+  }
+  if (start?.json?.data && start.json.data.started === false) {
+    return { ran: 0, refused: "task is no longer assigned to this agent" };
+  }
 
   const outcome = await executeTask(task, [state.secret]);
   await post(
@@ -1017,6 +1151,7 @@ export async function main() {
     console.log(`enrolled as ${state.agentKey}; state written to ${cfg.statePath} (mode 0600)`);
   }
   if (!cfg.panelUrl) cfg.panelUrl = state.panelUrl;
+  assertPanelTransport(cfg.panelUrl);
 
   if (cfg.once) {
     const hb = await heartbeatOnce(cfg, state);

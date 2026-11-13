@@ -502,7 +502,7 @@ describe("backoff maths", () => {
 // ── The production worker catalogue ─────────────────────────────────────────
 
 describe("worker catalogue", () => {
-  it("registers all thirteen specialized workers with declared risk and scopes", () => {
+  it("registers all fourteen specialized workers with declared risk and scopes", () => {
     const list = listWorkers();
     expect(list.map((w) => w.kind).sort()).toEqual(
       [
@@ -519,6 +519,7 @@ describe("worker catalogue", () => {
         "WORKFLOW_STEP",
         "PLATFORM_OPS",
         "AI_DIAGNOSIS",
+        "NATIVE_BUILD_PLAN",
       ].sort(),
     );
     for (const worker of list) {

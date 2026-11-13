@@ -8,6 +8,37 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /**
+ * Resolve the database URL, or refuse to start.
+ *
+ * SEC-12: an unset `DATABASE_URL` fell back to `file:./db/custom.db` — the
+ * tracked development fixture, which is shipped inside the release payload. In
+ * production that means a missing environment variable produces a running panel
+ * backed by a database of seeded accounts, silently. `scripts/validate-prod-config.mjs`
+ * caught it, but only at deploy time and only along that one path.
+ *
+ * A production process now refuses to start without an explicit database URL.
+ * Build-time workers are exempt: `next build` evaluates modules without a
+ * production database and must not need one.
+ */
+export function resolveDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = (env.DATABASE_URL ?? "").trim();
+  const isBuildWorker =
+    !!env.NEXT_WORKER_ID ||
+    !!env.BUILD_ID ||
+    env.NEXT_PHASE === "phase-production-build" ||
+    env.npm_lifecycle_event === "build";
+  if (configured) return configured;
+  if (env.NODE_ENV === "production" && !isBuildWorker) {
+    // Fail loudly and specifically. `process.exit(1)` matches how env.ts treats
+    // placeholder secrets: a broken configuration must not serve traffic.
+    console.error("[SECURITY] FATAL: DATABASE_URL is not set. Refusing to start in production.");
+    console.error("[SECURITY] Set DATABASE_URL=file:/var/lib/alo-hosting/alo.db (or your server URL) in the process environment.");
+    process.exit(1);
+  }
+  return "file:./db/custom.db";
+}
+
+/**
  * SQLite robustness for the pooled libsql driver.
  *
  * Two behaviours of the @libsql/client connection pool caused real outages:
@@ -71,7 +102,7 @@ class PrismaLibSQLPooled extends PrismaLibSQL {
 }
 
 export function createPrismaClient(): PrismaClient {
-  const databaseUrl = process.env.DATABASE_URL || "file:./db/custom.db";
+  const databaseUrl = resolveDatabaseUrl();
   if (databaseUrl.startsWith("file:")) {
     patchSqliteForPooling();
     const adapter = new PrismaLibSQLPooled({ url: databaseUrl });
