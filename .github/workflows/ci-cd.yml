@@ -109,7 +109,13 @@ jobs:
     name: Lint, typecheck, and tests
     runs-on: ubuntu-24.04
     steps:
+      # Full history is required by `npm run audit:merges`, which walks every
+      # merge commit to prove no file introduced by a merged PR was silently
+      # dropped later. A depth-1 checkout makes that audit skip itself, which
+      # would turn a real gate into a no-op that still reports green.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -145,6 +151,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run audit:repo
+      - name: Merge integrity (no merged file may be silently lost)
+        run: npm run audit:merges
 
   build:
     name: Production build
