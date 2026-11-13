@@ -184,6 +184,9 @@ const MIGRATIONS = [
   // Keep after the optional rebuild: a fresh apply must not add tables that a
   // later rebuild could obscure. This migration only creates automation tables.
   { name: "20261111190000_central_automation", kind: "ADDITIVE" },
+  // Remote node deployment: pin the enrolled compute node (ServerAgent) a
+  // GitProject deploys to. Additive nullable column + index on git_projects.
+  { name: "20261112120000_remote_node_deployment", kind: "ADDITIVE" },
 ];
 
 function registry() {

@@ -31,10 +31,12 @@ import { createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypt
 import { execFile } from "node:child_process";
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 
-export const AGENT_VERSION = "1.2.0";
+export const AGENT_VERSION = "1.3.4";
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -81,6 +83,13 @@ const EMAIL_ADDR = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/;
 const DNS_TYPES = new Set(["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA"]);
 const DNS_NAME = /^(?:@|[A-Za-z0-9_][A-Za-z0-9._-]{0,119})$/;
 const DNS_VALUE = /^[A-Za-z0-9._:@/=+\- ]{1,255}$/;
+const DEPLOYMENT_ID = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/;
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+const HEALTH_PATH = /^\/[A-Za-z0-9/._-]{0,100}$/;
+// Either a validated start command (node ecosystem) or a relative static
+// output root without "..", e.g. "." or "dist" or "public".
+const START_CMD_OR_ROOT =
+  /^(?:(?:npm|npx|yarn|pnpm|bun|node)(?:\s+[A-Za-z0-9._:@/=-]+)*|[A-Za-z0-9._][A-Za-z0-9._/-]{0,199})$/;
 
 const validDomain = (d) =>
   typeof d === "string" && d.length >= 3 && d.length <= 253 && !d.includes("..") && DOMAIN_NAME.test(d);
@@ -92,6 +101,15 @@ const validBuildCmd = (c) =>
   typeof c === "string" && c.length >= 3 && c.length <= 200 && !c.includes("..") && BUILD_CMD.test(c);
 const validDnsName = (n) => typeof n === "string" && !n.includes("..") && DNS_NAME.test(n);
 const validDnsValue = (v) => typeof v === "string" && DNS_VALUE.test(v);
+const validSiteReleasePath = (a) =>
+  typeof a.releasePath === "string" &&
+  a.releasePath.length <= 300 &&
+  !a.releasePath.includes("..") &&
+  SITE_RELEASE_PATH.test(a.releasePath) &&
+  a.releasePath.startsWith(`/srv/alo-sites/${a.domain}/releases/`);
+const validPort = (p) => typeof p === "number" && Number.isInteger(p) && p >= 1024 && p <= 65535;
+const validStartCmdOrRoot = (c) =>
+  typeof c === "string" && c.length >= 1 && c.length <= 300 && !c.includes("..") && START_CMD_OR_ROOT.test(c);
 
 export const AGENT_ALLOWLIST = {
   "metrics.collect": {
@@ -126,7 +144,13 @@ export const AGENT_ALLOWLIST = {
     executable: null, // handled internally with fetch()
     risk: "READ_ONLY",
     timeoutMs: 20_000,
-    validate: (a) => typeof a.url === "string" && isPrivateTarget(a.url),
+    validate: (a) =>
+      typeof a.url === "string" &&
+      isPrivateTarget(a.url) &&
+      (a.host === undefined ||
+        a.host === null ||
+        (typeof a.host === "string" && validDomain(a.host))),
+    // host: optional Host header for probing a name-based reverse proxy.
   },
   "disk.usage": {
     executable: "df",
@@ -216,6 +240,46 @@ export const AGENT_ALLOWLIST = {
       validDomain(a.domain) &&
       (a.buildCmd === undefined || a.buildCmd === null || validBuildCmd(a.buildCmd)),
   },
+  "deploy.build-release": {
+    // Builds inside a specific (not yet active) release directory, so a build
+    // never touches the live release before verification.
+    executable: "alo-deploy-helper",
+    argv: (a) => ["build-release", String(a.domain), String(a.releasePath), String(a.buildCmd)],
+    sudo: true,
+    risk: "REVERSIBLE",
+    timeoutMs: 10 * 60_000,
+    validate: (a) => validDomain(a.domain) && validSiteReleasePath(a) && validBuildCmd(a.buildCmd),
+  },
+  "deploy.marker": {
+    // Verifies the release tree IS the pinned commit, then writes the release
+    // identity marker used for live verification.
+    executable: "alo-deploy-helper",
+    argv: (a) => ["marker", String(a.domain), String(a.releasePath), String(a.deploymentId), String(a.commitSha)],
+    sudo: true,
+    risk: "REVERSIBLE",
+    timeoutMs: 60_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      validSiteReleasePath(a) &&
+      typeof a.deploymentId === "string" &&
+      DEPLOYMENT_ID.test(a.deploymentId) &&
+      typeof a.commitSha === "string" &&
+      COMMIT_SHA.test(a.commitSha),
+  },
+  "deploy.read-marker": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["read-marker", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "deploy.manifest": {
+    executable: "alo-deploy-helper",
+    argv: (a) => ["manifest", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 60_000,
+    validate: (a) => validDomain(a.domain),
+  },
   "deploy.switch": {
     executable: "alo-deploy-helper",
     argv: (a) => ["switch", String(a.domain), String(a.releasePath)],
@@ -243,6 +307,44 @@ export const AGENT_ALLOWLIST = {
     argv: (a) => ["list-releases", String(a.domain)],
     risk: "READ_ONLY",
     timeoutMs: 15_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  // ── Supervised application runtime (alo-app-helper / node runtime kit) ────
+  "app.up": {
+    executable: "alo-app-helper",
+    argv: (a) => [
+      "up",
+      String(a.domain),
+      String(a.port),
+      String(a.type),
+      String(a.commandOrRoot),
+      String(a.healthPath ?? "/"),
+    ],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 120_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      validPort(a.port) &&
+      (a.type === "node" || a.type === "static") &&
+      validStartCmdOrRoot(a.commandOrRoot) &&
+      (a.healthPath === undefined ||
+        a.healthPath === null ||
+        (typeof a.healthPath === "string" && HEALTH_PATH.test(a.healthPath))),
+  },
+  "app.restart": {
+    executable: "alo-app-helper",
+    argv: (a) => ["restart", String(a.domain)],
+    sudo: true,
+    risk: "PRIVILEGED",
+    timeoutMs: 60_000,
+    validate: (a) => validDomain(a.domain),
+  },
+  "app.status": {
+    executable: "alo-app-helper",
+    argv: (a) => ["status", String(a.domain)],
+    risk: "READ_ONLY",
+    timeoutMs: 30_000,
     validate: (a) => validDomain(a.domain),
   },
   // ── SSL / TLS (alo-ssl-helper) ────────────────────────────────────────────
@@ -280,6 +382,19 @@ export const AGENT_ALLOWLIST = {
     timeoutMs: 15_000,
     validate: () => true,
   },
+  "ssl.verify-tls": {
+    // Real TLS handshake against the local edge listener with SNI, proving the
+    // proxy terminates TLS with the expected (non-expired) certificate.
+    executable: "alo-ssl-helper",
+    argv: (a) => ["verify-tls", String(a.domain), ...(a.port ? [String(a.port)] : [])],
+    risk: "READ_ONLY",
+    timeoutMs: 30_000,
+    validate: (a) =>
+      validDomain(a.domain) &&
+      (a.port === undefined ||
+        a.port === null ||
+        (typeof a.port === "number" && Number.isInteger(a.port) && a.port >= 1 && a.port <= 65535)),
+  },
   // ── DNS (alo-dns-helper) ──────────────────────────────────────────────────
   "domain.add": {
     executable: "alo-domain-helper",
@@ -304,7 +419,10 @@ export const AGENT_ALLOWLIST = {
       String(a.priority ?? 0),
     ],
     sudo: true,
-    risk: "PRIVILEGED",
+    // Adding one record to the platform-managed local zone is reversible (the
+    // matching dns.delete can undo it) and does not by itself affect a live
+    // service. Removal stays DESTRUCTIVE.
+    risk: "REVERSIBLE",
     timeoutMs: 15_000,
     validate: (a) =>
       validDomain(a.domain) &&
@@ -666,6 +784,57 @@ function round(n) {
 }
 
 /**
+ * Raw HTTP probe for requests fetch() cannot express. undici treats Host as a
+ * forbidden header name and silently drops it, which defeats probing a
+ * name-based reverse proxy (the edge routes by Host); node:http honours an
+ * explicit host header. Resolves with a fetch-like { status, text } response;
+ * a 3xx answer rejects, matching fetch(..., { redirect: "error" }).
+ */
+function probeWithHttpClient(rawUrl, headers, signal) {
+  return new Promise((resolve, reject) => {
+    let target;
+    try {
+      target = new URL(rawUrl);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      reject(new Error(`unsupported probe protocol: ${target.protocol}`));
+      return;
+    }
+    const client = target.protocol === "https:" ? https : http;
+    const req = client.request(
+      {
+        hostname: target.hostname,
+        port: target.port || (target.protocol === "https:" ? 443 : 80),
+        path: target.pathname + target.search,
+        method: "GET",
+        headers,
+        signal,
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          res.resume();
+          reject(new Error(`probe was redirected (HTTP ${status})`));
+          return;
+        }
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          resolve({ status, url: rawUrl, redirected: false, text: async () => body });
+        });
+        res.on("error", reject);
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
  * Static hardware/OS inventory, read from the OS itself — never from a value
  * the panel supplied. Sent with every heartbeat and returned by the
  * `system.inventory` task.
@@ -688,7 +857,13 @@ export function run(executable, args, timeoutMs, useSudo = false) {
   return new Promise((resolve, reject) => {
     const cmd = useSudo ? "sudo" : executable;
     const argv = useSudo ? ["-n", executable, ...args] : args;
-    const child = execFile(cmd, argv, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: { PATH: process.env.PATH, HOME: process.env.HOME, LANG: "C" } }, (error, stdout, stderr) => {
+    // The installer puts the platform helpers in /usr/local/sbin, but the
+    // agent inherits whatever PATH its launching shell had — which may not
+    // include sbin directories (e.g. when started from a user session).
+    // Resolve helpers through the standard system paths first so binary
+    // lookup does not depend on the caller's environment.
+    const stablePath = ["/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin", process.env.PATH].filter(Boolean).join(":");
+    const child = execFile(cmd, argv, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: { PATH: stablePath, HOME: process.env.HOME, LANG: "C" } }, (error, stdout, stderr) => {
       resolve({ code: error && typeof error.code === "number" ? error.code : error ? 1 : 0, stdout: stdout ?? "", stderr: stderr ?? "", error: error ? String(error.message).slice(0, 300) : null });
     });
     child.on("error", (e) => reject(e));
@@ -755,15 +930,33 @@ export async function executeTask(task, secrets = []) {
       if (!isPrivateTarget(url)) {
         return { status: "REFUSED", refuseReason: `Refusing to probe ${url}: only loopback and private addresses are allowed`, exitCode: null };
       }
+      if (args.host !== undefined && args.host !== null && !validDomain(String(args.host))) {
+        return { status: "REFUSED", refuseReason: `Invalid Host header: ${String(args.host).slice(0, 100)}`, exitCode: null };
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), entry.timeoutMs);
       try {
-        const res = await fetch(url, { signal: controller.signal, redirect: "error" });
+        // fetch() (undici) silently strips the Host header — it is a forbidden
+        // header name there — which defeats the whole point of probing a
+        // name-based reverse proxy with a custom Host. node:http honours an
+        // explicit host header, so probes with one go through the raw client.
+        const headers = {};
+        if (args.host) headers.host = String(args.host);
+        const res = args.host
+          ? await probeWithHttpClient(url, headers, controller.signal)
+          : await fetch(url, { signal: controller.signal, redirect: "error" });
+        if (res.redirected) throw new Error(`probe redirected to ${res.url}`);
         const body = (await res.text()).slice(0, 2000);
         return {
           status: "SUCCEEDED",
           exitCode: 0,
-          result: { url, httpStatus: res.status, latencyMs: Date.now() - started, commit: (body.match(/\b[0-9a-f]{40}\b/) || [null])[0] },
+          result: {
+            url,
+            host: args.host ? String(args.host) : null,
+            httpStatus: res.status,
+            latencyMs: Date.now() - started,
+            commit: (body.match(/\b[0-9a-f]{40}\b/) || [null])[0],
+          },
           durationMs: Date.now() - started,
         };
       } finally {
@@ -795,6 +988,39 @@ export async function executeTask(task, secrets = []) {
       } catch {
         parsedData = undefined;
       }
+    } else {
+      // Helper contract: the result is the LAST JSON object printed on
+      // stdout. Some helpers legitimately emit progress first (git prints
+      // "Cloning into ..." during deploy.clone), so whole-output parsing is
+      // not enough — scan back for the final balanced JSON object.
+      const lines = trimmedOut.split("\n");
+      let start = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim().startsWith("{")) { start = i; break; }
+      }
+      if (start >= 0) {
+        const candidate = lines.slice(start).join("\n");
+        try {
+          const value = JSON.parse(sanitize(candidate, secrets));
+          if (value && typeof value === "object" && !Array.isArray(value)) parsedData = value;
+        } catch {
+          parsedData = undefined;
+        }
+      }
+    }
+    // A failed helper reports through its stdout JSON contract (stderr is
+    // usually empty), while execFile's error message only carries the argv —
+    // "Command failed: sudo -n alo-deploy-helper rollback …" with no reason.
+    // Surface the helper's own diagnostic so failures are diagnosable
+    // upstream instead of every rejection looking identical.
+    let errorText;
+    if (succeeded) {
+      errorText = out.error ? sanitize(out.error, secrets) : undefined;
+    } else {
+      const parsedReason = parsedData && typeof parsedData.error === "string" && parsedData.error.trim() ? parsedData.error.trim() : "";
+      const fallbackReason = (out.stderr || "").trim() || trimmedOut || (out.error ? String(out.error).split("\n")[0] : "");
+      const reason = parsedReason || fallbackReason;
+      errorText = sanitize(`exit code ${out.code}${reason ? `: ${reason.slice(0, 500)}` : ""}`, secrets);
     }
     return {
       status: succeeded ? "SUCCEEDED" : "FAILED",
@@ -806,7 +1032,7 @@ export async function executeTask(task, secrets = []) {
         ...(parsedData !== undefined ? { data: parsedData } : {}),
       },
       logs: sanitize(`${out.stdout || ""}\n${out.stderr || ""}`.trim(), secrets),
-      error: out.error ? sanitize(out.error, secrets) : succeeded ? undefined : sanitize((out.stderr || "").slice(0, 500), secrets) || `exit code ${out.code}`,
+      error: errorText,
       durationMs: Date.now() - started,
     };
   } catch (error) {

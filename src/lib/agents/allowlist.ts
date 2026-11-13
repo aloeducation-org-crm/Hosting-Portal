@@ -88,6 +88,32 @@ const buildCommand = z
   )
   .refine((c) => !c.includes(".."), "build command must not contain '..'");
 
+/** Start command for a supervised node app, or a relative static output root. */
+const startCommandOrRoot = z
+  .string()
+  .min(1)
+  .max(300)
+  .regex(
+    /^(?:(?:npm|npx|yarn|pnpm|bun|node)(?:\s+[A-Za-z0-9._:@/=-]+)*|[A-Za-z0-9._][A-Za-z0-9._/-]{0,199})$/,
+    "must be a plain start command (npm/npx/yarn/pnpm/bun/node …) or a relative output root",
+  )
+  .refine((c) => !c.includes(".."), "must not contain '..'");
+
+const deploymentId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/, "invalid deployment id");
+
+const commitSha = z.string().regex(/^[0-9a-f]{40}$/, "invalid commit SHA");
+
+const healthPath = z
+  .string()
+  .max(100)
+  .regex(/^\/[A-Za-z0-9/._-]*$/, "must be an absolute path without metacharacters");
+
+const appPort = z
+  .number()
+  .int()
+  .min(1024)
+  .max(65535, "app ports are allocated in the 1024-65535 range");
+
 const siteReleasePath = z
   .string()
   .min(18)
@@ -176,10 +202,13 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     command: "health.probe",
     label: "Probe a local URL",
     description:
-      "Performs an HTTP GET against a loopback or private address and reports status + latency. The agent refuses public targets so it cannot be used as an SSRF pivot.",
+      "Performs an HTTP GET against a loopback or private address and reports status + latency. The agent refuses public targets so it cannot be used as an SSRF pivot. Optional `host` sets the Host header so a name-based reverse proxy can be probed.",
     executable: "alo-agent-probe",
-    argv: (a) => [String(a.url)],
-    argsSchema: recordOf({ url: z.string().url().max(300) }),
+    argv: (a) => [String(a.url), ...(a.host ? ["--host", String(a.host)] : [])],
+    argsSchema: recordOf({
+      url: z.string().url().max(300),
+      host: domainName.optional(),
+    }),
     risk: "READ_ONLY",
     timeoutMs: 20_000,
     requiresSudo: false,
@@ -335,6 +364,70 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     scopes: ["server:execute"],
   },
   {
+    command: "deploy.build-release",
+    label: "Build a specific site release",
+    description:
+      "Runs a validated package-manager command inside /srv/alo-sites/<domain>/releases/<release> — a directory that is not yet active — so builds never touch the live release before verification.",
+    executable: "alo-deploy-helper",
+    argv: (a) => ["build-release", String(a.domain), String(a.releasePath), String(a.buildCmd)],
+    argsSchema: z
+      .object({ domain: domainName, releasePath: siteReleasePath, buildCmd: buildCommand })
+      .passthrough()
+      .refine(
+        (a) => a.releasePath.startsWith(`/srv/alo-sites/${a.domain}/releases/`),
+        "releasePath must belong to the target domain",
+      ) as unknown as z.ZodType<Record<string, string | number | boolean>>,
+    risk: "REVERSIBLE",
+    timeoutMs: 10 * 60_000,
+    requiresSudo: true,
+    scopes: ["server:execute"],
+  },
+  {
+    command: "deploy.marker",
+    label: "Verify and mark a site release",
+    description:
+      "Verifies the cloned release tree's git HEAD equals the pinned commit SHA, then writes the release identity marker (alo-deploy.json) used for live verification. Refuses on commit mismatch.",
+    executable: "alo-deploy-helper",
+    argv: (a) => ["marker", String(a.domain), String(a.releasePath), String(a.deploymentId), String(a.commitSha)],
+    argsSchema: z
+      .object({ domain: domainName, releasePath: siteReleasePath, deploymentId, commitSha })
+      .passthrough()
+      .refine(
+        (a) => a.releasePath.startsWith(`/srv/alo-sites/${a.domain}/releases/`),
+        "releasePath must belong to the target domain",
+      ) as unknown as z.ZodType<Record<string, string | number | boolean>>,
+    risk: "REVERSIBLE",
+    timeoutMs: 60_000,
+    requiresSudo: true,
+    scopes: ["server:execute"],
+  },
+  {
+    command: "deploy.read-marker",
+    label: "Read the live release marker",
+    description:
+      "Returns the release marker (deployment id + commit SHA) of the domain's current release, so the platform can prove which commit is actually live.",
+    executable: "alo-deploy-helper",
+    argv: (a) => ["read-marker", String(a.domain)],
+    argsSchema: recordOf({ domain: domainName }),
+    risk: "READ_ONLY",
+    timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
+    command: "deploy.manifest",
+    label: "Read the active release manifest",
+    description:
+      "Returns a bounded manifest of /srv/alo-sites/<domain>/current — relative paths and contents of text files (dependency/build dirs, binaries and oversized files skipped; hard file/byte caps). Used by the control plane's security scan for remote-node deployments. Read-only.",
+    executable: "alo-deploy-helper",
+    argv: (a) => ["manifest", String(a.domain)],
+    argsSchema: recordOf({ domain: domainName }),
+    risk: "READ_ONLY",
+    timeoutMs: 60_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
     command: "deploy.switch",
     label: "Switch active site release",
     description:
@@ -370,12 +463,57 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     command: "deploy.list",
     label: "List site releases",
     description:
-      "Lists release directories under /srv/alo-sites/<domain>/releases and marks which release is currently active. Read-only.",
+      "Lists release directories under /srv/alo-sites/<domain>/releases (with their deployment markers) and marks which release is currently active. Read-only.",
     executable: "alo-deploy-helper",
     argv: (a) => ["list-releases", String(a.domain)],
     argsSchema: recordOf({ domain: domainName }),
     risk: "READ_ONLY",
     timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  // ── Supervised application runtime (alo-app-helper / node runtime kit) ─────
+  {
+    command: "app.up",
+    label: "Start (or replace) a site's supervised process",
+    description:
+      "Starts the site's runtime through the node runtime kit: type=node runs the validated start command under PM2 in the current release; type=static serves the current release's output root through the platform static server. Binds 127.0.0.1:<port>.",
+    executable: "alo-app-helper",
+    argv: (a) => ["up", String(a.domain), String(a.port), String(a.type), String(a.commandOrRoot), String(a.healthPath ?? "/")],
+    argsSchema: recordOf({
+      domain: domainName,
+      port: appPort,
+      type: z.enum(["node", "static"]),
+      commandOrRoot: startCommandOrRoot,
+      healthPath: healthPath.optional(),
+    }),
+    risk: "PRIVILEGED",
+    timeoutMs: 120_000,
+    requiresSudo: true,
+    scopes: ["server:execute"],
+  },
+  {
+    command: "app.restart",
+    label: "Restart a site's supervised process",
+    description:
+      "Restarts the site's PM2-managed process (node app or static server). One of the two bounded, preapproved self-healing recovery verbs.",
+    executable: "alo-app-helper",
+    argv: (a) => ["restart", String(a.domain)],
+    argsSchema: recordOf({ domain: domainName }),
+    risk: "PRIVILEGED",
+    timeoutMs: 60_000,
+    requiresSudo: true,
+    scopes: ["server:execute"],
+  },
+  {
+    command: "app.status",
+    label: "Read a site's process state",
+    description: "Reports the PM2 state and restart count of the site's supervised process. Read-only.",
+    executable: "alo-app-helper",
+    argv: (a) => ["status", String(a.domain)],
+    argsSchema: recordOf({ domain: domainName }),
+    risk: "READ_ONLY",
+    timeoutMs: 30_000,
     requiresSudo: false,
     scopes: ["server:read"],
   },
@@ -423,12 +561,28 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
     command: "ssl.list",
     label: "List installed TLS certificates",
     description:
-      "Lists Let's Encrypt certificates present on the host with expiry dates and remaining days. Read-only.",
+      "Lists certificates present on the host (Let's Encrypt and internal-CA) with expiry dates and remaining days. Read-only.",
     executable: "alo-ssl-helper",
     argv: () => ["list"],
     argsSchema: recordOf({}),
     risk: "READ_ONLY",
     timeoutMs: 15_000,
+    requiresSudo: false,
+    scopes: ["server:read"],
+  },
+  {
+    command: "ssl.verify-tls",
+    label: "Verify live TLS termination",
+    description:
+      "Performs a real TLS handshake (SNI <domain>) against the local edge listener and validates the served certificate is present and unexpired. Read-only.",
+    executable: "alo-ssl-helper",
+    argv: (a) => ["verify-tls", String(a.domain), ...(a.port ? [String(a.port)] : [])],
+    argsSchema: recordOf({
+      domain: domainName,
+      port: z.number().int().min(1).max(65535).optional(),
+    }),
+    risk: "READ_ONLY",
+    timeoutMs: 30_000,
     requiresSudo: false,
     scopes: ["server:read"],
   },
@@ -470,7 +624,10 @@ export const AGENT_ALLOWLIST: AllowlistEntry[] = [
       ttl: z.number().int().min(60).max(604_800).optional(),
       priority: z.number().int().min(0).max(65_535).optional(),
     }),
-    risk: "PRIVILEGED",
+    // Adding one record to the platform-managed local zone is reversible (the
+    // matching dns.delete can undo it) and does not by itself affect a live
+    // service. Removal stays DESTRUCTIVE.
+    risk: "REVERSIBLE",
     timeoutMs: 15_000,
     requiresSudo: true,
     scopes: ["server:execute"],

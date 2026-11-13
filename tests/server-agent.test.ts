@@ -666,7 +666,11 @@ describe("agent request replay prevention", () => {
     });
     expect(await db.agentNonce.count({ where: { agentId: agent.id } })).toBe(2);
 
+    // The in-request sweep is probabilistic (it only fires on ~5% of requests
+    // to avoid a DELETE per poll), so it must never break consumption…
     expect(await agents.consumeRequestNonce(agent.id, "fresh-nonce")).toBe(true);
+    // …and the explicit sweep prunes everything past the signature window.
+    expect(await agents.sweepExpiredRequestNonces()).toBeGreaterThanOrEqual(2);
     expect(await db.agentNonce.count({ where: { agentId: agent.id, nonce: { startsWith: "ancient" } } })).toBe(0);
     // An expired nonce is no longer protected by the table, and that is correct:
     // the timestamp check now rejects the request on its own.

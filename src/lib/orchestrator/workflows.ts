@@ -109,7 +109,7 @@ export const BUILTIN_WORKFLOWS: Array<{ key: string; name: string; description: 
       { key: "detect", label: "Detect framework and runtime", handler: "FRAMEWORK_DETECTION", dependsOn: ["inspect"], input: { projectId: "{{ input.projectId }}" } },
       { key: "prepare", label: "Validate environment and create deployment", handler: "PLATFORM_OPS", dependsOn: ["detect"], input: { action: "prepare-deployment", projectId: "{{ input.projectId }}", commitSha: "{{ steps.inspect.output.sha }}", detection: "{{ steps.detect.output }}", domain: "{{ input.domain }}", profileKey: "{{ input.profileKey }}" }, lockKey: "project:{{ input.projectId }}" },
       { key: "deploy", label: "Build, activate and verify release", handler: "BUILD_TEST", dependsOn: ["prepare"], input: { deploymentId: "{{ steps.prepare.output.deploymentId }}" }, lockKey: "project:{{ input.projectId }}", timeoutMs: 1_800_000 },
-      { key: "dns", label: "Verify custom domain DNS", handler: "DOMAIN_TLS", dependsOn: ["deploy"], when: { path: "input.domain", operator: "truthy" }, input: { action: "verify-ownership", projectId: "{{ input.projectId }}", domain: "{{ input.domain }}", expectedIp: "{{ steps.prepare.output.publicIp }}" } },
+      { key: "dns", label: "Verify custom domain DNS", handler: "DOMAIN_TLS", dependsOn: ["deploy"], when: { path: "input.domain", operator: "truthy" }, input: { action: "verify-ownership", projectId: "{{ input.projectId }}", domain: "{{ input.domain }}", expectedIp: "{{ steps.prepare.output.publicIp }}", agentId: "{{ steps.prepare.output.agentId }}" } },
       { key: "proxy", label: "Configure reverse proxy", handler: "PLATFORM_OPS", dependsOn: ["dns"], when: { path: "input.domain", operator: "truthy" }, executionActor: "platform", input: { action: "configure-proxy", projectId: "{{ input.projectId }}", domain: "{{ input.domain }}", port: "{{ steps.prepare.output.port }}", agentId: "{{ steps.prepare.output.agentId }}" } },
       { key: "tls", label: "Issue TLS certificate", handler: "DOMAIN_TLS", dependsOn: ["proxy"], when: { path: "input.domain", operator: "truthy" }, executionActor: "platform", input: { action: "issue-certificate", projectId: "{{ input.projectId }}", domain: "{{ input.domain }}", agentId: "{{ steps.prepare.output.agentId }}" } },
       { key: "verify", label: "Verify live application", handler: "MONITORING_RECOVERY", dependsOn: ["tls"], input: { action: "check", projectId: "{{ input.projectId }}" } },
@@ -128,7 +128,7 @@ export const BUILTIN_WORKFLOWS: Array<{ key: string; name: string; description: 
     definition: { version: 1, steps: [
       { key: "evidence", label: "Collect logs and metrics", handler: "PLATFORM_OPS", input: { action: "collect-evidence", projectId: "{{ input.projectId }}" } },
       { key: "diagnose", label: "Determine recovery action", handler: "PLATFORM_OPS", dependsOn: ["evidence"], input: { action: "diagnose", projectId: "{{ input.projectId }}", evidence: "{{ steps.evidence.output }}" } },
-      { key: "restart", label: "Restart crashed service", handler: "INFRASTRUCTURE", dependsOn: ["diagnose"], when: { path: "steps.diagnose.output.action", operator: "equals", value: "restart" }, input: { agentId: "{{ steps.diagnose.output.agentId }}", command: "service.restart", args: { unit: "{{ steps.diagnose.output.unit }}" } } },
+      { key: "restart", label: "Restart crashed service", handler: "INFRASTRUCTURE", dependsOn: ["diagnose"], when: { path: "steps.diagnose.output.action", operator: "equals", value: "restart" }, input: { agentId: "{{ steps.diagnose.output.agentId }}", command: "{{ steps.diagnose.output.command }}", args: { unit: "{{ steps.diagnose.output.unit }}", domain: "{{ steps.diagnose.output.domain }}" } } },
       { key: "rollback", label: "Restore previous verified release", handler: "MONITORING_RECOVERY", dependsOn: ["diagnose"], when: { path: "steps.diagnose.output.action", operator: "equals", value: "rollback" }, input: { action: "recover", projectId: "{{ input.projectId }}" } },
       { key: "restart-static", label: "Restart platform static listener", handler: "PLATFORM_OPS", dependsOn: ["diagnose"], when: { path: "steps.diagnose.output.action", operator: "equals", value: "restart-static" }, input: { action: "restart-static", projectId: "{{ input.projectId }}" } },
       { key: "verify", label: "Verify recovery", handler: "MONITORING_RECOVERY", dependsOn: ["restart", "rollback", "restart-static"], input: { action: "check", projectId: "{{ input.projectId }}" } },
@@ -143,11 +143,26 @@ export const BUILTIN_WORKFLOWS: Array<{ key: string; name: string; description: 
 export async function ensureBuiltinWorkflows(): Promise<void> {
   for (const builtin of BUILTIN_WORKFLOWS) {
     const definition = validateWorkflowDefinition(builtin.definition);
-    await db.automationWorkflow.upsert({
-      where: { key: builtin.key },
-      create: { key: builtin.key, name: builtin.name, description: builtin.description, definition: json(definition), trigger: builtin.trigger, eventName: builtin.eventName ?? null, intervalSeconds: builtin.intervalSeconds ?? null, enabled: true, nextRunAt: builtin.trigger === "schedule" ? new Date() : null },
-      update: {}, // never overwrite an administrator's versioned configuration
-    });
+    const existing = await db.automationWorkflow.findUnique({ where: { key: builtin.key } });
+    if (!existing) {
+      // Plain create: Prisma implements upsert as an interactive transaction,
+      // and this runs on every engine tick — the transaction churn wedged the
+      // SQLite adapter under load. Steady-state ticks must not write at all.
+      await db.automationWorkflow.create({ data: { key: builtin.key, name: builtin.name, description: builtin.description, definition: json(definition), trigger: builtin.trigger, eventName: builtin.eventName ?? null, intervalSeconds: builtin.intervalSeconds ?? null, enabled: true, nextRunAt: builtin.trigger === "schedule" ? new Date() : null } }).catch((error) => {
+        // A concurrent tick may have created it first; that outcome is fine.
+        if ((error as { code?: string })?.code !== "P2002") throw error;
+      });
+      continue;
+    }
+    // A platform-owned builtin (no administrator author) is refreshed when the
+    // compiled-in definition changes, and the version bump records that the
+    // definition moved. A workflow an administrator authored (createdById set)
+    // is never overwritten.
+    const refresh =
+      existing.createdById === null && existing.definition !== json(definition)
+        ? { definition: json(definition), version: { increment: 1 }, description: builtin.description }
+        : null;
+    if (refresh) await db.automationWorkflow.update({ where: { key: builtin.key }, data: refresh });
   }
 }
 
@@ -243,7 +258,11 @@ export async function advanceRun(runId: string, orch: Orchestrator): Promise<voi
     const def = definition.steps.find((s) => s.key === step.key)!;
     const deps = run.steps.filter((s) => def.dependsOn.includes(s.key));
     if (deps.some((d) => ["FAILED", "CANCELLED", "WAITING_EXTERNAL"].includes(d.status))) { await db.automationStep.update({ where: { id: step.id }, data: { status: "SKIPPED", error: "Dependency did not complete" } }); changed = true; continue; }
-    if (deps.some((d) => d.status !== "SUCCEEDED")) continue;
+    // A SKIPPED dependency is a terminal, deterministic outcome (its `when`
+    // condition was not met), not an unfinished one — join steps that depend
+    // on alternative branches (e.g. self-heal's restart|rollback|restart-static)
+    // must advance once the taken branch finished, or the run can never end.
+    if (deps.some((d) => d.status !== "SUCCEEDED" && d.status !== "SKIPPED")) continue;
     const stored = parse<{ input: Record<string, unknown>; when: z.infer<typeof conditionSchema> | null; lockKey: string | null; executionActor: "requester" | "platform"; requiresApproval: boolean | null; maxAttempts: number | null; timeoutMs: number | null }>(step.inputTemplate, { input: {}, when: null, lockKey: null, executionActor: "requester", requiresApproval: null, maxAttempts: null, timeoutMs: null });
     if (!conditionPasses(stored.when, scope)) { await db.automationStep.update({ where: { id: step.id }, data: { status: "SKIPPED", finishedAt: new Date() } }); changed = true; continue; }
     const input = renderDeep(stored.input, scope) as Record<string, unknown>;

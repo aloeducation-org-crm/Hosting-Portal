@@ -33,6 +33,13 @@ let stopping = false;
 let inTick = false;
 let lastSuccessAt: string | null = null;
 let lastError: string | null = null;
+// Consecutive failed ticks. A wedged database adapter (a leaked Prisma
+// interactive transaction holds the SQLite adapter's mutex) makes every
+// following tick fail deterministically; a worker that only logs is then dead
+// in the water while looking alive. After this many failures in a row the
+// worker exits non-zero so the supervisor restarts it with a fresh adapter.
+const MAX_CONSECUTIVE_TICK_FAILURES = Math.max(2, Number(process.env.ORCHESTRATOR_MAX_TICK_FAILURES) || 5);
+let consecutiveFailures = 0;
 
 async function heartbeat() {
   const payload = { workerId, pid: process.pid, inTick, lastSuccessAt, lastError, updatedAt: new Date().toISOString() };
@@ -46,12 +53,22 @@ async function tick() {
     const result = await runAutomationTick({ workerId, maxJobs });
     lastSuccessAt = new Date().toISOString();
     lastError = null;
+    consecutiveFailures = 0;
     if (result.recovered.jobIds.length || result.expiredTasks || result.ran.length || result.scheduled.length) {
       logger.info({ workerId, jobs: result.ran.length, scheduled: result.scheduled.length, recovered: result.recovered.jobIds.length }, "automation tick");
     }
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 300) : "unknown";
-    logger.error({ workerId, error }, "automation tick failed");
+    consecutiveFailures += 1;
+    logger.error({ workerId, error, consecutiveFailures }, "automation tick failed");
+    if (!once && consecutiveFailures >= MAX_CONSECUTIVE_TICK_FAILURES) {
+      // Crash-only design: the supervisor (systemd, PM2, the run loop that
+      // started this process) restarts us with a clean adapter. Leases and
+      // idempotency keys make the restart safe.
+      logger.fatal({ workerId, consecutiveFailures }, "automation worker gave up after repeated tick failures; exiting for a supervised restart");
+      process.exitCode = 1;
+      stopping = true;
+    }
   } finally {
     inTick = false;
     await heartbeat();

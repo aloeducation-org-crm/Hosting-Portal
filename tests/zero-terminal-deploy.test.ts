@@ -16,6 +16,13 @@ import {
 describe("Zero-Terminal AI Deploy Assistant", () => {
   const originalEnv = { ...process.env };
 
+  // These tests assert the documented default suffix; an ambient .env (e.g.
+  // the acceptance harness's DEPLOY_DOMAIN_SUFFIX=acceptance.alo.test) must
+  // not change what they observe.
+  beforeEach(() => {
+    delete process.env.DEPLOY_DOMAIN_SUFFIX;
+  });
+
   afterEach(() => {
     process.env = { ...originalEnv };
     vi.restoreAllMocks();

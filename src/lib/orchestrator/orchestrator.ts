@@ -121,7 +121,16 @@ const DEFAULT_OPTIONS: Required<Omit<OrchestratorOptions, "now">> = {
 
 interface JobMetadata {
   timeoutMs: number;
+  /** Scopes the job's INPUT requires — used to re-assert the actor at execution time. */
   scopes: string[];
+  /**
+   * The actor's actual scopes at enqueue time. Handlers that dispatch agent
+   * commands must authorize those commands against what the actor is really
+   * allowed to do, not against this job's required-scopes subset (a deploy
+   * job requires build:run/release:write, but its agent commands may need
+   * server:read/server:execute, which the actor holds).
+   */
+  actorScopes?: string[];
   inputHash: string;
   retrySafe: boolean;
   automation?: { runId: string; stepId: string };
@@ -229,7 +238,10 @@ export class Orchestrator {
     if (!Number.isInteger(requestedAttempts) || requestedAttempts < 1 || requestedAttempts > 10) {
       throw new WorkerError("VALIDATION_FAILED", "maxAttempts must be an integer from 1 to 10", false);
     }
-    if (!retrySafe && requestedAttempts > 1) {
+    // An explicit request for retries on a non-retry-safe action is rejected;
+    // a defaulted attempt count is simply clamped to 1. Either way a
+    // non-retry-safe job never runs more than once.
+    if (!retrySafe && request.maxAttempts !== undefined && request.maxAttempts > 1) {
       throw new WorkerError("UNSAFE_RETRY", `${request.kind} has not declared this action safe to retry; maxAttempts must be 1`, false);
     }
     const maxAttempts = retrySafe ? requestedAttempts : 1;
@@ -245,6 +257,7 @@ export class Orchestrator {
     const meta: JobMetadata = {
       timeoutMs, scopes: [...scopes], retrySafe,
       inputHash: createHash("sha256").update(`${request.kind}:${input}`).digest("hex"),
+      ...(request.actor?.scopes?.length ? { actorScopes: [...request.actor.scopes] } : {}),
       ...(request.automation ? { automation: request.automation } : {}),
     };
 
@@ -561,7 +574,7 @@ export class Orchestrator {
       correlationId,
       signal: controller.signal,
       approval: job.approvedBy && job.approvedAt ? { by: job.approvedBy, at: job.approvedAt } : null,
-      actor: job.actorEmail ? { id: job.actorId ?? "", email: job.actorEmail, role: job.actorRole ?? "", scopes: stored.meta?.scopes ?? [] } : null,
+      actor: job.actorEmail ? { id: job.actorId ?? "", email: job.actorEmail, role: job.actorRole ?? "", scopes: stored.meta?.actorScopes ?? stored.meta?.scopes ?? [] } : null,
       progress: async (percent, message) => {
         controller.signal.throwIfAborted();
         await db.operationJob.updateMany({ where: { id: jobId, leasedBy: workerId, status: "RUNNING" }, data: { progress: clamp(percent, 0, 100) } });
