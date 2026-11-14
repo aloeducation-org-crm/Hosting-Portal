@@ -58,6 +58,13 @@ const envSchema = z.object({
   // Cloudflare DNS & SSL
   CLOUDFLARE_API_TOKEN: z.string().optional().default(""),
   CLOUDFLARE_ZONE_ID: z.string().optional().default(""),
+  // Cloudflare Registrar (domain purchases) — distinct from DNS records above.
+  // The Registrar API needs the account ID and the token must carry
+  // Account:Registrar:Edit in addition to Zone:DNS:Edit.
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional().default(""),
+  // Which DNS publication mode the panel uses: "local" (panel-only store),
+  // "cloudflare" (Zone DNS API), "powerdns" (blocked), "registrar" (now wired).
+  DNS_PROVIDER_MODE: z.enum(["local", "cloudflare", "powerdns", "registrar"]).default("local"),
 
   // Hostinger public API (Server C)
   HOSTINGER_API_TOKEN: z.string().optional().default(""),
