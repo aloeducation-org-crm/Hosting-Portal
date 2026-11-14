@@ -52,6 +52,19 @@ on:
         required: false
         default: ''
         type: string
+      # Diagnostics for the `verify-routing` job. They only choose what that
+      # read-only job inspects; no other job reads them, so a dispatch with
+      # these filled and release_approval empty verifies without deploying.
+      routing_domain:
+        description: 'Apex domain for the read-only routing check (default hosting.alolabs.net).'
+        required: false
+        default: 'hosting.alolabs.net'
+        type: string
+      routing_port:
+        description: 'Loopback port the panel listens on for the read-only routing check (default 3051).'
+        required: false
+        default: '3051'
+        type: string
 
 permissions:
   contents: read
@@ -245,6 +258,42 @@ jobs:
             scripts/deploy-preflight.sh
             scripts/decide-release-target.mjs
             .deploy-digest
+
+  # Read-only routing diagnostic, deliberately separate from `deploy-preflight`.
+  # Preflight only runs for an approved release dispatch, so it cannot answer
+  # "is the public domain healthy right now?" during an incident — this job can.
+  # It mutates nothing: no install, no build, no migration, no restart, and it
+  # never writes config. `continue-on-error` is set because several findings
+  # depend on infrastructure this job cannot change (the Cloudflare SSL/TLS
+  # mode is a dashboard setting), so a failure must be reported, not block a
+  # release that the operator has separately approved.
+  verify-routing:
+    name: Verify public routing (read-only)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: self-hosted
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that the public domain reaches the panel
+        env:
+          DOMAIN: ${{ github.event.inputs.routing_domain || 'hosting.alolabs.net' }}
+          APP_PORT: ${{ github.event.inputs.routing_port || '3051' }}
+          # Optional. Without them the Cloudflare SSL/TLS mode check reports
+          # NOT VERIFIABLE instead of guessing, which is the honest outcome —
+          # 'flexible' is the setting that produces the 530 redirect loop.
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          set -Eeuo pipefail
+          bash scripts/verify-production-routing.sh | tee routing-report.txt
+      - name: Upload the routing report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: routing-report-${{ github.sha }}
+          path: routing-report.txt
+          if-no-files-found: ignore
 
   # Read-only. Runs only for an explicitly approved production dispatch, before
   # the mutating job. It changes nothing on the host: no checkout, no install
