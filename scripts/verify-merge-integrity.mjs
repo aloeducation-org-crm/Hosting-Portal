@@ -45,6 +45,26 @@ const CONSOLIDATED = {
     canonical: ".github/workflows/ci-cd.yml",
     why: "auto-deploy workflow superseded by the release-guarded CI and production deploy workflow",
   },
+  // Removals that predate the 2026-11-09 unification and so are absent from
+  // `semantic-diff.json`. They are recorded here — with the commit that made
+  // them and the replacement that still exists — so that "absent from HEAD"
+  // can never be mistaken for "silently lost" if one is ever reintroduced.
+  "alo-hosting-portal/.github/workflows/ci-cd.yml": {
+    canonical: ".github/workflows/ci-cd.yml",
+    why: "nested app's workflow moved to the repository root by 8eadfc1 (correct cache-dependency-path)",
+  },
+  "alo-hosting-portal/.github/workflows/deploy.yml": {
+    canonical: ".github/workflows/ci-cd.yml",
+    why: "nested app's auto-deploy workflow moved to the repository root and superseded by 8eadfc1",
+  },
+  "bun.lock": {
+    canonical: "package-lock.json",
+    why: "Bun lockfile dropped when the project standardised on npm (package-lock.json is the live lockfile)",
+  },
+  "src/app/login/page.tsx": {
+    canonical: "src/app/(auth)/login/page.tsx",
+    why: "login page moved into the (auth) route group by the phase-1 auth rebuild (4b81b35)",
+  },
 };
 
 function git(...args) {
