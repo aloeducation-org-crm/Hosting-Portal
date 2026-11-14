@@ -87,3 +87,4 @@ release-identity.json
 
 # Sandbox acceptance artifacts (generated at runtime; evidence lives in REAL-LIFECYCLE-PROOF.md)
 db/acceptance.db*
+.deploy-pm2.lock
