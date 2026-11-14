@@ -1,8 +1,13 @@
 # Merge-integrity verification — every merged PR is fully present in `main`
 
-**Generated:** 2026-11-13
-**Scope:** pull requests #1–#38 in `aloeducation-org-crm/Hosting-Portal`
+**Generated:** 2026-11-14
+**Scope:** pull requests #1–#39 in `aloeducation-org-crm/Hosting-Portal`
 **Question answered:** *are all merge requests actually merged, is any merged file missing from `main`, and are any files broken?*
+
+> **Re-run note (2026-11-14).** This report was refreshed after PR #39 merged, so the scope is now
+> 39 PRs / 45 merge commits. It additionally closes the last gap in the first run: four paths that
+> were removed *before* the 2026-11-09 unification are now recorded in the guard (§3, §4) instead of
+> being explained only by commit history. Verdict is unchanged — **nothing is missing**.
 
 ---
 
@@ -10,17 +15,17 @@
 
 | Question | Answer | Evidence |
 |---|---|---|
-| Are all merge requests merged? | **Yes — 38 of 38.** No open or closed-unmerged PRs exist. | `gh pr list --state all` |
-| Is any PR head or merge commit absent from `main`? | **No.** Every PR's `headRefOid` *and* `mergeCommit.oid` is an ancestor of `main`. | `git merge-base --is-ancestor <sha> main` → true for 38/38 |
-| Did this branch hold work that never reached `main`? | **No.** `arena/9304b44c-hosting-portal` was branched from `07c34ad` and differs from `main` by **0 commits / 0 files**. | `git diff --stat main` (empty) |
-| Was any file introduced by a merge later dropped without trace? | **No.** Of 1,096 files added by the 44 reachable merge commits, **1,078 are present in `HEAD`** and the remaining **18 are accounted for individually** (§3). **0 unexplained.** | `npm run audit:merges` |
+| Are all merge requests merged? | **Yes — 39 of 39.** No open or closed-unmerged PRs exist. | `gh pr list --state all` |
+| Is any PR head or merge commit absent from `main`? | **No.** Every PR's `headRefOid` *and* `mergeCommit.oid` is an ancestor of `main`. | `git merge-base --is-ancestor <sha> main` → true for 39/39 heads and 39/39 merges |
+| Did this branch hold work that never reached `main`? | **No.** `arena/427e0528-hosting-portal` was branched from `8f020ee` and started with **0 commits / 0 files** of its own. | `git diff --stat main` (empty at branch point) |
+| Was any file introduced by a merge later dropped without trace? | **No.** Of 1,098 files added by the 45 reachable merge commits, **1,080 are present in `HEAD`** and the remaining **18 are accounted for individually** (§3). **0 unexplained.** | `npm run audit:merges` |
 | Are there broken files? | **No.** Lint, typecheck, 1,241 tests, production build, worker build, and the repository audit all pass (§2). | commands in §2 |
 
 Because nothing was missing, **nothing had to be restored**. No application code was changed by this audit; the only additions are the repeatable guard in §4 and this report.
 
 ---
 
-## 2. Gate results (run against `main` @ `07c34ad`)
+## 2. Gate results (run against `main` @ `8f020ee`)
 
 | Gate | Command | Result |
 |---|---|---|
@@ -35,7 +40,44 @@ Because nothing was missing, **nothing had to be restored**. No application code
 | Merge conflict markers | `git grep -nE '^(<<<<<<< |=======$|>>>>>>> )'` | None |
 | Empty tracked files | size scan | Only 3 intentional `.gitkeep` markers |
 
-CI on `main` is green: the run for `07c34ad` (2026-11-13T19:08Z) **succeeded**. The two earlier failures on `main` (11:52Z and 07:11Z) were fixed by PR #38 itself, which merged at 19:08Z.
+CI on `main` is green: the run for `8f020ee` (2026-11-13T19:26Z, run `43491702424`) **succeeded**.
+
+### 2.1 The two failures that preceded this report, and their root cause
+
+| Failing run | What it was | Failure |
+|---|---|---|
+| `43383998607` — push to `main`, merge of PR #35 | "Merge pull request #35 from … feat/native-cmake-build-pipeline" | job *Lint, typecheck, and tests* |
+| `43420443168` — PR #37 (`arena/374447c3-hosting-portal`) | "Remote-node deployment: verified lifecycle, self-heal, and root-cause acceptance fixes" | `npm test` → `tests/marketing-operator-and-providers.test.ts:383` — `expected 400 to be 200`, then `expected 0 to be greater than 100` |
+
+Both were the **same root cause: schema drift, not missing files.**
+
+PR #37 added migration `20261112120000_remote_node_deployment`, which adds `git_projects.agentId`. It updated the Prisma schema and the migration file, but **not** the two places CI actually derives its test database from:
+
+- `REQUIRED_SCHEMA` in `scripts/apply-deploy-schema.mjs` — still listed `git_projects` without `agentId`, so the column was never created in the CI database;
+- `SCHEMA_PROBES` in `src/lib/health.ts` — did not probe the new column.
+
+The health probe therefore reported the schema as incomplete, the `/api/ai/operator` auto-deploy path rejected the request with **400**, and the assertion expecting **200** failed. No file was missing from `main`; every file PR #37 touched is present.
+
+PR #38 ("sync remote-node deployment schema, audit gates, and worker supervision") fixed it at the root by:
+
+- adding `agentId` to `REQUIRED_SCHEMA.git_projects` and `executedByAgentId` to `REQUIRED_SCHEMA.deployments`;
+- adding the matching `git_projects` / `deployments` probes to `SCHEMA_PROBES`;
+- extending the migration with `deployments.executedByAgentId`;
+- adding `DATABASE_BUSY_TIMEOUT_MS` and `ORCHESTRATOR_MAX_TICK_FAILURES` to `.env.example`.
+
+PR #38 did **not** delete or relax any test or any file from PR #37 — it changed 22 files, all of them schema/config/supervision, and it *added* coverage (`tests/native-build.test.ts` +21). Verified locally on `8f020ee`: **77 test files / 1,241 passed / 1 skipped / 0 failed**.
+
+#### Review checklist when a PR adds a column
+
+This failure class is only partly mechanical, so it needs a checklist as well as a test:
+
+- [ ] `prisma/schema.prisma` — model field added
+- [ ] `prisma/migrations/<timestamp>_<name>/migration.sql` — `ALTER TABLE … ADD COLUMN`
+- [ ] `REQUIRED_SCHEMA` in `scripts/apply-deploy-schema.mjs` — **add it if the panel cannot start or deploy without it** (this is the step PR #37 missed)
+- [ ] `SCHEMA_PROBES` in `src/lib/health.ts` — add it if drift must be visible to the health probe
+- [ ] `.env.example` — add any new tuning variable it introduces
+
+`tests/deploy-schema-sync.test.ts` enforces the parts that are mechanically decidable (migration → Prisma, and listed-entry → Prisma). It explicitly does **not** enforce "every migrated column must be required", because `REQUIRED_SCHEMA` is a curated minimal subset — 18 migrated columns are correctly absent from it today.
 
 ---
 
@@ -64,16 +106,29 @@ These are the *only* files that a merge commit added and that are absent from `H
 | `src/app/api/agents/[id]/revoke/route.ts` | renamed → `src/app/api/agents/[slug]/revoke/route.ts` | dynamic segment renamed [id] -> [slug] |
 | `src/app/api/agents/[id]/rotate/route.ts` | renamed → `src/app/api/agents/[slug]/rotate/route.ts` | dynamic segment renamed [id] -> [slug] |
 
-Notes on the three that are not in the retirement manifest and are therefore pinned explicitly in the guard:
+Notes on the entries that are not in the retirement manifest and are therefore pinned explicitly in the guard:
 
 - `src/app/api/agents/[id]/revoke|rotate/route.ts` → now `[slug]/…`. The diff is only the dynamic-segment name plus an explanatory comment; handler bodies are unchanged.
 - `.github/workflows/deploy.yml` → superseded by `.github/workflows/ci-cd.yml`. The retired file ran an unattended `git pull` + `pm2 restart` over SSH on every push to `main`; the replacement requires an attributable release approval and verifies the artifact digest, so restoring the old file would re-open that hole.
+
+### 3.1 Four further paths: removed *before* the unification, now also recorded
+
+Comparing the file tree of **every PR head** (not only merge-added files) against `HEAD` surfaces 438 paths that no longer sit at their original location. 431 are the 2026-11-09 retirement set. The other 7 are the routes and workflow above plus these four, which were removed by ordinary commits months earlier and so never appeared in `semantic-diff.json`. They were verified individually — each was **superseded, not lost** — and are now pinned in the guard's `CONSOLIDATED` map so their absence is a matter of record rather than of archaeology:
+
+| Path | Removed by | Replacement that still exists in `HEAD` |
+|---|---|---|
+| `alo-hosting-portal/.github/workflows/ci-cd.yml` | `8eadfc1` — "fix: workflows at repo root with correct cache-dependency-path" (2026-10-25) | `.github/workflows/ci-cd.yml` |
+| `alo-hosting-portal/.github/workflows/deploy.yml` | `8eadfc1` (same commit — nested app's workflows moved to the repository root) | `.github/workflows/ci-cd.yml` |
+| `bun.lock` | `2023a1e` (2026-10-25) — project standardised on npm | `package-lock.json` |
+| `src/app/login/page.tsx` | `4b81b35` — phase-1 auth rebuild | `src/app/(auth)/login/page.tsx` |
+
+Each replacement was confirmed to exist in `HEAD` at the time of the audit. **Result: 438 absent paths, 438 accounted for, 0 unexplained.**
 
 ---
 
 ## 4. New guard: `npm run audit:merges`
 
-`scripts/verify-merge-integrity.mjs` makes this verification repeatable instead of a one-off claim. For every merge commit reachable from `HEAD` it collects the files that merge **added** (rename detection disabled, so moves appear as explicit add/delete) and requires each to be either present in `HEAD`, replaced by a canonical path in `archive/retired-2026-11-09/semantic-diff.json`, covered by the explicit `[id] → [slug]` route-rename rule, or covered by the explicit workflow-consolidation rule. Anything else fails the audit with the file, its introducing commit(s), and the instruction to restore it or record a reviewed retirement.
+`scripts/verify-merge-integrity.mjs` makes this verification repeatable instead of a one-off claim. For every merge commit reachable from `HEAD` it collects the files that merge **added** (rename detection disabled, so moves appear as explicit add/delete) and requires each to be either present in `HEAD`, replaced by a canonical path in `archive/retired-2026-11-09/semantic-diff.json`, covered by the explicit `[id] → [slug]` route-rename rule, or covered by the explicit `CONSOLIDATED` map (workflow consolidation plus the four pre-unification removals in §3.1). Anything else fails the audit with the file, its introducing commit(s), and the instruction to restore it or record a reviewed retirement.
 
 It is wired into:
 
@@ -83,9 +138,10 @@ It is wired into:
 
 Behaviour was validated in both directions:
 
-- **Positive:** current `main` → `ok: true`, 1,096 added / 1,078 present / 18 explained / 0 unexplained.
-- **Negative:** deleting a merged file and committing it → `ok: false`, exit code 1, naming `SERVER-SPEC.md` and its introducing commits.
-- **Shallow clone:** prints a `skipped` report and exits 0, so shallow developer clones and server checkouts are never broken.
+- **Positive:** current `main` (`8f020ee`) → `ok: true`, exit 0 — **1,098 added / 1,080 present / 18 explained / 0 unexplained** across 45 merge commits.
+- **Negative (retired file):** deleting a merged file and committing it → `ok: false`, exit code 1, naming `SERVER-SPEC.md` and its introducing commits.
+- **Negative (pre-unification path):** re-adding `bun.lock` on a branch, merging it, then deleting it again → without the new `CONSOLIDATED` entry the guard fails with exit 1 (`unexplained: 1`, naming the merge commit); with the entry it passes and reports `via: "consolidated" → package-lock.json`. This is the test that proves the four paths in §3.1 are genuinely pinned rather than merely described.
+- **Shallow clone:** prints a `skipped` report and exits 0, so shallow developer clones and server checkouts are never broken. CI pins `fetch-depth: 0` so the gate cannot silently no-op itself.
 
 ---
 
