@@ -4,6 +4,8 @@ import { requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TOTP } from 'otpauth';
 import { hashPassword } from '@/lib/password';
+import { openMfaSecret, sealMfaSecret } from '@/lib/mfa-challenge';
+import { needsSealing } from '@/lib/secret-store';
 import crypto from 'crypto';
 
 function handleErr(e: unknown): NextResponse {
@@ -45,13 +47,14 @@ export async function POST(request: NextRequest) {
       throw apiError('MFA must be enabled to regenerate backup codes', 'MFA_NOT_ENABLED', undefined, 400);
     }
 
+    const plainSecret = openMfaSecret(userMfa.secret);
     const totp = new TOTP({
       issuer: 'ALO Labs Hosting',
       label: auth.email,
       algorithm: 'SHA1',
       digits: 6,
       period: 30,
-      secret: userMfa.secret,
+      secret: plainSecret,
     });
 
     const delta = totp.validate({ token: code, window: 1 });
@@ -70,6 +73,7 @@ export async function POST(request: NextRequest) {
     await db.userMfa.update({
       where: { userId: auth.id },
       data: {
+        ...(needsSealing(userMfa.secret) ? { secret: sealMfaSecret(plainSecret) } : {}),
         backupCodes: JSON.stringify(hashedCodes),
       },
     });

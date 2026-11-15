@@ -269,7 +269,7 @@ export default function Home() {
                 What we build for clients
               </a>
               <a
-                href="/support"
+                href="/contact"
                 className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 hover:text-white"
               >
                 Contact support
@@ -297,7 +297,7 @@ export default function Home() {
                 <ArrowRight className="size-4" />
               </a>
               <a
-                href="/support"
+                href="/contact"
                 className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-[#1E293B] transition-colors hover:border-[#E8501A] hover:text-[#E8501A]"
               >
                 Contact support

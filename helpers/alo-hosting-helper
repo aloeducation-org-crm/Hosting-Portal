@@ -311,10 +311,41 @@ action_cleanup_release() {
   json_out "{\"success\":true,\"step\":\"cleanup-release\",\"domain\":\"${domain}\",\"removed\":${removed},\"kept\":${keep_count}}"
 }
 
+# ── action: deploy ──────────────────────────────────────────────────────────
+action_deploy() {
+  if [[ $# -lt 1 ]]; then
+    die "deploy" "Usage: deploy <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  local site_dir="${SITE_BASE}/${domain}"
+  if [[ ! -d "$site_dir" ]]; then
+    die "deploy" "Site directory does not exist: ${domain}"
+  fi
+
+  # Restart managed site service when present
+  local service_name="alo-site-${domain}.service"
+  if systemctl list-unit-files "$service_name" &>/dev/null; then
+    systemctl restart "$service_name" || die "deploy" "Failed to restart ${service_name}"
+  fi
+
+  # Validate and reload Caddy when configured
+  if [[ -f "${CADDY_CONFIG_DIR}/${domain}.caddy" ]]; then
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || \
+      die "deploy" "Caddy config validation failed"
+    systemctl reload caddy || die "deploy" "Failed to reload Caddy"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"deploy\",\"domain\":\"${domain}\",\"siteDir\":\"${site_dir}\",\"message\":\"Deployment activated\"}"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
   provision-static) action_provision_static "$@" ;;
   provision-php)    action_provision_php "$@" ;;
+  deploy)           action_deploy "$@" ;;
   validate-caddy)   action_validate_caddy "$@" ;;
   reload-caddy)     action_reload_caddy "$@" ;;
   allocate-port)    action_allocate_port "$@" ;;

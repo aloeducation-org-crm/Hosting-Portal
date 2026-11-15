@@ -5,42 +5,27 @@ import Image from 'next/image';
 import {
   Menu,
   ChevronDown,
-  Search,
   Globe,
   Server,
   Shield,
   ArrowRight,
-  FileSearch,
   Lock,
   LayoutGrid,
   Sparkles,
   Palette,
   BookOpen,
-  GraduationCap,
   Building2,
   Phone,
   Activity,
-  Zap,
-  ShoppingCart,
   Mail,
   Bot,
   Globe2,
-  Code2,
   Boxes,
-  ArrowRightLeft,
-  Wifi,
   CloudCog,
   Database,
-  MonitorSmartphone,
-  PenTool,
-  Link2,
-  Newspaper,
   Megaphone,
-  MessageSquare,
-  Headphones,
   BookMarked,
   Lightbulb,
-  FolderOpen,
   type LucideIcon,
 } from 'lucide-react';
 import { Sheet, SheetTrigger, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -65,67 +50,41 @@ interface MegaMenuSection {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Services menu data (matches Hostinger's 6 categories)                     */
+/*  Platform menu data (reflects real ALO Labs control-plane capabilities)    */
 /* -------------------------------------------------------------------------- */
 
 const servicesSections: MegaMenuSection[] = [
   {
-    title: 'CREATE A WEBSITE',
+    title: 'HOSTING & DEPLOYMENTS',
     items: [
-      { label: 'Vibe code websites', href: '/dashboard/websites/new', icon: Sparkles, badge: 'FREE TRIAL', description: 'Describe what you want, and our AI builder creates it. No technical skills needed.' },
-      { label: 'Drag-and-drop website builder', href: '/dashboard/websites/new', icon: Palette, description: 'Build and edit your site with templates' },
-      { label: 'Managed hosting for WordPress', href: '/dashboard', icon: LayoutGrid, description: 'Power your website with the world\'s leading CMS' },
-      { label: 'Migrate a website', href: '/dashboard', icon: ArrowRightLeft, description: 'Move your site fast and for free' },
+      { label: 'Websites & deployments', href: '/sites', icon: Server, description: 'Deploy Static, PHP, Node.js, and Next.js applications on ALO-managed hosts' },
+      { label: 'Cloud Projects (BaaS)', href: '/cloud', icon: CloudCog, description: 'Managed database, auth, storage, and worker projects in one workspace' },
+      { label: 'App Center', href: '/apps', icon: Boxes, description: 'Install and monitor supported self-hosted applications' },
+      { label: 'Backups & monitoring', href: '/dashboard/monitoring', icon: Activity, description: 'Scheduled backups, health checks, and service telemetry' },
     ],
   },
   {
-    title: 'SELL ONLINE',
+    title: 'DOMAINS, MAIL & DATA',
     items: [
-      { label: 'Ecommerce', href: '/dashboard', icon: ShoppingCart, badge: 'NEW', description: 'Everything you need to launch, run and scale your ecommerce business' },
-      { label: 'Managed hosting for WooCommerce', href: '/dashboard', icon: LayoutGrid, description: 'Run your WooCommerce store with ease' },
+      { label: 'Domains & DNS', href: '/dashboard/domains', icon: Globe, description: 'Manage domains, DNS zones, and TLS certificates' },
+      { label: 'Managed databases', href: '/databases', icon: Database, description: 'Provision MariaDB and PostgreSQL databases for hosted sites' },
+      { label: 'Business email', href: '/dashboard/email', icon: Mail, description: 'Manage domain mailboxes with SPF, DKIM, and DMARC records' },
+      { label: 'Security & access', href: '/dashboard/settings', icon: Lock, description: 'Role-based access control, TOTP MFA, and audit logs' },
     ],
   },
   {
-    title: 'HOST AND DEPLOY',
+    title: 'AI OPERATIONS & SYSTEMS',
     items: [
-      { label: 'Web hosting', href: '/dashboard/websites/new', icon: Server, description: 'Host any site quickly, easily, and securely' },
-      { label: 'Cloud hosting', href: '/dashboard', icon: CloudCog, description: 'Scale with more power and resources' },
-      { label: 'VPS hosting', href: '/dashboard', icon: Zap, description: 'Get full control with AI-managed VPS' },
-      { label: 'Web Apps Hosting', href: '/dashboard', icon: MonitorSmartphone, description: 'Deploy and run modern web apps instantly' },
-      { label: 'Application catalog', href: '/dashboard', icon: Boxes, description: 'Deploy open-source apps in seconds' },
-      { label: 'Agency hosting', href: '/dashboard', icon: Building2, description: 'Manage multiple sites professionally' },
-    ],
-  },
-  {
-    title: 'DOMAINS',
-    items: [
-      { label: 'Domain name search', href: '/dashboard/domains', icon: Search, description: 'Find the perfect domain name' },
-      { label: 'Buy a domain', href: '/dashboard/domains', icon: Globe, description: 'Register a domain name for your website' },
-      { label: 'Transfer domain', href: '/dashboard/domains', icon: ArrowRightLeft, description: 'Bring your existing domain to ALO Labs' },
-    ],
-  },
-  {
-    title: 'EMAIL AND MARKETING',
-    items: [
-      { label: 'Business email', href: '/dashboard/email', icon: Mail, description: 'Create professional addresses to build your brand' },
-      { label: 'Email marketing', href: '/dashboard/email', icon: Megaphone, description: 'Create and send emails with the AI-powered Reach' },
-      { label: 'Google Workspace', href: '/dashboard', icon: MessageSquare, description: 'Transform teamwork and boost productivity' },
-    ],
-  },
-  {
-    title: '1-CLICK AI AGENTS',
-    items: [
-      { label: 'OpenClaw', href: '/dashboard/agents/openclaw', icon: Bot, description: 'Personal, always-on AI assistant for everyday automation' },
-      { label: 'Hermes Agent', href: '/dashboard/agents/hermes-agent', icon: Sparkles, badge: 'NEW', description: 'Persistent, context-aware AI agent for continuous automations' },
-      { label: 'Paperclip VPS', href: '/dashboard', icon: Database, description: 'Secure file sharing and transfer from your VPS' },
-      { label: 'Self-hosted n8n', href: '/dashboard', icon: Code2, description: 'Turn hard work into smart work with no-code AI workflows' },
-      { label: 'Minecraft hosting', href: '/dashboard', icon: Shield, description: 'Launch your Minecraft server in seconds' },
+      { label: 'Bill Agent AI Operator', href: '/ai/operator', icon: Bot, description: 'Policy-guarded AI operator with approvals and execution audit trail' },
+      { label: 'AI Auto-Deploy', href: '/ai/auto-deploy', icon: Sparkles, description: 'Guided bilingual (EN / বাংলা) deployment workflows' },
+      { label: 'AI Site Builder', href: '/ai/builder', icon: Palette, description: 'Generate and iterate on websites inside your workspace' },
+      { label: 'CRM & Marketing', href: '/dashboard/crm', icon: Megaphone, description: 'Manage contacts, leads, and campaign integrations' },
     ],
   },
 ];
 
 /* -------------------------------------------------------------------------- */
-/*  Explore menu data (matches Hostinger's About + Support)                    */
+/*  Explore menu data                                                         */
 /* -------------------------------------------------------------------------- */
 
 const exploreSections: MegaMenuSection[] = [
@@ -134,30 +93,23 @@ const exploreSections: MegaMenuSection[] = [
     items: [
       { label: 'Our projects', href: '/projects', icon: Boxes, description: 'Everything we build, host and run — with live status' },
       { label: 'Industry solutions', href: '/industries', icon: Building2, description: '20 industry software system families, feature by feature' },
-      { label: 'Service catalog', href: '/services', icon: Boxes, description: 'What we build and run — deliverables, prerequisites, honest exclusions' },
+      { label: 'Service catalog', href: '/services', icon: LayoutGrid, description: 'What we build and run — deliverables, prerequisites, honest exclusions' },
     ],
   },
   {
-    title: 'About',
+    title: 'Platform',
     items: [
-      { label: 'Our story', href: '/projects', icon: BookMarked, description: 'How we got here and where we\'re going' },
-      { label: 'Blog', href: '/services', icon: Newspaper, description: 'Our latest news and updates' },
-      { label: 'Product updates', href: '/services', icon: Lightbulb, description: 'Latest releases and upcoming features' },
+      { label: 'Hosting control plane', href: '/projects/hosting-portal', icon: Server, description: 'Architecture and status of the ALO Labs Hosting Portal' },
+      { label: 'AI automations', href: '/projects/ai-automations', icon: Lightbulb, description: 'Internal workflows and agent infrastructure we operate' },
+      { label: 'Operator sign-in', href: '/login', icon: Shield, description: 'Sign in with email, password, and MFA' },
     ],
   },
   {
-    title: 'Support',
+    title: 'Support & Contact',
     items: [
-      { label: 'Knowledge Base', href: '/support', icon: BookOpen, description: 'Advice and answers to all of your FAQs' },
-      { label: 'Tutorials', href: '/support', icon: GraduationCap, description: 'Articles to help you achieve your online success story' },
-      { label: 'ALO Academy', href: '/support', icon: Headphones, description: 'Practical video guides to help you build and grow online.' },
-      { label: 'Contact', href: '/support', icon: Phone, description: 'How to reach us' },
-    ],
-  },
-  {
-    title: 'Learning Lab',
-    items: [
-      { label: 'Step-by-step guides', href: '/support', icon: FolderOpen, description: 'to launch and grow your online project.' },
+      { label: 'Contact ALO Labs', href: '/contact', icon: Phone, description: 'Submit an enquiry or reach the platform engineering team' },
+      { label: 'Privacy policy', href: '/privacy', icon: BookOpen, description: 'How we handle platform and customer data' },
+      { label: 'Terms of service', href: '/terms', icon: BookMarked, description: 'Operating terms for hosted projects and accounts' },
     ],
   },
 ];

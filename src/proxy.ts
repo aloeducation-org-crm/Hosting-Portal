@@ -20,6 +20,7 @@ const AI_RATE_MAX = 30;
 const AI_RATE_WINDOW_MS = 60_000;
 const STRICT_PUBLIC_PATHS = new Set([
   "/api/auth/login",
+  "/api/auth/callback/credentials",
   "/api/auth/signup",
   "/api/auth/register",
   "/api/auth/mfa-challenge",
@@ -102,16 +103,36 @@ const HMAC_AUTHENTICATED_API_PATHS = [
   "/api/agents/enroll",
   "/api/agents/heartbeat",
   "/api/agents/tasks/claim",
+  "/api/agents/tasks/start",
   "/api/agents/tasks/result",
   "/api/orchestrator/run",
   // Scoped Cloud Project API key endpoint (`x-alo-project` + `x-alo-key`).
   "/api/cloud/v1",
+  // Cloud worker node registration & heartbeats (verified via INTERNAL_SECRET / per-worker bearer).
+  "/api/cloud/workers/register",
+  "/api/cloud/workers/heartbeat",
+  // ALO Education CRM document vault (verified via ServiceCredential bearer or HMAC-signed download URL).
+  "/api/internal/crm",
+  // Stripe payment webhooks (verified via HMAC-SHA256 Stripe-Signature header).
+  "/api/billing/webhook",
   // Machine-to-machine automation endpoints preserved from the retired nested
   // app. They carry no session cookie: the cron route verifies CRON_SECRET and
   // the tool route verifies INTERNAL_SECRET in constant time before acting.
   "/api/automation/cron",
   "/api/automation/tool",
 ];
+
+/**
+ * Endpoints that accept EITHER a NextAuth browser session OR a scoped
+ * `Authorization: Bearer <api-key>` token verified inside the route handler.
+ */
+const BEARER_OR_SESSION_API_PATHS = [
+  "/api/ai/operator",
+];
+
+export function isMachineAuthenticatedApiPath(pathname: string): boolean {
+  return HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 const ADMIN_UI_PREFIXES = [
   "/ai/research",
@@ -382,10 +403,16 @@ export async function proxy(request: NextRequest) {
   }
 
   // --- API Authentication & Admin Guard ---
+  const hasExplicitBearerAuth =
+    BEARER_OR_SESSION_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`)) &&
+    /^Bearer\s+\S+/i.test(request.headers.get("authorization") ?? "") &&
+    !hasSessionCookie(request.cookies.getAll().map((c) => c.name));
+
   if (
     pathname.startsWith("/api/") &&
     !PUBLIC_API_PATHS.some((p) => pathname.startsWith(p)) &&
-    !HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname.startsWith(p))
+    !isMachineAuthenticatedApiPath(pathname) &&
+    !hasExplicitBearerAuth
   ) {
     if (!jwtSecret) {
       return applySecurityHeaders(
@@ -532,7 +559,7 @@ export async function proxy(request: NextRequest) {
     // Non-browser credentials: per-agent HMAC, or INTERNAL_SECRET for the worker
     // tick. Neither uses cookies, so neither is CSRF-able, and each route
     // re-verifies its own credential.
-    !HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname.startsWith(p)) &&
+    !isMachineAuthenticatedApiPath(pathname) &&
     // CSRF is an attack on ambient session authority. With no session cookie
     // there is none to abuse, so pre-authentication flows (login, signup, email
     // verification, MFA challenge, NextAuth's own callback) are not required to

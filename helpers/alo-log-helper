@@ -57,22 +57,24 @@ encode_logs() {
 
 # ── argument validation ─────────────────────────────────────────────────────
 if [[ $# -lt 1 ]]; then
-  die "arg-validation" "Usage: alo-log-helper <action> <domain> [args...]"
+  die "arg-validation" "Usage: alo-log-helper <action> [args...]"
 fi
 
 ACTION="$1"
 shift
 
-if [[ $# -lt 1 ]]; then
-  die "arg-validation" "Usage: alo-log-helper <action> <domain> [args...]"
-fi
-
-DOMAIN="$1"
-shift
-validate_domain "$DOMAIN"
-
-SERVICE_NAME="alo-site-${DOMAIN}"
 DEFAULT_LINES=100
+DOMAIN=""
+SERVICE_NAME=""
+
+require_domain_arg() {
+  if [[ $# -lt 1 ]]; then
+    die "arg-validation" "Usage: alo-log-helper ${ACTION} <domain> [args...]"
+  fi
+  DOMAIN="$1"
+  validate_domain "$DOMAIN"
+  SERVICE_NAME="alo-site-${DOMAIN}"
+}
 
 # ── action: application ─────────────────────────────────────────────────────
 action_application() {
@@ -220,12 +222,125 @@ action_deployment() {
   json_out "{\"success\":true,\"step\":\"deployment\",\"domain\":\"${DOMAIN}\",\"deploymentId\":\"${deployment_id}\",\"lines\":[{\"encoding\":\"base64\",\"count\":${line_count},\"content\":\"${encoded}\"}]}"
 }
 
+# ── action: get-logs (used by /api/logs/center) ──────────────────────────────
+action_get_logs() {
+  if [[ $# -lt 1 ]]; then
+    die "get-logs" "Usage: get-logs <caddy-access|caddy-error|php-fpm> [domain] [lines]"
+  fi
+
+  local source="$1"
+  shift
+  local target_domain=""
+  local lines="${DEFAULT_LINES}"
+
+  if [[ $# -ge 2 ]]; then
+    target_domain="$1"
+    validate_domain "$target_domain"
+    lines="$2"
+  elif [[ $# -eq 1 ]]; then
+    if [[ "$1" =~ ^[0-9]+$ ]]; then
+      lines="$1"
+    else
+      target_domain="$1"
+      validate_domain "$target_domain"
+    fi
+  fi
+
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [[ "$lines" -eq 0 ]]; then
+    lines="$DEFAULT_LINES"
+  fi
+  if [[ "$lines" -gt 10000 ]]; then
+    lines=10000
+  fi
+
+  local log_path=""
+  case "$source" in
+    caddy-access)
+      if [[ -n "$target_domain" ]]; then
+        log_path="${CADDY_LOG_DIR}/${target_domain}-access.log"
+      else
+        log_path="/var/log/caddy/access.log"
+      fi
+      ;;
+    caddy-error)
+      if [[ -n "$target_domain" ]]; then
+        log_path="${CADDY_LOG_DIR}/${target_domain}-error.log"
+      else
+        log_path="/var/log/caddy/error.log"
+      fi
+      ;;
+    php-fpm)
+      log_path="/var/log/php8.2-fpm.log"
+      ;;
+    *)
+      die "get-logs" "Unsupported log source: ${source}"
+      ;;
+  esac
+
+  if [[ -f "$log_path" ]]; then
+    tail -n "$lines" "$log_path" 2>/dev/null || true
+  fi
+}
+
+# ── action: website-logs (used by /api/applications/[id]/logs) ───────────────
+action_website_logs() {
+  local lines="${1:-${DEFAULT_LINES}}"
+  if ! [[ "$lines" =~ ^[0-9]+$ ]] || [[ "$lines" -eq 0 ]]; then
+    lines="$DEFAULT_LINES"
+  fi
+  if [[ "$lines" -gt 10000 ]]; then
+    lines=10000
+  fi
+
+  local out=""
+  out=$(journalctl -u "${SERVICE_NAME}.service" -n "$lines" --no-pager --output=cat 2>/dev/null || true)
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$out"
+    return 0
+  fi
+
+  local access_log="${CADDY_LOG_DIR}/${DOMAIN}-access.log"
+  if [[ -f "$access_log" ]]; then
+    tail -n "$lines" "$access_log" 2>/dev/null || true
+  fi
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
-  application) action_application "$@" ;;
-  access)      action_access "$@" ;;
-  error)       action_error "$@" ;;
-  caddy)       action_caddy "$@" ;;
-  deployment)  action_deployment "$@" ;;
-  *)           die "dispatch" "Unknown action: ${ACTION}" ;;
+  application)
+    require_domain_arg "$@"
+    shift
+    action_application "$@"
+    ;;
+  access)
+    require_domain_arg "$@"
+    shift
+    action_access "$@"
+    ;;
+  error)
+    require_domain_arg "$@"
+    shift
+    action_error "$@"
+    ;;
+  caddy)
+    require_domain_arg "$@"
+    shift
+    action_caddy "$@"
+    ;;
+  deployment)
+    require_domain_arg "$@"
+    shift
+    action_deployment "$@"
+    ;;
+  website-logs)
+    require_domain_arg "$@"
+    shift
+    action_website_logs "$@"
+    ;;
+  get-logs)
+    action_get_logs "$@"
+    ;;
+  *)
+    die "dispatch" "Unknown action: ${ACTION}"
+    ;;
 esac

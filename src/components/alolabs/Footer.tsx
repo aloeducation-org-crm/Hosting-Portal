@@ -46,7 +46,7 @@ const columns: FooterColumn[] = [
       { label: 'Team sign-in', href: '/login' },
       { label: 'Create an account', href: '/register' },
       { label: 'Dashboard', href: '/dashboard' },
-      { label: 'System status', href: '/support' },
+      { label: 'Monitoring', href: '/dashboard/monitoring' },
       { label: 'Privacy policy', href: '/privacy' },
       { label: 'Terms of service', href: '/terms' },
     ],
@@ -54,10 +54,9 @@ const columns: FooterColumn[] = [
   {
     title: 'Support',
     links: [
-      { label: 'Contact us', href: '/support' },
-      { label: 'Knowledge base', href: '/support' },
-      { label: 'Tutorials', href: '/support' },
-      { label: 'Report abuse', href: '/support' },
+      { label: 'Contact us', href: '/contact' },
+      { label: 'Service catalog', href: '/services' },
+      { label: 'Report an issue', href: '/contact' },
       { label: 'Sitemap', href: '/sitemap.xml' },
     ],
   },

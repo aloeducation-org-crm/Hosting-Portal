@@ -4,6 +4,7 @@ import { requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TOTP, Secret } from 'otpauth';
 import { hashPassword } from '@/lib/password';
+import { sealMfaSecret } from '@/lib/mfa-challenge';
 import crypto from 'crypto';
 
 function handleErr(e: unknown): NextResponse {
@@ -75,19 +76,21 @@ export async function POST(request: NextRequest) {
       hashedCodes.push(await hashPassword(code));
     }
 
+    const sealedSecret = sealMfaSecret(totp.secret.base32);
+
     await db.userMfa.upsert({
       where: { userId: auth.id },
       create: {
         userId: auth.id,
         method: 'totp',
-        secret: totp.secret.base32,
+        secret: sealedSecret,
         backupCodes: JSON.stringify(hashedCodes),
         isVerified: false,
         isEnabled: false,
       },
       update: {
         method: 'totp',
-        secret: totp.secret.base32,
+        secret: sealedSecret,
         backupCodes: JSON.stringify(hashedCodes),
         isVerified: false,
         isEnabled: false,

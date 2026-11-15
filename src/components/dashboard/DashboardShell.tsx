@@ -352,11 +352,23 @@ export function DashboardShell({
               variant="ghost"
               size="icon"
               className="relative text-[#475569] hover:text-[#E8501A] hover:bg-[#FFF7ED]"
-              aria-label="Notifications"
-              onClick={() => toast.info("All systems operational on hosting.alolabs.net")}
+              aria-label="System health & alerts"
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/health", { credentials: "include" });
+                  const json = await res.json().catch(() => ({}));
+                  if (res.ok && json.status === "ok") {
+                    toast.success("Platform health check passed — opening Monitoring.");
+                  } else {
+                    toast.warning(`Platform health reported: ${json.status ?? res.status}`);
+                  }
+                } catch {
+                  toast.error("Unable to reach /api/health");
+                }
+                router.push("/dashboard/monitoring");
+              }}
             >
               <Bell className="h-5 w-5" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-[#E8501A]" />
             </Button>
 
             <DropdownMenu>

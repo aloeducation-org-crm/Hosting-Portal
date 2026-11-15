@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { env } from "@/lib/env";
 
 export interface CheckoutSessionInput {
@@ -90,4 +91,72 @@ export async function createBillingCheckoutSession(
     checkoutUrl: data.url,
     mode: "live",
   };
+}
+
+export const STRIPE_WEBHOOK_TOLERANCE_SECONDS = 300;
+
+export interface StripeSignatureVerdict {
+  ok: boolean;
+  reason?: string;
+  timestamp?: number;
+}
+
+/**
+ * Verifies a Stripe webhook `Stripe-Signature` header (`t=<ts>,v1=<hex>,...`)
+ * in constant time against one or more configured signing secrets (supports
+ * rotation across `STRIPE_WEBHOOK_SECRET` and `STRIPE_WEBHOOK_SECRET_2`).
+ * Fails closed when no signing secret is configured or the timestamp is outside
+ * the replay tolerance window.
+ */
+export function verifyStripeWebhookSignature(
+  rawBody: string,
+  signatureHeader: string | null | undefined,
+  secrets: string[],
+  options?: { nowSeconds?: number; toleranceSeconds?: number },
+): StripeSignatureVerdict {
+  const validSecrets = secrets.map((s) => s.trim()).filter((s) => s.length >= 16);
+  if (validSecrets.length === 0) {
+    return { ok: false, reason: "STRIPE_WEBHOOK_SECRET_NOT_CONFIGURED" };
+  }
+  if (!signatureHeader || typeof signatureHeader !== "string") {
+    return { ok: false, reason: "MISSING_SIGNATURE_HEADER" };
+  }
+
+  let timestamp: number | null = null;
+  const signatures: string[] = [];
+  for (const part of signatureHeader.split(",")) {
+    const [k, v] = part.trim().split("=", 2);
+    if (k === "t" && v && /^\d+$/.test(v)) {
+      timestamp = Number(v);
+    } else if (k === "v1" && v && /^[0-9a-f]{64}$/i.test(v)) {
+      signatures.push(v.toLowerCase());
+    }
+  }
+
+  if (timestamp === null || signatures.length === 0) {
+    return { ok: false, reason: "MALFORMED_SIGNATURE_HEADER" };
+  }
+
+  const nowSeconds = options?.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const tolerance = options?.toleranceSeconds ?? STRIPE_WEBHOOK_TOLERANCE_SECONDS;
+  if (Math.abs(nowSeconds - timestamp) > tolerance) {
+    return { ok: false, reason: "SIGNATURE_TIMESTAMP_OUT_OF_RANGE", timestamp };
+  }
+
+  const signedPayload = `${timestamp}.${rawBody}`;
+  for (const secret of validSecrets) {
+    const expectedHex = crypto
+      .createHmac("sha256", secret)
+      .update(signedPayload, "utf8")
+      .digest("hex");
+    const expectedBuf = Buffer.from(expectedHex, "hex");
+    for (const sig of signatures) {
+      const providedBuf = Buffer.from(sig, "hex");
+      if (providedBuf.length === expectedBuf.length && crypto.timingSafeEqual(expectedBuf, providedBuf)) {
+        return { ok: true, timestamp };
+      }
+    }
+  }
+
+  return { ok: false, reason: "INVALID_SIGNATURE", timestamp };
 }

@@ -106,7 +106,8 @@ export default function PlanCards({
       >
         {plans.map((plan) => {
           const monthly = priceForTerm(plan, activeTerm);
-          const total = termTotal(plan, activeTerm);
+          // Annual-unit products (priceUnit === "/yr") already express their full yearly charge.
+          const total = product.priceUnit === "/yr" ? monthly : termTotal(plan, activeTerm);
           const save = savingsPercent(plan, activeTerm);
           const ctaHref =
             plan.ctaHref ??

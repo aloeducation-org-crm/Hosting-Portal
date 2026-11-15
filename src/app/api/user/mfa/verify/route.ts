@@ -3,6 +3,8 @@ import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TOTP } from 'otpauth';
+import { openMfaSecret, sealMfaSecret } from '@/lib/mfa-challenge';
+import { needsSealing } from '@/lib/secret-store';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -30,13 +32,14 @@ export async function POST(request: NextRequest) {
       throw apiError('MFA is not set up. Please set up MFA first.', 'MFA_NOT_SETUP', undefined, 400);
     }
 
+    const plainSecret = openMfaSecret(userMfa.secret);
     const totp = new TOTP({
       issuer: 'ALO Labs Hosting',
       label: auth.email,
       algorithm: 'SHA1',
       digits: 6,
       period: 30,
-      secret: userMfa.secret,
+      secret: plainSecret,
     });
 
     const delta = totp.validate({ token: code, window: 1 });
@@ -47,6 +50,7 @@ export async function POST(request: NextRequest) {
     await db.userMfa.update({
       where: { userId: auth.id },
       data: {
+        ...(needsSealing(userMfa.secret) ? { secret: sealMfaSecret(plainSecret) } : {}),
         isVerified: true,
         isEnabled: true,
         lastUsedAt: new Date(),

@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import { env } from "./env";
 import { logger } from "./logger";
 
-const ALLOWED_HELPERS = [
+export const ALLOWED_HELPERS = [
   "alo-hosting-helper",
   "alo-site-lifecycle",
   "alo-site-backup",
@@ -22,6 +22,7 @@ const ALLOWED_HELPERS = [
   "alo-deploy-helper",
   "alo-dns-helper",
   "alo-docker-helper",
+  "alo-app-helper",
 ] as const;
 
 type HelperName = (typeof ALLOWED_HELPERS)[number];
@@ -97,10 +98,16 @@ function checkNullByte(s: string, label: string): void {
   }
 }
 
+export interface CallHelperOptions {
+  /** Optional sensitive payload sent via stdin so secrets never appear in argv. */
+  stdin?: string;
+}
+
 export function callHelper(
   helperName: string,
   args: string[] = [],
   timeoutMs?: number,
+  options?: CallHelperOptions,
 ): Promise<HelperResult> {
   return new Promise((resolve) => {
     if (!isAllowedHelper(helperName)) {
@@ -197,5 +204,10 @@ export function callHelper(
         stderr: sanitizeHelperStderr(err.message, (err as NodeJS.ErrnoException).code),
       });
     });
+
+    if (options?.stdin !== undefined && child.stdin) {
+      child.stdin.on("error", () => {});
+      child.stdin.end(options.stdin, "utf8");
+    }
   });
 }
