@@ -586,6 +586,7 @@ export const config = {
     "/onboarding/:path*",
     "/deployments/:path*",
     "/apps/:path*",
+    "/sales-channels/:path*",
     "/infrastructure/:path*",
     "/api/:path*",
   ],

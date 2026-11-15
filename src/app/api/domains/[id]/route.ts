@@ -3,6 +3,23 @@ import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requirePermission, requireSession } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
+import { z } from 'zod';
+
+const domainUpdateSchema = z.object({
+  autoRenew: z.boolean().optional(),
+  locked: z.boolean().optional(),
+  nameservers: z.array(z.string()).optional(),
+  dnsRecords: z.array(
+    z.object({
+      id: z.string().optional(),
+      type: z.string(),
+      host: z.string(),
+      value: z.string(),
+      ttl: z.number().optional(),
+    })
+  ).optional(),
+  status: z.string().optional(),
+});
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -113,4 +130,53 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     return NextResponse.json(apiError('Unknown action', 'VALIDATION_ERROR', undefined, 400), { status: 400 });
   } catch (e) { return handleErr(e); }
+}
+
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const user = await requirePermission(request, 'DOMAIN_UPDATE');
+    const { id } = await params;
+    const body = await request.json();
+    const input = domainUpdateSchema.parse(body);
+
+    const domain = await db.domain.findUnique({
+      where: { id },
+      include: { website: true },
+    });
+    if (!domain) {
+      return NextResponse.json(apiError('Domain not found', 'NOT_FOUND', undefined, 404), { status: 404 });
+    }
+
+    if (user.role !== 'SUPER_ADMIN' && domain.website?.ownerId !== user.id) {
+      return NextResponse.json(apiError('Forbidden', 'FORBIDDEN', undefined, 403), { status: 403 });
+    }
+
+    const updateData: any = {};
+    if (input.autoRenew !== undefined) updateData.autoRenew = input.autoRenew;
+    if (input.locked !== undefined) updateData.locked = input.locked;
+    if (input.nameservers !== undefined) updateData.nameservers = JSON.stringify(input.nameservers);
+    if (input.status !== undefined) updateData.status = input.status as any;
+
+    const updated = await db.domain.update({
+      where: { id },
+      data: updateData,
+      include: { website: true, certificate: true },
+    });
+
+    const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
+    await db.auditLog.create({
+      data: {
+        actorUserId: user.id, actorEmail: user.email, actorRole: user.role,
+        action: 'DOMAIN_UPDATE', resourceType: 'Domain', resourceId: id,
+        domain: domain.domain, result: 'SUCCESS', ipAddress: ip,
+      },
+    });
+
+    return NextResponse.json(apiSuccess(updated));
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return NextResponse.json(apiError('Validation failed', 'VALIDATION_ERROR', e.flatten(), 400), { status: 400 });
+    }
+    return handleErr(e);
+  }
 }

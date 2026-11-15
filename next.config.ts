@@ -38,12 +38,9 @@ const nextConfig: NextConfig = {
   async redirects() {
     const project = "/projects/hosting-portal";
     return [
-      { source: "/pricing", destination: "/", permanent: false },
-      { source: "/hosting", destination: project, permanent: false },
-      { source: "/hosting/:path*", destination: project, permanent: false },
-      { source: "/domains", destination: project, permanent: false },
       { source: "/email", destination: project, permanent: false },
       { source: "/ssl", destination: project, permanent: false },
+      { source: "/support", destination: "/contact", permanent: false },
     ];
   },
 

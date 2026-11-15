@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { classifySecret, validateProductionConfig } from "@/lib/config/production-config";
+import { loadEnv } from "@/lib/env";
 
 const REPO = process.cwd();
 const CLI = path.join(REPO, "scripts/validate-prod-config.mjs");
@@ -322,5 +323,50 @@ describe("validate-prod-config CLI", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("parses .env.example cleanly when secrets are populated and tolerates blank optional keys", () => {
+    const { parsePanelEnv } = require(path.join(REPO, "deploy/pm2/panel-env.cjs")) as {
+      parsePanelEnv: (text: string) => Record<string, string>;
+    };
+    const template = fs
+      .readFileSync(path.join(REPO, ".env.example"), "utf8")
+      .replaceAll("REPLACE_WITH_OPENSSL_RAND_HEX_32", "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+
+    const parsedTemplate = parsePanelEnv(template);
+    const loadedFromTemplate = loadEnv(parsedTemplate);
+    expect(loadedFromTemplate.DNS_PROVIDER_MODE).toBe("local");
+    expect(loadedFromTemplate.AI_MODEL).toBe("gpt-4o-mini");
+
+    // Legacy panel.env files copied from older .env.example had DNS_PROVIDER_MODE=""
+    // and blank numeric/boolean overrides; loadEnv must normalize them rather than
+    // crashing routes that import @/lib/env with HTTP 500.
+    const legacyBlankOverrides = loadEnv({
+      ...parsedTemplate,
+      DNS_PROVIDER_MODE: "",
+      HELPER_TIMEOUT_SECONDS: "",
+      ALLOW_PHP: "false",
+      SMTP_HOST: "",
+    });
+    expect(legacyBlankOverrides.DNS_PROVIDER_MODE).toBe("local");
+    expect(legacyBlankOverrides.HELPER_TIMEOUT_SECONDS).toBe(120);
+    expect(legacyBlankOverrides.ALLOW_PHP).toBe(false);
+    expect(legacyBlankOverrides.SMTP_HOST).toBeUndefined();
+  });
+
+  it("flags an invalid non-empty DNS_PROVIDER_MODE in production config validation", () => {
+    const report = validateProductionConfig({
+      NODE_ENV: "production",
+      PORT: "3000",
+      APP_URL: "https://hosting.alolabs.net",
+      NEXT_PUBLIC_APP_URL: "https://hosting.alolabs.net",
+      NEXTAUTH_URL: "https://hosting.alolabs.net",
+      DATABASE_URL: "file:/var/lib/alo-hosting/production.db",
+      AI_ALLOW_ANONYMOUS: "false",
+      DNS_PROVIDER_MODE: "bogus-provider",
+      ...SECRETS,
+    });
+    expect(report.ok).toBe(false);
+    expect(report.findings.some((f) => f.key === "DNS_PROVIDER_MODE" && f.severity === "error")).toBe(true);
   });
 });

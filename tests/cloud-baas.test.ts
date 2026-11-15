@@ -57,6 +57,7 @@ import { POST as createWebhookPOST } from "@/app/api/cloud/projects/[id]/webhook
 import { DELETE as removeWebhookDELETE } from "@/app/api/cloud/projects/[id]/webhooks/[webhookId]/route";
 import { POST as createFunctionPOST } from "@/app/api/cloud/projects/[id]/functions/route";
 import { DELETE as removeFunctionDELETE } from "@/app/api/cloud/projects/[id]/functions/[functionId]/route";
+import { GET as cloudRootGET } from "@/app/api/cloud/v1/route";
 import { GET as healthGET } from "@/app/api/cloud/v1/health/route";
 
 const TEST_JWT_SECRET = "dev-secret-change-in-production";
@@ -523,8 +524,19 @@ describe("Additive migration 20261102120000_cloud_baas_projects & end-to-end Baa
     expect(rawDetailJson).not.toContain(healthIssued.secret);
     expect(rawDetailJson).not.toContain("keyHash");
 
-    // 6. Verify machine `/api/cloud/v1/health` auth matrix
+    // 6. Verify machine `/api/cloud/v1` and `/api/cloud/v1/health` auth matrix
+    expect((await cloudRootGET(new NextRequest("http://localhost/api/cloud/v1"))).status).toBe(401);
     expect((await healthGET(new NextRequest("http://localhost/api/cloud/v1/health"))).status).toBe(401);
+
+    const validRootRes = await cloudRootGET(
+      new NextRequest("http://localhost/api/cloud/v1", {
+        headers: { "x-alo-project": "student-cloud", "x-alo-key": healthIssued.secret },
+      }),
+    );
+    expect(validRootRes.status).toBe(200);
+    const validRootBody = await validRootRes.json();
+    expect(validRootBody.data.version).toBe("v1");
+    expect(validRootBody.data.project.slug).toBe("student-cloud");
 
     const badScopeHealth = await healthGET(
       new NextRequest("http://localhost/api/cloud/v1/health", {

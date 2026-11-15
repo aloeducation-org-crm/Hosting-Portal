@@ -396,8 +396,15 @@ export function validateProductionConfig(
     if (dangerous) add(key, severity, message);
   }
 
-  if ((source.DNS_PROVIDER_MODE ?? "").trim().toLowerCase() === "none") {
+  const dnsMode = (source.DNS_PROVIDER_MODE ?? "").trim().toLowerCase();
+  if (dnsMode === "none") {
     add("DNS_PROVIDER_MODE", "info", "no DNS provider is configured: DNS automation must report that honestly rather than claiming a record was created.");
+  } else if (dnsMode && !["local", "cloudflare", "powerdns", "registrar"].includes(dnsMode)) {
+    add(
+      "DNS_PROVIDER_MODE",
+      "error",
+      "DNS_PROVIDER_MODE is not one of the supported values (local, cloudflare, powerdns, registrar); runtime environment validation will reject it.",
+    );
   }
 
   const uploadSize = Number.parseInt((source.MAX_UPLOAD_SIZE_MB ?? "").trim(), 10);

@@ -55,6 +55,7 @@ import {
   Archive,
   Workflow,
 } from "lucide-react";
+import AIChatWidget from "@/components/alolabs/AIChatWidget";
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
@@ -420,6 +421,7 @@ export function DashboardShell({
         </header>
 
         <main className="flex-1 p-4 md:p-6">{children}</main>
+        <AIChatWidget />
       </div>
     </div>
   );

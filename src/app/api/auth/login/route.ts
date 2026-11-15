@@ -121,6 +121,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Admin approval gate: unapproved non-admin users cannot log in.
+    // `onboardingCompleted` is false until an administrator approves the account.
+    const isAdminUser = user.role.name === "SUPER_ADMIN" || user.role.name === "ADMIN";
+    if (!user.onboardingCompleted && !isAdminUser) {
+      await db.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          actorEmail: user.email,
+          actorRole: user.role.name,
+          action: "LOGIN_BLOCKED_PENDING_APPROVAL",
+          resourceType: "User",
+          resourceId: user.id,
+          result: "FAILURE",
+          ipAddress:
+            request.headers.get("x-forwarded-for") ??
+            request.headers.get("x-real-ip"),
+        },
+      });
+      return NextResponse.json(
+        apiError(
+          "Account pending admin approval. Please wait for an administrator to activate your account.",
+          "PENDING_APPROVAL",
+          undefined,
+          403
+        ),
+        { status: 403 }
+      );
+    }
+
     await db.user.update({
       where: { id: user.id },
       data: {
