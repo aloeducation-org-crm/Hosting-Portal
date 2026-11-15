@@ -140,9 +140,9 @@ const exploreSections: MegaMenuSection[] = [
   {
     title: 'About',
     items: [
-      { label: 'Our story', href: '/about', icon: BookMarked, description: 'How we got here and where we\'re going' },
-      { label: 'Blog', href: '/blog', icon: Newspaper, description: 'Our latest news and updates' },
-      { label: 'Product updates', href: '/blog', icon: Lightbulb, description: 'Latest releases and upcoming features' },
+      { label: 'Our story', href: '/projects', icon: BookMarked, description: 'How we got here and where we\'re going' },
+      { label: 'Blog', href: '/services', icon: Newspaper, description: 'Our latest news and updates' },
+      { label: 'Product updates', href: '/services', icon: Lightbulb, description: 'Latest releases and upcoming features' },
     ],
   },
   {

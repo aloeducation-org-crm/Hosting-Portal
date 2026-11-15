@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession } from '@/lib/auth';
+import { requirePermission, requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { hashPassword } from '@/lib/password';
 import { z } from 'zod';
@@ -105,6 +105,47 @@ export async function POST(request: NextRequest) {
       ),
       { status: 201 },
     );
+  } catch (e) {
+    return handleErr(e);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const user = await requireSession(request);
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json(apiError("API key ID is required", "VALIDATION_ERROR", undefined, 400), { status: 400 });
+    }
+
+    const apiKey = await db.apiKey.findUnique({ where: { id } });
+    if (!apiKey) {
+      return NextResponse.json(apiError("API key not found", "NOT_FOUND", undefined, 404), { status: 404 });
+    }
+
+    if (apiKey.userId !== user.id) {
+      return NextResponse.json(apiError("Forbidden", "FORBIDDEN", undefined, 403), { status: 403 });
+    }
+
+    await db.apiKey.delete({ where: { id } });
+
+    const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip');
+    await db.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        action: 'API_KEY_DELETE',
+        resourceType: 'ApiKey',
+        resourceId: id,
+        result: 'SUCCESS',
+        ipAddress: ip,
+      },
+    });
+
+    return NextResponse.json(apiSuccess(null, "API key deleted"));
   } catch (e) {
     return handleErr(e);
   }

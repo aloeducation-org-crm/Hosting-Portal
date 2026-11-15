@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { SALES_CHANNELS, buildCampaignLink } from "@/lib/marketing/sales-channels";
-import { isProtectedDashboardPath } from "@/proxy";
+import { config as proxyConfig, isProtectedDashboardPath } from "@/proxy";
 
 describe("sales channels", () => {
   it("protects the workspace and nested paths", () => {
     expect(isProtectedDashboardPath("/sales-channels")).toBe(true);
     expect(isProtectedDashboardPath("/sales-channels/settings")).toBe(true);
+    expect(proxyConfig.matcher).toContain("/sales-channels/:path*");
   });
   it("builds attribution for every channel without dropping existing URL data", () => {
     for (const channel of SALES_CHANNELS) {

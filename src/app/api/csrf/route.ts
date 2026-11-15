@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     );
   }
   const secure = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
-  const response = NextResponse.json({ success: true, message: "CSRF cookie issued", data: { rotated: true } });
+  const response = NextResponse.json({ success: true, message: "CSRF token cookie issued", data: { rotated: true } });
   response.cookies.set(CSRF_COOKIE_NAME, issued.cookieValue, csrfCookieAttributes(secure));
   return response;
 }

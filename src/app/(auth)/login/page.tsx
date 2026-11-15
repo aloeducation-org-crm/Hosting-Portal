@@ -35,10 +35,8 @@ const loginFormSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
-function LoginContent() {
+function LoginContent({ callbackUrl }: { callbackUrl: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
   const login = useAuthStore((s) => s.login);
 
   const [email, setEmail] = useState("");
@@ -266,16 +264,20 @@ function LoginContent() {
   );
 }
 
+function LoginPageShell() {
+  const searchParams = useSearchParams();
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
+  return <LoginContent callbackUrl={callbackUrl} />;
+}
+
 export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex items-center justify-center p-12">
-          <Loader2 className="h-6 w-6 animate-spin text-[#E8501A]" />
-        </div>
+        <LoginContent callbackUrl="/dashboard" />
       }
     >
-      <LoginContent />
+      <LoginPageShell />
     </Suspense>
   );
 }

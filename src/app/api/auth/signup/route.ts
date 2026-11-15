@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { UserRole } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
-import { encode, getToken } from "next-auth/jwt";
+import { getToken } from "next-auth/jwt";
 import { apiSuccess, apiError } from "@/lib/response";
 import { db } from "@/lib/db";
 import { applyEntitlementChange, freeTierAuthorization, type PlanRecord } from "@/lib/billing/entitlements";
@@ -11,7 +11,6 @@ import { resolveSignupRole } from "@/lib/account-status";
 import { hashPassword } from "@/lib/password";
 import { sendEmail } from "@/lib/smtp";
 import { env } from "@/lib/env";
-import { sessionCookieName, sessionCookieOptions } from "@/lib/session-cookie";
 
 const signupSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -177,22 +176,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const jwtToken = await encode({
-      token: {
-        sub: newUser.id,
-        userId: newUser.id,
-        email: newUser.email,
-        name: newUser.name,
-        role: newUser.role.name,
-        emailVerified: false,
-        onboardingCompleted: false,
-      },
-      secret: env.NEXTAUTH_SECRET,
-      maxAge: 86400,
-    });
-
     const permissions = newUser.role.permissions.map((rp) => rp.permission.name);
 
+    // No auto-login: new accounts are pending admin approval. The session
+    // cookie is not set and no token is returned, so the client cannot
+    // authenticate until an administrator approves the account.
     const response = NextResponse.json(
       apiSuccess(
         {
@@ -208,16 +196,13 @@ export async function POST(request: NextRequest) {
           onboardingStep: 0,
           verificationToken:
             process.env.NODE_ENV !== "production" ? verificationToken : undefined,
-          token: jwtToken,
           createdAt: newUser.createdAt,
         },
-        emailResult.sent ? "User registered successfully" : "User registered, but the verification email was not sent. Use resend verification after SMTP is configured.",
+        emailResult.sent ? "User registered successfully. Pending admin approval." : "User registered, but the verification email was not sent. Use resend verification after SMTP is configured.",
         201
       ),
       { status: 201 }
     );
-
-    response.cookies.set(sessionCookieName(), jwtToken, sessionCookieOptions());
 
     return response;
   } catch (e) {
