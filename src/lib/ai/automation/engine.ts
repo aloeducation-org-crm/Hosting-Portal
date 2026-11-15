@@ -3,14 +3,18 @@
  *
  * Pure-ish: all I/O is injected through `RunDependencies` (AI client + tool
  * registry), so the engine can be unit-tested without a database or network and
- * the production wiring in `./index.ts` supplies the real implementations.
+ * the production wiring in `./runner.ts` supplies the real implementations.
  *
  * Safety properties enforced here:
  *   - the graph is validated (DAG, size limits) before any step runs,
  *   - a per-run cap on AI calls and a per-step timeout,
  *   - tool/config values are template-rendered but never `eval`-ed,
  *   - a failing step fails the run unless the workflow opts into `continueOnError`,
- *   - `dryRun` never touches an AI provider or a tool.
+ *   - `dryRun` never touches an AI provider or a tool,
+ *   - `verify.assert` checks structural properties of a prior step's output
+ *     mechanically (no tokens spent) — the two-tier verification pattern,
+ *   - `traceId` is threaded through every step for causal observability,
+ *   - `priorSteps` + `onStepComplete` enable crash-resilient resumable runs.
  */
 
 import { renderDeep, renderTemplateValue, type TemplateScope } from "./template";
@@ -32,6 +36,8 @@ export interface StepResult {
   model?: string;
   tokensUsed?: number;
   dryRun?: boolean;
+  /** Causal trace id shared by every step in the same run. */
+  traceId?: string;
 }
 
 export interface WorkflowRunResult {
@@ -43,6 +49,8 @@ export interface WorkflowRunResult {
   aiCalls: number;
   tokensUsed: number;
   providers: string[];
+  /** Causal trace id for this run; safe to index/log/correlate across services. */
+  traceId?: string;
 }
 
 export interface AIInvocationResult {
@@ -88,6 +96,15 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** Acting user/tenant identity passed to read-only hosting tools. */
   actor?: WorkflowActor;
+  /** Stable id for causal tracing across a run, its steps, logs and audit trail. */
+  traceId?: string;
+  /** Already-succeeded steps from a prior partial run; the engine skips them
+   *  and continues downstream. Enables crash-resilient resume. */
+  priorSteps?: StepResult[];
+  /** Called after every step (succeeded, failed or skipped) is recorded, so the
+   *  runner can flush incremental progress to durable storage. Best-effort:
+   *  errors thrown here propagate to the run (do not silently swallow). */
+  onStepComplete?: (step: StepResult) => Promise<void>;
 }
 
 const DEFAULT_STEP_TIMEOUT_MS = 120_000;
@@ -137,6 +154,137 @@ function truthy(value: unknown): boolean {
   return false;
 }
 
+// ─── mechanical assertion helpers (verify.assert) ────────────────────────────
+// These never call the AI; they judge structural properties of a step's output
+// deterministically. This is the second tier of the two-tier verification
+// pattern: the model judges content (ai.complete / ai.extract), the assertion
+// judges structure (does the output actually have the fields/count/shape we
+// need to proceed?).
+
+const PROTOTYPE_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Navigate a dot/numeric path into a JSON value, blocking prototype pollution. */
+function getJsonPath(source: unknown, path: string): unknown {
+  if (!path) return source;
+  let current: unknown = source;
+  for (const segment of path.split(".")) {
+    if (PROTOTYPE_SEGMENTS.has(segment)) return undefined;
+    if (current == null) return undefined;
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) return undefined;
+      current = current[index];
+    } else if (typeof current === "object") {
+      current = (current as Record<string, unknown>)[segment];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}
+
+function countOf(value: unknown): number {
+  if (Array.isArray(value)) return value.length;
+  if (value && typeof value === "object") return Object.keys(value as Record<string, unknown>).length;
+  if (typeof value === "string") return value.length;
+  return 0;
+}
+
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a == null || b == null) return a === b;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (typeof a === "object" && typeof b === "object") {
+    const ak = Object.keys(a as Record<string, unknown>);
+    const bk = Object.keys(b as Record<string, unknown>);
+    return ak.length === bk.length && ak.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+  }
+  return false;
+}
+
+/** Truncate a value for the assertion's `actual` echo, so step output stays bounded. */
+function summarizeForAssert(value: unknown): unknown {
+  try {
+    const text = JSON.stringify(value);
+    if (text.length > 500) return { truncated: true, preview: text.slice(0, 500) };
+    return value;
+  } catch {
+    return { unserializable: true };
+  }
+}
+
+type AssertOperator =
+  | "exists" | "equals" | "notEquals" | "contains" | "matches"
+  | "minLength" | "maxLength" | "minCount" | "maxCount"
+  | "gte" | "lte" | "range";
+
+const ASSERT_OPERATORS: readonly AssertOperator[] = [
+  "exists", "equals", "notEquals", "contains", "matches",
+  "minLength", "maxLength", "minCount", "maxCount",
+  "gte", "lte", "range",
+];
+
+function evaluateAssertion(value: unknown, operator: string, expected: unknown): { passed: boolean; reason: string } {
+  if (!ASSERT_OPERATORS.includes(operator as AssertOperator)) {
+    return { passed: false, reason: `unknown operator "${operator}"` };
+  }
+  switch (operator as AssertOperator) {
+    case "exists":
+      return { passed: value !== undefined && value !== null, reason: "value is null or undefined" };
+    case "equals":
+      return { passed: deepEqual(value, expected), reason: `got ${JSON.stringify(value)}, expected ${JSON.stringify(expected)}` };
+    case "notEquals":
+      return { passed: !deepEqual(value, expected), reason: `value equals ${JSON.stringify(expected)}` };
+    case "contains": {
+      if (Array.isArray(value)) {
+        return { passed: value.some((v) => deepEqual(v, expected)), reason: `array does not contain ${JSON.stringify(expected)}` };
+      }
+      return { passed: String(value ?? "").includes(String(expected ?? "")), reason: `"${value}" does not contain "${expected}"` };
+    }
+    case "matches": {
+      try {
+        const re = new RegExp(String(expected));
+        return { passed: re.test(String(value ?? "")), reason: `"${value}" does not match /${expected}/` };
+      } catch {
+        return { passed: false, reason: `invalid regex: ${expected}` };
+      }
+    }
+    case "minLength": {
+      const len = String(value ?? "").length;
+      return { passed: len >= Number(expected), reason: `length ${len} < ${expected}` };
+    }
+    case "maxLength": {
+      const len = String(value ?? "").length;
+      return { passed: len <= Number(expected), reason: `length ${len} > ${expected}` };
+    }
+    case "minCount": {
+      const count = countOf(value);
+      return { passed: count >= Number(expected), reason: `count ${count} < ${expected}` };
+    }
+    case "maxCount": {
+      const count = countOf(value);
+      return { passed: count <= Number(expected), reason: `count ${count} > ${expected}` };
+    }
+    case "gte":
+      return { passed: Number(value) >= Number(expected), reason: `${value} < ${expected}` };
+    case "lte":
+      return { passed: Number(value) <= Number(expected), reason: `${value} > ${expected}` };
+    case "range": {
+      const range = (expected ?? {}) as { min?: number; max?: number };
+      const n = Number(value);
+      if (!Number.isFinite(n)) return { passed: false, reason: `value ${value} is not a number` };
+      const minOk = range.min === undefined || n >= range.min;
+      const maxOk = range.max === undefined || n <= range.max;
+      return { passed: minOk && maxOk, reason: `${n} not in [${range.min ?? "-∞"}, ${range.max ?? "+∞"}]` };
+    }
+    default:
+      return { passed: false, reason: `operator "${operator}" not implemented` };
+  }
+}
+
 /**
  * Execute a workflow.
  *
@@ -154,6 +302,7 @@ export async function runWorkflowGraph(
   const dryRun = Boolean(options.dryRun);
   const stepTimeoutMs = options.stepTimeoutMs ?? DEFAULT_STEP_TIMEOUT_MS;
   const maxAiCalls = options.maxAiCalls ?? DEFAULT_MAX_AI_CALLS;
+  const traceId = options.traceId;
 
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
   const incoming = new Map<string, WorkflowEdge[]>(graph.nodes.map((node) => [node.id, []]));
@@ -184,7 +333,7 @@ export async function runWorkflowGraph(
     }
   };
 
-  const skipNode = (node: WorkflowNode, reason: string) => {
+  const skipNode = async (node: WorkflowNode, reason: string) => {
     const result: StepResult = {
       nodeId: node.id,
       type: node.type,
@@ -192,11 +341,13 @@ export async function runWorkflowGraph(
       status: "skipped",
       skippedReason: reason,
       durationMs: 0,
+      traceId,
     };
     steps.push(result);
     stepById.set(node.id, result);
     outputs[node.id] = { status: "skipped" };
     markOutgoing(node.id, "all");
+    await options.onStepComplete?.(result);
   };
 
   const executeNode = async (node: WorkflowNode, config: Record<string, unknown>, primaryInput: unknown): Promise<{
@@ -295,6 +446,38 @@ export async function runWorkflowGraph(
         }
         return { output: { value, operator, compare, result: verdict }, condition: verdict };
       }
+      case "verify.assert": {
+        // Mechanical structural assertion against a prior step's output.
+        // Never calls the AI — the whole point is a deterministic check that
+        // costs zero tokens, so a model that claims "done" can still be caught
+        // when the output is missing the expected field/count/shape.
+        const fromStep = typeof config.from === "string" && config.from ? config.from : null;
+        const source = fromStep
+          ? outputs[fromStep]?.output
+          : primaryInput ?? input;
+        const path = asString(config.path, "");
+        const value = path ? getJsonPath(source, path) : source;
+        const operator = asString(config.operator, "exists");
+        const verdict = evaluateAssertion(value, operator, config.expected);
+        if (!verdict.passed) {
+          const custom = asString(config.message, "");
+          const msg = custom || `assertion failed: ${operator}(${path || "<root>"}) — ${verdict.reason}`;
+          throw new Error(msg);
+        }
+        return {
+          output: {
+            asserted: true,
+            from: fromStep ?? "<upstream>",
+            path: path || "<root>",
+            operator,
+            actual: summarizeForAssert(value),
+            expected: config.expected,
+          },
+          // An assertion that passes always takes the "true" branch downstream,
+          // so it composes with logic.condition in conditional graphs.
+          condition: true,
+        };
+      }
       case "transform.template": {
         const template = asString(config.template);
         if (!template) throw new Error("transform.template requires a template");
@@ -314,6 +497,25 @@ export async function runWorkflowGraph(
     }
   };
 
+  // Pre-load succeeded steps from a prior partial run (crash-resilient resume).
+  // Only succeeded steps are re-used; failed/skipped steps re-execute so a
+  // transient error can be retried without editing the graph.
+  if (options.priorSteps?.length) {
+    for (const prior of options.priorSteps) {
+      if (prior.status !== "succeeded") continue;
+      if (stepById.has(prior.nodeId)) continue;
+      const restored: StepResult = { ...prior, traceId: traceId ?? prior.traceId };
+      stepById.set(prior.nodeId, restored);
+      outputs[prior.nodeId] = { output: prior.output, status: "succeeded" };
+      // Re-derive which outbound edges were taken from the step's recorded output.
+      const isCondition = prior.type === "logic.condition";
+      const conditionResult = isCondition && prior.output && typeof prior.output === "object"
+        ? (prior.output as { result?: boolean }).result
+        : undefined;
+      markOutgoing(prior.nodeId, conditionResult !== undefined ? conditionResult : "all");
+    }
+  }
+
   // Execution loop: run nodes whose inbound edges are all resolved.
   let progress = true;
   while (progress) {
@@ -326,7 +528,7 @@ export async function runWorkflowGraph(
 
       if (!isEntry && !allResolved) continue;
       if (!isEntry && !inbound.some((edge) => edgeStatus.get(edgeKey(edge)) === "taken")) {
-        skipNode(node, "no upstream branch selected this node");
+        await skipNode(node, "no upstream branch selected this node");
         progress = true;
         continue;
       }
@@ -347,11 +549,13 @@ export async function runWorkflowGraph(
             output: { planned: true, type: node.type },
             durationMs: Date.now() - started,
             dryRun: true,
+            traceId,
           };
           steps.push(result);
           stepById.set(node.id, result);
           outputs[node.id] = { output: result.output, status: "succeeded" };
           markOutgoing(node.id, "all");
+          await options.onStepComplete?.(result);
           progress = true;
           continue;
         }
@@ -367,12 +571,14 @@ export async function runWorkflowGraph(
           status: "succeeded",
           output: executed.output,
           durationMs: Date.now() - started,
+          traceId,
           ...(executed.meta ?? {}),
         };
         steps.push(result);
         stepById.set(node.id, result);
         outputs[node.id] = { output: result.output, status: "succeeded" };
         markOutgoing(node.id, executed.condition ?? "all");
+        await options.onStepComplete?.(result);
         progress = true;
       } catch (error) {
         const message = error instanceof Error ? error.message : "step failed";
@@ -383,11 +589,13 @@ export async function runWorkflowGraph(
           status: "failed",
           error: message.slice(0, 500),
           durationMs: Date.now() - started,
+          traceId,
         };
         steps.push(result);
         stepById.set(node.id, result);
         outputs[node.id] = { status: "failed" };
         markOutgoing(node.id, "all");
+        await options.onStepComplete?.(result);
         progress = true;
         if (!options.continueOnError) {
           failed = true;
@@ -400,7 +608,7 @@ export async function runWorkflowGraph(
   // Anything still unvisited is unreachable or downstream of a failure.
   for (const node of graph.nodes) {
     if (stepById.has(node.id)) continue;
-    skipNode(node, failed ? "skipped because an upstream step failed" : "unreachable");
+    await skipNode(node, failed ? "skipped because an upstream step failed" : "unreachable");
   }
 
   const status = failed || steps.some((step) => step.status === "failed") ? "failed" : "succeeded";
@@ -426,6 +634,7 @@ export async function runWorkflowGraph(
     aiCalls,
     tokensUsed,
     providers: [...providers],
+    traceId,
   };
 }
 

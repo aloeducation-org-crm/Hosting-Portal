@@ -187,6 +187,10 @@ const MIGRATIONS = [
   // Remote node deployment: pin the enrolled compute node (ServerAgent) a
   // GitProject deploys to. Additive nullable column + index on git_projects.
   { name: "20261112120000_remote_node_deployment", kind: "ADDITIVE" },
+  // AI workflow engine: causal trace ids on ai_workflow_runs. Additive nullable
+  // column + lookup index so a run can be found from a log line that only
+  // carries the traceId. Resumability reuses the existing steps column.
+  { name: "20261115120000_ai_workflow_assertions_trace", kind: "ADDITIVE" },
 ];
 
 function registry() {

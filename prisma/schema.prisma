@@ -2009,12 +2009,17 @@ model AiWorkflowRun {
   durationMs  Int?
   startedAt   DateTime @default(now())
   finishedAt  DateTime?
+  /// Causal trace id shared by every step in the run. Threaded through the
+  /// engine, the AI invoker, hosting tools and the audit trail so a single run
+  /// can be correlated across logs and services. Indexed for lookup-by-trace.
+  traceId     String?
 
   workflow    AiWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
 
   @@index([workflowId])
   @@index([status])
   @@index([startedAt])
+  @@index([traceId])
   @@map("ai_workflow_runs")
 }
 
