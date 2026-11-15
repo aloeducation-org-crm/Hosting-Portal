@@ -94,9 +94,14 @@ action_create() {
     " 2>/dev/null || die "create" "PostgreSQL grant failed"
   fi
 
+  local db_port=3306
+  if [[ "$engine" == "postgresql" ]]; then
+    db_port=5432
+  fi
+
   log_info "Database created successfully."
   # Password only in stdout JSON, never in logs
-  json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\",\"password\":\"${password}\"}"
+  json_out "{\"success\":true,\"engine\":\"${engine}\",\"host\":\"127.0.0.1\",\"port\":${db_port},\"database\":\"${dbname}\",\"username\":\"${username}\",\"password\":\"${password}\"}"
 }
 
 # ── action: test ────────────────────────────────────────────────────────────
@@ -264,13 +269,48 @@ action_delete() {
   json_out "{\"success\":true,\"engine\":\"${engine}\",\"database\":\"${dbname}\",\"username\":\"${username}\"}"
 }
 
+# ── shorthand wrappers used by REST API routes (create-mariadb, etc.) ────────
+derive_db_username() {
+  local dbname="$1"
+  local base="${dbname:0:27}"
+  printf '%s_usr' "$base"
+}
+
+action_create_for_engine() {
+  local engine="$1"
+  shift
+  if [[ $# -lt 2 ]]; then
+    die "create-${engine}" "Usage: create-${engine} <domain> <dbname> [username]"
+  fi
+  local _domain="$1"
+  local dbname="$2"
+  local username="${3:-$(derive_db_username "$dbname")}"
+  action_create "$engine" "$dbname" "$username"
+}
+
+action_delete_for_engine() {
+  local engine="$1"
+  shift
+  if [[ $# -lt 2 ]]; then
+    die "delete-${engine}" "Usage: delete-${engine} <domain> <dbname> [username]"
+  fi
+  local _domain="$1"
+  local dbname="$2"
+  local username="${3:-$(derive_db_username "$dbname")}"
+  action_delete "$engine" "$dbname" "$username"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
-  create)         action_create "$@" ;;
-  test)           action_test "$@" ;;
-  backup)         action_backup "$@" ;;
-  restore)        action_restore "$@" ;;
-  rotate-password) action_rotate_password "$@" ;;
-  delete)         action_delete "$@" ;;
-  *)              die "dispatch" "Unknown action: ${ACTION}" ;;
+  create)            action_create "$@" ;;
+  create-mariadb)    action_create_for_engine mariadb "$@" ;;
+  create-postgresql) action_create_for_engine postgresql "$@" ;;
+  test)              action_test "$@" ;;
+  backup)            action_backup "$@" ;;
+  restore)           action_restore "$@" ;;
+  rotate-password)   action_rotate_password "$@" ;;
+  delete)            action_delete "$@" ;;
+  delete-mariadb)    action_delete_for_engine mariadb "$@" ;;
+  delete-postgresql) action_delete_for_engine postgresql "$@" ;;
+  *)                 die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

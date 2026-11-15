@@ -3,17 +3,26 @@ import "./globals.css";
 import { CsrfGuard } from "@/components/security/CsrfGuard";
 
 export const metadata: Metadata = {
-  title: "ALO Labs - Bring Your Idea Online With a Website",
-  description: "ALO Labs offers premium web hosting, domain registration, website builder, and AI-powered tools to help you build and grow your online presence.",
-  keywords: ["ALO Labs", "web hosting", "domain", "website builder", "VPS", "cloud hosting", "WordPress"],
+  title: "ALO Labs — Hosting Control Plane & Engineering Platform",
+  description:
+    "ALO Labs operates self-managed web hosting, domains, TLS certificates, databases, backups, and AI engineering workflows for ALO Group systems and managed clients.",
+  keywords: [
+    "ALO Labs",
+    "hosting control plane",
+    "domain management",
+    "cloud platform",
+    "Next.js hosting",
+    "AI operations",
+  ],
   authors: [{ name: "ALO Labs" }],
   icons: {
     icon: "/alolabs-agentos-mark.png",
   },
   openGraph: {
-    title: "ALO Labs - Bring Your Idea Online With a Website",
-    description: "Premium web hosting, domains, and AI-powered tools to grow your online presence.",
-    url: "https://alolabs.net",
+    title: "ALO Labs — Hosting Control Plane & Engineering Platform",
+    description:
+      "Self-operated hosting control plane, domains, TLS lifecycle, databases, and AI operations by ALO Labs.",
+    url: "https://hosting.alolabs.net",
     siteName: "ALO Labs",
     type: "website",
   },

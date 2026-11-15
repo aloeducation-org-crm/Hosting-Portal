@@ -244,11 +244,35 @@ action_status() {
   json_out "{\"success\":true,\"step\":\"status\",\"domain\":\"${DOMAIN}\",\"suspended\":${is_suspended},\"serviceState\":\"${service_state}\",\"hasDirectory\":${has_dir},\"hasCaddyConfig\":${has_caddy}}"
 }
 
+# ── action: restart ──────────────────────────────────────────────────────────
+action_restart() {
+  log_info "Restarting site: ${DOMAIN}"
+
+  if [[ ! -d "$SITE_DIR" ]]; then
+    die "restart" "Site directory not found: ${DOMAIN}"
+  fi
+
+  if [[ -f "$SERVICE_FILE" ]] || systemctl list-unit-files "${SERVICE_NAME}.service" &>/dev/null; then
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart "${SERVICE_NAME}.service" || die "restart" "Failed to restart service ${SERVICE_NAME}"
+  fi
+
+  if [[ -f "$CADDY_FRAGMENT" ]]; then
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || \
+      die "restart" "Caddy config validation failed"
+    systemctl reload caddy || die "restart" "Failed to reload Caddy"
+  fi
+
+  json_out "{\"success\":true,\"step\":\"restart\",\"domain\":\"${DOMAIN}\",\"message\":\"Site restarted\"}"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
   suspend) action_suspend "$@" ;;
   resume)  action_resume "$@" ;;
+  restart) action_restart "$@" ;;
   delete)  action_delete "$@" ;;
+  destroy) action_delete "$@" ;;
   status)  action_status "$@" ;;
-  *)      die "dispatch" "Unknown action: ${ACTION}" ;;
+  *)       die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

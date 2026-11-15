@@ -105,10 +105,13 @@ export async function POST(request: NextRequest) {
       // Non-fatal: domain may already be configured
     });
 
-    // === REAL: Create mail account via Postfix/Dovecot ===
-    const addResult = await callHelper('alo-email-helper', [
-      'add-account', domain, localPart, password, String(quota),
-    ]);
+    // === REAL: Create mail account via Postfix/Dovecot (password over stdin, never argv) ===
+    const addResult = await callHelper(
+      'alo-email-helper',
+      ['add-account', domain, localPart, '--stdin', String(quota)],
+      undefined,
+      { stdin: `${password}\n` },
+    );
 
     if (!addResult.success) {
       throw apiError(
@@ -184,12 +187,45 @@ export async function PUT(request: NextRequest) {
     if (isActive !== undefined) updateData.isActive = isActive;
     if (password) updateData.password = await hashPassword(password);
 
-    // === REAL: Update quota on Dovecot ===
+    const localPart = existing.address.split('@')[0] ?? '';
+
+    // === REAL: Sync quota, password, and active status on Postfix/Dovecot ===
     if (quotaMb !== undefined) {
-      const localPart = existing.address.split('@')[0] ?? '';
       await callHelper('alo-email-helper', ['set-quota', existing.domain, localPart, String(quotaMb)]).catch(() => {
         // Non-fatal: quota update on server failed but DB update continues
       });
+    }
+    if (password) {
+      const pwRes = await callHelper(
+        'alo-email-helper',
+        ['set-password', existing.domain, localPart, '--stdin'],
+        undefined,
+        { stdin: `${password}\n` },
+      );
+      if (!pwRes.success) {
+        throw apiError(
+          `Failed to update mailbox password on server: ${pwRes.stderr}`,
+          'EMAIL_PROVISIONING_FAILED',
+          undefined,
+          502,
+        );
+      }
+    }
+    if (isActive !== undefined && isActive !== existing.isActive) {
+      const statusRes = await callHelper('alo-email-helper', [
+        'set-status',
+        existing.domain,
+        localPart,
+        isActive ? 'active' : 'disabled',
+      ]);
+      if (!statusRes.success) {
+        throw apiError(
+          `Failed to update mailbox status on server: ${statusRes.stderr}`,
+          'EMAIL_PROVISIONING_FAILED',
+          undefined,
+          502,
+        );
+      }
     }
 
     const updated = await db.emailAccount.update({

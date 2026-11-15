@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 import { env } from "@/lib/env";
 import { sessionCookieName, sessionCookieOptions } from "@/lib/session-cookie";
+import { createMfaChallengeToken } from "@/lib/mfa-challenge";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -150,6 +151,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // MFA enforcement gate: when TOTP MFA is enabled on the account, do NOT
+    // issue a session cookie yet. Mint a short-lived signed challenge ticket
+    // that /api/auth/mfa-challenge exchanges for a real session once verified.
+    if (user.mfa?.isEnabled && user.mfa?.secret) {
+      const mfaToken = createMfaChallengeToken(user.id, user.email);
+      await db.auditLog.create({
+        data: {
+          actorUserId: user.id,
+          actorEmail: user.email,
+          actorRole: user.role.name,
+          action: "LOGIN_MFA_REQUIRED",
+          resourceType: "User",
+          resourceId: user.id,
+          result: "PENDING",
+          ipAddress:
+            request.headers.get("x-forwarded-for") ??
+            request.headers.get("x-real-ip"),
+        },
+      });
+      return NextResponse.json(
+        apiSuccess(
+          {
+            requiresMfa: true,
+            mfaToken,
+            method: user.mfa.method || "totp",
+          },
+          "MFA verification required"
+        )
+      );
+    }
+
     await db.user.update({
       where: { id: user.id },
       data: {
@@ -193,6 +225,8 @@ export async function POST(request: NextRequest) {
     const permissions = user.role.permissions.map((rp) => rp.permission.name);
     const activePlan = user.subscriptions?.[0]?.plan?.name?.toLowerCase() || "starter";
 
+    // Do NOT include the raw NextAuth JWT in the JSON body; browser auth relies
+    // exclusively on the httpOnly session cookie below.
     const payload = {
       id: user.id,
       email: user.email,
@@ -203,7 +237,6 @@ export async function POST(request: NextRequest) {
       emailVerified: !!user.emailVerified,
       onboardingCompleted: user.onboardingCompleted ?? false,
       onboardingStep: user.onboardingStep ?? 0,
-      token: jwtToken,
     };
 
     const response = NextResponse.json(apiSuccess(payload, "Login successful"));

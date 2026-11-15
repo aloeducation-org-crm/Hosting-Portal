@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { Mail, Lock, User, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -73,6 +74,7 @@ function LoginForm({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const setAuth = useAuthStore((s) => s.setAuth);
+  const router = useRouter();
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -104,9 +106,15 @@ function LoginForm({
           return;
         }
 
+        if (data.data?.requiresMfa) {
+          toast.info('Two-factor verification is required. Redirecting to sign-in…');
+          onClose();
+          router.push('/login');
+          return;
+        }
+
         const user = data.data || data.user;
-        const token = data.data?.token || data.token || 'session';
-        setAuth(user, token);
+        setAuth(user, 'session');
         toast.success(`Welcome back, ${user?.name || 'User'}!`);
         onClose();
       } catch {
@@ -115,7 +123,7 @@ function LoginForm({
         setLoading(false);
       }
     },
-    [email, password, setAuth, onClose],
+    [email, password, setAuth, onClose, router],
   );
 
   return (

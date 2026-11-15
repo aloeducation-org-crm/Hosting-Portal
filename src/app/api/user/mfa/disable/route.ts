@@ -4,6 +4,7 @@ import { requireSession } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { TOTP } from 'otpauth';
 import { verifyPassword } from '@/lib/password';
+import { openMfaSecret } from '@/lib/mfa-challenge';
 
 function handleErr(e: unknown): NextResponse {
   if (e && typeof e === 'object' && 'status' in e) {
@@ -35,14 +36,15 @@ export async function POST(request: NextRequest) {
       throw apiError('MFA is not currently enabled', 'MFA_NOT_ENABLED', undefined, 400);
     }
 
-    // Try TOTP verification first
+    // Try TOTP verification first (unsealing enc:v1: or legacy plaintext)
+    const plainSecret = openMfaSecret(userMfa.secret);
     const totp = new TOTP({
       issuer: 'ALO Labs Hosting',
       label: auth.email,
       algorithm: 'SHA1',
       digits: 6,
       period: 30,
-      secret: userMfa.secret,
+      secret: plainSecret,
     });
 
     const delta = totp.validate({ token: code, window: 1 });

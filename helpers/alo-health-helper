@@ -206,9 +206,94 @@ action_system() {
   json_out "{\"success\":true,\"step\":\"system\",\"cpuLoad\":\"${CPU_LOAD}\",\"memTotalMb\":${MEM_TOTAL},\"memUsedMb\":${MEM_USED},\"memPct\":${MEM_PCT},\"diskTotal\":\"${DISK_TOTAL}\",\"diskUsed\":\"${DISK_USED}\",\"diskPct\":${DISK_PCT},\"uptime\":\"${UPTIME}\"}"
 }
 
+# ── action: system-info / discover / resources ───────────────────────────────
+action_system_info() {
+  local hostname_val ip_val os_val uptime_val cpu_cores
+  hostname_val=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "localhost")
+  ip_val=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+  os_val=$(grep -m1 '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"' || uname -sr)
+  uptime_val=$(uptime -p 2>/dev/null || echo "unknown")
+  cpu_cores=$(nproc 2>/dev/null || echo "1")
+
+  local load1 load5 load15
+  read -r load1 load5 load15 _ < /proc/loadavg 2>/dev/null || { load1="0"; load5="0"; load15="0"; }
+
+  local mem_total_b mem_used_b mem_pct
+  mem_total_b=$(free -b 2>/dev/null | awk '/Mem:/{print $2}' || echo "0")
+  mem_used_b=$(free -b 2>/dev/null | awk '/Mem:/{print $3}' || echo "0")
+  mem_pct=0
+  if [[ "$mem_total_b" =~ ^[0-9]+$ ]] && [[ "$mem_total_b" -gt 0 ]]; then
+    mem_pct=$(( mem_used_b * 100 / mem_total_b ))
+  fi
+
+  local disk_total_b disk_used_b disk_pct
+  disk_total_b=$(df -B1 / 2>/dev/null | awk 'NR==2{print $2}' || echo "0")
+  disk_used_b=$(df -B1 / 2>/dev/null | awk 'NR==2{print $3}' || echo "0")
+  disk_pct=$(df -B1 / 2>/dev/null | awk 'NR==2{print $5}' | tr -d '%' || echo "0")
+
+  json_out "{\"success\":true,\"step\":\"${ACTION}\",\"hostname\":\"${hostname_val}\",\"ip\":\"${ip_val}\",\"os\":\"${os_val}\",\"uptime\":\"${uptime_val}\",\"cpu\":{\"cores\":${cpu_cores}},\"loadAverage\":{\"1min\":${load1:-0},\"5min\":${load5:-0},\"15min\":${load15:-0}},\"memory\":{\"totalBytes\":${mem_total_b:-0},\"usedBytes\":${mem_used_b:-0},\"usedPercent\":${mem_pct}},\"disk\":{\"totalBytes\":${disk_total_b:-0},\"usedBytes\":${disk_used_b:-0},\"usedPercent\":${disk_pct:-0}}}"
+}
+
+# ── action: listening-ports ──────────────────────────────────────────────────
+action_listening_ports() {
+  local items=""
+  local sep=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local proto addr port
+    proto=$(echo "$line" | awk '{print $1}')
+    addr=$(echo "$line" | awk '{print $4}')
+    port="${addr##*:}"
+    if [[ "$port" =~ ^[0-9]+$ ]]; then
+      items="${items}${sep}{\"protocol\":\"${proto}\",\"address\":\"${addr}\",\"port\":${port}}"
+      sep=","
+    fi
+  done < <(ss -tulnH 2>/dev/null || true)
+
+  json_out "{\"success\":true,\"step\":\"listening-ports\",\"ports\":[${items}]}"
+}
+
+# ── action: service-status ───────────────────────────────────────────────────
+action_service_status() {
+  if [[ $# -lt 1 ]]; then
+    die "service-status" "Usage: service-status <service-name>"
+  fi
+  local svc="$1"
+  if [[ ! "$svc" =~ ^[a-zA-Z0-9._@-]{1,64}$ ]]; then
+    die "arg-validation" "Invalid service name: ${svc}"
+  fi
+  local state active_bool="false"
+  state=$(systemctl is-active "${svc}" 2>/dev/null || echo "inactive")
+  if [[ "$state" == "active" ]]; then
+    active_bool="true"
+  fi
+  json_out "{\"success\":true,\"step\":\"service-status\",\"service\":\"${svc}\",\"state\":\"${state}\",\"active\":${active_bool}}"
+}
+
+# ── action: services ─────────────────────────────────────────────────────────
+action_services() {
+  local candidates=("caddy" "nginx" "mysql" "mariadb" "postgresql" "php8.2-fpm" "docker" "redis-server" "postfix" "dovecot" "cloudflared")
+  local items=""
+  local sep=""
+  for svc in "${candidates[@]}"; do
+    local state active_bool="false"
+    state=$(systemctl is-active "${svc}" 2>/dev/null || echo "inactive")
+    [[ "$state" == "active" ]] && active_bool="true"
+    items="${items}${sep}{\"name\":\"${svc}\",\"state\":\"${state}\",\"active\":${active_bool}}"
+    sep=","
+  done
+  json_out "{\"success\":true,\"step\":\"services\",\"services\":[${items}]}"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
-  check)  action_check "$@" ;;
-  system) action_system "$@" ;;
-  *)      die "dispatch" "Unknown action: ${ACTION}" ;;
+  check)           action_check "$@" ;;
+  system)          action_system "$@" ;;
+  system-info)     action_system_info "$@" ;;
+  discover)        action_system_info "$@" ;;
+  resources)       action_system_info "$@" ;;
+  listening-ports) action_listening_ports "$@" ;;
+  service-status)  action_service_status "$@" ;;
+  services)        action_services "$@" ;;
+  *)               die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

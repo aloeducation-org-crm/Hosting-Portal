@@ -445,3 +445,91 @@ export function adminGrantAuthorization(actor: { id: string; role: string }, rea
 export function paymentAuthorization(transactionRef: string, provider = "provider"): EntitlementAuthorization {
   return { source: "payment", authorizedBy: `${provider}:${transactionRef}`, reason: "Verified provider payment", transactionRef };
 }
+
+/**
+ * Applies a cryptographically verified Stripe `checkout.session.completed`
+ * webhook event through the single entitlement writer (SEC-03).
+ *
+ * The caller MUST have already verified the `Stripe-Signature` HMAC header
+ * via `verifyStripeWebhookSignature` before invoking this function.
+ */
+export async function applyVerifiedStripeCheckout(input: {
+  stripeEventId: string;
+  userId: string;
+  planId: string;
+  amountCents?: number;
+  currency?: string;
+}): Promise<EntitlementResult> {
+  const plan = await findSelectablePlan({ id: input.planId });
+  const cycle: "monthly" | "yearly" = plan.interval === "yearly" ? "yearly" : "monthly";
+  const expectedAmount = amountFor(plan, cycle);
+  if (typeof input.amountCents === "number" && input.amountCents < expectedAmount) {
+    throw new EntitlementError(
+      "Verified checkout amount is lower than the selected plan price.",
+      "PAYMENT_NOT_VERIFIED",
+      400,
+    );
+  }
+
+  // Scope verification to this single cryptographically verified Stripe event id
+  // without altering the global default `noPaymentVerifier` for other callers.
+  const previousVerifier = paymentVerifier;
+  setPaymentVerifier(async (check) => {
+    if (
+      check.userId === input.userId &&
+      check.plan.id === plan.id &&
+      check.transactionRef === input.stripeEventId
+    ) {
+      return { verified: true };
+    }
+    return { verified: false, reason: "Stripe webhook proof mismatch" };
+  });
+
+  try {
+    return await applyEntitlementChange({
+      userId: input.userId,
+      plan,
+      billingCycle: cycle,
+      authorization: paymentAuthorization(input.stripeEventId, "stripe"),
+    });
+  } finally {
+    setPaymentVerifier(previousVerifier);
+  }
+}
+
+/**
+ * Records a verified Stripe invoice lifecycle event (`paid` or `failed`) and
+ * syncs the user's latest subscription state.
+ */
+export async function recordVerifiedStripeInvoiceEvent(input: {
+  userId: string;
+  outcome: "paid" | "failed";
+  amountCents: number;
+  currency?: string;
+  invoiceUrl?: string | null;
+}): Promise<void> {
+  const now = new Date();
+  const sub = await db.subscription.findFirst({
+    where: { userId: input.userId },
+    orderBy: { createdAt: "desc" },
+  });
+  if (sub) {
+    await db.subscription.update({
+      where: { id: sub.id },
+      data: { status: input.outcome === "paid" ? "active" : "past_due" },
+    });
+  }
+  const invoiceStatus = input.outcome === "paid" ? "paid" : "failed";
+  await db.invoice.create({
+    data: {
+      userId: input.userId,
+      subscriptionId: sub?.id ?? null,
+      amountCents: input.amountCents,
+      currency: (input.currency ?? "USD").toUpperCase(),
+      status: invoiceStatus,
+      dueDate: now,
+      paidAt: input.outcome === "paid" ? now : null,
+      invoiceUrl: input.invoiceUrl ?? null,
+    },
+  });
+}

@@ -14,12 +14,29 @@ export interface User {
   companyName?: string | null;
 }
 
+export interface MfaChallengeError extends Error {
+  requiresMfa: true;
+  mfaToken: string;
+  method: string;
+}
+
+export function isMfaChallengeError(err: unknown): err is MfaChallengeError {
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      "requiresMfa" in err &&
+      (err as MfaChallengeError).requiresMfa === true &&
+      typeof (err as MfaChallengeError).mfaToken === "string",
+  );
+}
+
 interface AuthState {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<User>;
+  completeMfaLogin: (mfaToken: string, mfaCode: string) => Promise<User>;
   signup: (
     name: string,
     email: string,
@@ -63,6 +80,15 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       const userData = body.data;
+      if (userData?.requiresMfa && typeof userData.mfaToken === "string") {
+        set({ isLoading: false });
+        const mfaErr = new Error("Multi-factor verification required") as MfaChallengeError;
+        mfaErr.requiresMfa = true;
+        mfaErr.mfaToken = userData.mfaToken;
+        mfaErr.method = userData.method || "totp";
+        throw mfaErr;
+      }
+
       const user: User = {
         id: userData.id,
         name: userData.name,
@@ -77,7 +103,50 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       set({
         user,
-        token: userData.token || "session",
+        token: "session",
+        isAuthenticated: true,
+        isLoading: false,
+      });
+
+      return user;
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  completeMfaLogin: async (mfaToken: string, mfaCode: string) => {
+    set({ isLoading: true });
+    try {
+      const res = await fetch("/api/auth/mfa-challenge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mfaToken, mfaCode }),
+        credentials: "include",
+      });
+
+      const body = await res.json();
+      if (!res.ok || !body?.success) {
+        const errMsg = body?.message || body?.error?.message || "Invalid verification code";
+        throw new Error(errMsg);
+      }
+
+      const userData = body.data;
+      const user: User = {
+        id: userData.id,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        permissions: userData.permissions,
+        plan: userData.plan || "starter",
+        emailVerified: userData.emailVerified,
+        onboardingCompleted: userData.onboardingCompleted,
+        onboardingStep: userData.onboardingStep,
+      };
+
+      set({
+        user,
+        token: "session",
         isAuthenticated: true,
         isLoading: false,
       });
@@ -127,8 +196,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       set({
         user,
-        token: userData.token || "session",
-        isAuthenticated: true,
+        token: "session",
+        isAuthenticated: Boolean(userData.onboardingCompleted),
         isLoading: false,
       });
 

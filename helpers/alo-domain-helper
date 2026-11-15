@@ -302,12 +302,39 @@ action_check_ssl() {
   json_out "{\"success\":true,\"domain\":\"${domain}\",\"sslValid\":${ssl_valid},\"expiry\":\"${expiry_date}\",\"issuer\":\"${issuer:-unknown}\",\"daysRemaining\":${days_remaining}}"
 }
 
+# ── action: request-ssl ──────────────────────────────────────────────────────
+action_request_ssl() {
+  if [[ $# -lt 1 ]]; then
+    die "request-ssl" "Usage: request-ssl <domain>"
+  fi
+
+  local domain="$1"
+  validate_domain "$domain"
+
+  if [[ -x "/usr/local/sbin/alo-ssl-helper" ]]; then
+    /usr/local/sbin/alo-ssl-helper issue "$domain"
+    return $?
+  fi
+
+  if command -v caddy >/dev/null 2>&1 && [[ -f "${CADDY_CONFIG_DIR}/${domain}.caddy" ]]; then
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 || \
+      die "request-ssl" "Caddy config validation failed"
+    systemctl reload caddy || die "request-ssl" "Failed to reload Caddy for ACME issuance"
+    json_out "{\"success\":true,\"step\":\"request-ssl\",\"domain\":\"${domain}\",\"provider\":\"caddy-acme\",\"message\":\"TLS issuance triggered via Caddy\"}"
+    return 0
+  fi
+
+  die "request-ssl" "Neither alo-ssl-helper nor a Caddy fragment for ${domain} is available"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
-  add)        action_add "$@" ;;
-  verify)     action_verify "$@" ;;
-  remove)     action_remove "$@" ;;
-  dns-check)  action_dns_check "$@" ;;
-  check-ssl)  action_check_ssl "$@" ;;
-  *)          die "dispatch" "Unknown action: ${ACTION}" ;;
+  add)         action_add "$@" ;;
+  verify)      action_verify "$@" ;;
+  verify-dns)  action_verify "$@" ;;
+  remove)      action_remove "$@" ;;
+  dns-check)   action_dns_check "$@" ;;
+  check-ssl)   action_check_ssl "$@" ;;
+  request-ssl) action_request_ssl "$@" ;;
+  *)           die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

@@ -152,7 +152,7 @@ export default function ProductTemplate({
                     <ArrowRight className="size-4" />
                   </a>
                   <a
-                    href="/support"
+                    href="/contact"
                     className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-[#1E293B] transition-colors hover:border-[#E8501A] hover:text-[#E8501A]"
                   >
                     Talk to an engineer
@@ -394,7 +394,7 @@ export default function ProductTemplate({
                 engineers.
               </p>
               <a
-                href="/support"
+                href="/contact"
                 className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#E8501A] hover:underline"
               >
                 Ask a question <ArrowRight className="size-4" />

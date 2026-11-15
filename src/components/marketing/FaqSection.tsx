@@ -69,7 +69,7 @@ export default function FaqSection({
             and will tell you when a plan is the wrong fit.
           </p>
           <a
-            href="/support"
+            href="/contact"
             className="mt-5 inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-[#1E293B] transition-colors hover:border-[#E8501A] hover:text-[#E8501A]"
           >
             Contact support

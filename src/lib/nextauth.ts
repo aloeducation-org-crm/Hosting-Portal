@@ -7,6 +7,8 @@ import { verifyPassword } from "@/lib/password";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { secureSessionCookiesEnabled } from "@/lib/session-cookie";
+import { verifyUserMfaCode, openMfaSecret, sealMfaSecret } from "@/lib/mfa-challenge";
+import { needsSealing } from "@/lib/secret-store";
 
 declare module "next-auth" {
   interface Session {
@@ -41,13 +43,24 @@ declare module "next-auth" {
   }
 }
 
-export const authOptions: NextAuthOptions = {
-  providers: [
+const PRIVILEGED_ROLES = new Set(["SUPER_ADMIN", "ADMIN"]);
+
+function isConfiguredOAuthSecret(value: string | undefined): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (trimmed.length < 8) return false;
+  const lower = trimmed.toLowerCase();
+  return !lower.includes("replace_with") && !lower.includes("placeholder") && !lower.startsWith("not-configured");
+}
+
+function buildAuthProviders(): NextAuthOptions["providers"] {
+  const providers: NextAuthOptions["providers"] = [
     CredentialsProvider({
       name: "credentials",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        mfaCode: { label: "MFA Code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
@@ -95,6 +108,51 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
+        // Admin approval gate parity with /api/auth/login: unapproved non-admin
+        // accounts must not bypass approval through NextAuth CredentialsProvider.
+        const isAdminUser = PRIVILEGED_ROLES.has(user.role.name);
+        if (!user.onboardingCompleted && !isAdminUser) {
+          return null;
+        }
+
+        // MFA enforcement gate: when TOTP MFA is enabled, credentials sign-in
+        // requires a valid TOTP or backup code (never silently bypasses MFA).
+        if (user.mfa?.isEnabled && user.mfa?.secret) {
+          const mfaCode = credentials.mfaCode?.trim() ?? "";
+          if (!mfaCode) {
+            return null;
+          }
+          const mfaCheck = await verifyUserMfaCode({
+            storedSecret: user.mfa.secret,
+            email: user.email,
+            code: mfaCode,
+            backupCodesJson: user.mfa.backupCodes,
+          });
+          if (!mfaCheck.valid) {
+            await db.user.update({
+              where: { id: user.id },
+              data: {
+                failedLoginAttempts: { increment: 1 },
+                ...(user.failedLoginAttempts >= 4
+                  ? { isLocked: true, lockedUntil: new Date(Date.now() + 15 * 60 * 1000) }
+                  : {}),
+              },
+            });
+            return null;
+          }
+          const mfaUpdate: Record<string, unknown> = { lastUsedAt: new Date() };
+          if (needsSealing(user.mfa.secret)) {
+            mfaUpdate.secret = sealMfaSecret(openMfaSecret(user.mfa.secret));
+          }
+          if (mfaCheck.method === "backup_code") {
+            mfaUpdate.backupCodes = mfaCheck.remainingBackupCodesJson ?? null;
+          }
+          await db.userMfa.update({
+            where: { userId: user.id },
+            data: mfaUpdate,
+          });
+        }
+
         await db.user.update({
           where: { id: user.id },
           data: {
@@ -117,15 +175,33 @@ export const authOptions: NextAuthOptions = {
         };
       },
     }),
-    GoogleProvider({
-      clientId: env.GOOGLE_CLIENT_ID || "google-oauth-client-id",
-      clientSecret: env.GOOGLE_CLIENT_SECRET || "google-oauth-client-secret",
-    }),
-    GitHubProvider({
-      clientId: env.GITHUB_CLIENT_ID || "github-oauth-client-id",
-      clientSecret: env.GITHUB_CLIENT_SECRET || "github-oauth-client-secret",
-    }),
-  ],
+  ];
+
+  // Register OAuth providers ONLY when real credentials are configured;
+  // never register dummy placeholder client secrets.
+  if (isConfiguredOAuthSecret(env.GOOGLE_CLIENT_ID) && isConfiguredOAuthSecret(env.GOOGLE_CLIENT_SECRET)) {
+    providers.push(
+      GoogleProvider({
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+      }),
+    );
+  }
+
+  if (isConfiguredOAuthSecret(env.GITHUB_CLIENT_ID) && isConfiguredOAuthSecret(env.GITHUB_CLIENT_SECRET)) {
+    providers.push(
+      GitHubProvider({
+        clientId: env.GITHUB_CLIENT_ID,
+        clientSecret: env.GITHUB_CLIENT_SECRET,
+      }),
+    );
+  }
+
+  return providers;
+}
+
+export const authOptions: NextAuthOptions = {
+  providers: buildAuthProviders(),
   session: {
     strategy: "jwt",
     maxAge: 86400,
@@ -138,38 +214,99 @@ export const authOptions: NextAuthOptions = {
     newUser: "/onboarding",
   },
   callbacks: {
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       if (account && (account.provider === "google" || account.provider === "github")) {
         if (!user.email) return false;
         const normalizedEmail = user.email.toLowerCase().trim();
-        let dbUser = await db.user.findUnique({
-          where: { email: normalizedEmail },
-          include: { role: true },
+
+        // Require provider-verified email for Google OAuth
+        if (account.provider === "google") {
+          const emailVerifiedClaim = (profile as { email_verified?: boolean } | undefined)?.email_verified;
+          if (emailVerifiedClaim === false) return false;
+        }
+
+        // First check whether this exact OAuth identity is already linked
+        const existingAccount = await db.account.findUnique({
+          where: {
+            provider_providerAccountId: {
+              provider: account.provider,
+              providerAccountId: account.providerAccountId,
+            },
+          },
+          include: {
+            user: { include: { role: true, mfa: true } },
+          },
         });
 
+        let dbUser = existingAccount?.user ?? null;
+
         if (!dbUser) {
-          let clientRole = await db.role.findUnique({ where: { name: "CLIENT" } });
-          if (!clientRole) {
-            clientRole = await db.role.findUnique({ where: { name: "VIEWER" } });
-          }
-          if (!clientRole) {
-            clientRole = await db.role.create({
-              data: { name: "CLIENT", description: "Client access" },
+          const emailMatch = await db.user.findUnique({
+            where: { email: normalizedEmail },
+            include: { role: true, mfa: true },
+          });
+
+          if (emailMatch) {
+            // Never silently auto-link an unlinked OAuth identity onto an existing
+            // privileged account, MFA-protected account, or unverified local account.
+            if (
+              PRIVILEGED_ROLES.has(emailMatch.role.name) ||
+              emailMatch.mfa?.isEnabled ||
+              !emailMatch.emailVerified
+            ) {
+              return false;
+            }
+            dbUser = emailMatch;
+          } else {
+            let clientRole = await db.role.findUnique({ where: { name: "CLIENT" } });
+            if (!clientRole) {
+              clientRole = await db.role.findUnique({ where: { name: "VIEWER" } });
+            }
+            if (!clientRole) {
+              clientRole = await db.role.create({
+                data: { name: "CLIENT", description: "Client access" },
+              });
+            }
+
+            dbUser = await db.user.create({
+              data: {
+                email: normalizedEmail,
+                name: user.name ?? normalizedEmail.split("@")[0],
+                image: user.image ?? null,
+                roleId: clientRole.id,
+                emailVerified: new Date(),
+                onboardingCompleted: false,
+                lastLoginAt: new Date(),
+              },
+              include: { role: true, mfa: true },
             });
           }
+        }
 
-          dbUser = await db.user.create({
-            data: {
-              email: normalizedEmail,
-              name: user.name ?? normalizedEmail.split("@")[0],
-              image: user.image ?? null,
-              roleId: clientRole.id,
-              emailVerified: new Date(),
-              onboardingCompleted: false,
-              lastLoginAt: new Date(),
-            },
-            include: { role: true },
-          });
+        // Enforce active, lockout, approval, and MFA gates consistently for OAuth too
+        if (!dbUser.isActive) return false;
+        if (dbUser.isLocked) {
+          if (dbUser.lockedUntil && new Date() > dbUser.lockedUntil) {
+            await db.user.update({
+              where: { id: dbUser.id },
+              data: { isLocked: false, lockedUntil: null, failedLoginAttempts: 0 },
+            });
+          } else {
+            return false;
+          }
+        }
+
+        // OAuth callback does not execute TOTP verification, so MFA-enabled accounts
+        // must authenticate through the password + MFA challenge flow.
+        if (dbUser.mfa?.isEnabled) {
+          return false;
+        }
+
+        // Admin approval gate: newly created or unapproved non-admin OAuth accounts
+        // cannot bypass operator approval.
+        const isAdminUser = PRIVILEGED_ROLES.has(dbUser.role.name);
+        if (!dbUser.onboardingCompleted && !isAdminUser) {
+          return false;
         }
 
         await db.account.upsert({
@@ -203,6 +340,7 @@ export const authOptions: NextAuthOptions = {
 
         user.id = dbUser.id;
         user.role = dbUser.role.name;
+        user.mfaEnabled = dbUser.mfa?.isEnabled ?? false;
         user.emailVerified = !!dbUser.emailVerified;
         user.onboardingCompleted = dbUser.onboardingCompleted;
       }
@@ -220,19 +358,6 @@ export const authOptions: NextAuthOptions = {
         token.onboardingCompleted = user.onboardingCompleted ?? false;
         token.emailVerifiedCheckedAt = Date.now();
       } else if (token.sub) {
-        /**
-         * Refresh volatile claims from the database (SEC-06).
-         *
-         * Sessions are 24-hour JWTs, so a claim minted at sign-in is stale for a
-         * day. Without this, a user who verifies their email would still be
-         * refused by the verification gate (`src/proxy.ts`) until the token
-         * expired — the fix would look broken to every new customer. The same
-         * refresh also makes a revoked role or a suspended account take effect
-         * within the refresh window rather than within a day.
-         *
-         * The interval is one minute: a cheap primary-key read, and short enough
-         * that verification feels immediate.
-         */
         const checkedAt = Number(token.emailVerifiedCheckedAt ?? 0);
         if (Date.now() - checkedAt > 60_000) {
           try {
