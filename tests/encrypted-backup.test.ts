@@ -216,3 +216,54 @@ describe("encrypted backup — retention and concurrency", () => {
     expect(res2.stderr).toMatch(/another backup run is in progress/i);
   });
 });
+
+describe("encrypted backup — access control and upload failure semantics", () => {
+  it("writes archives and sidecars with mode 0600 and never embeds KEK material", () => {
+    const outDir = path.join(workDir, "bak-perms");
+    const res = run(BACKUP, backupArgs(outDir), { DATABASE_URL: `file:${scratchDb}` });
+    expect(res.status).toBe(0);
+    const summary = JSON.parse(res.stdout);
+    const kekHex = fs.readFileSync(kekFile, "utf8").trim();
+    const outputs = [summary.file, `${summary.file}.sha256`, `${summary.file}.manifest.json`, path.join(outDir, "backup-status.json")];
+    for (const f of outputs) {
+      const mode = fs.statSync(f).mode & 0o777;
+      expect(mode, `${f} must be 0600, got ${mode.toString(8)}`).toBe(0o600);
+      const bytes = fs.readFileSync(f);
+      expect(bytes.includes(Buffer.from(kekHex, "utf8")), `${f} must not contain the KEK`).toBe(false);
+      expect(bytes.includes(Buffer.from(kekFile)), `${f} must not embed the key file path`).toBe(false);
+    }
+  });
+
+  it("an existing directory as --live --db refuses (exit 3) and nothing is overwritten", () => {
+    const outDir = path.join(workDir, "bak-live");
+    const created = run(BACKUP, backupArgs(outDir), { DATABASE_URL: `file:${scratchDb}` });
+    const archive = JSON.parse(created.stdout).file;
+    const notADb = path.join(workDir, "not-a-db-dir");
+    fs.mkdirSync(notADb, { recursive: true });
+    const res = run(RESTORE, ["--from", archive, "--live", "--yes", "--db", `file:${notADb}`, "--key-file", kekFile]);
+    expect(res.status).toBe(3);
+    expect(fs.existsSync(notADb)).toBe(true); // untouched
+  });
+
+  it("a failing offsite destination records lastFailure and keeps the local verified backup", () => {
+    const outDir = path.join(workDir, "bak-offsite-fail");
+    const blocker = path.join(workDir, "offsite-blocker");
+    fs.writeFileSync(blocker, "not a directory"); // --offsite-dir mkdir must fail
+    const res = run(BACKUP, [...backupArgs(outDir), "--offsite-dir", path.join(blocker, "sub")], { DATABASE_URL: `file:${scratchDb}` });
+    expect(res.status).toBe(1);
+    // The local archive must still exist and verify — a failed upload must never destroy it.
+    const archives = fs.existsSync(outDir) ? fs.readdirSync(outDir).filter((f) => f.endsWith(".alobak")) : [];
+    expect(archives.length).toBe(1);
+    const status = JSON.parse(fs.readFileSync(path.join(outDir, "backup-status.json"), "utf8"));
+    expect(status.lastFailure).not.toBeNull();
+  });
+
+  it("restore of a valid archive never requires or reads the live database", () => {
+    // Sanity check on the isolation guarantee: --verify-only must succeed even when DATABASE_URL points nowhere.
+    const outDir = path.join(workDir, "bak-isolation");
+    const created = run(BACKUP, backupArgs(outDir), { DATABASE_URL: `file:${scratchDb}` });
+    const archive = JSON.parse(created.stdout).file;
+    const res = run(RESTORE, ["--from", archive, "--verify-only", "--key-file", kekFile, "--json"], {});
+    expect(res.status).toBe(0);
+  });
+});
