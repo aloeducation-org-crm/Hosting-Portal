@@ -77,6 +77,8 @@ const PUBLIC_API_PATHS = [
   // grants nothing: the value is an HMAC-bound random token with no identity.
   "/api/csrf",
   "/api/health",
+  // Minimal readiness probe for load balancers; discloses nothing beyond ready:true/false.
+  "/api/ready",
   "/api/pricing",
   "/api/deploy/webhook",
   "/api/internal/sites/ssl-status",
