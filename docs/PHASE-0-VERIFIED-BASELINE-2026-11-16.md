@@ -18,7 +18,7 @@ Nothing in this document is inferred from documentation alone.
 | Prisma schema | 124 models (`prisma/schema.prisma`, 3158 lines), `provider = "sqlite"`, `url = env("DATABASE_URL")` |
 | Migrations | 19 directories under `prisma/migrations/` (SQLite dialect, applied by `scripts/apply-deploy-schema.mjs`) |
 | DB access layer | `@prisma/adapter-libsql` + `@libsql/client`; SQLite pooling patch (`busy_timeout`, `BEGIN IMMEDIATE`) in `src/lib/db.ts` |
-| Test suite | 82 files, **1285 passed, 1 skipped** (`npm test`, 2026-11-16, after `/api/ready` addition) |
+| Test suite | 82 files, **1289 passed, 1 skipped** (`npm test`, 2026-11-16, after PR #47 audit fixes) |
 | Archived predecessor | `archive/retired-2026-11-09/` (immutable snapshot; not active code) |
 | Process managers in repo | PM2 (`ecosystem.config.cjs`, `deploy/pm2/`), systemd units (`deploy/systemd/`, `deploy/server-kit/`) — see risk register §7 |
 | CI | `.github/workflows/ci-cd.yml` (PR/push to `main`/`develop`; production deploy only via attributable `workflow_dispatch` with `release_approval`) |
@@ -30,7 +30,7 @@ Nothing in this document is inferred from documentation alone.
 | V1 | Dependency install | `npm ci` | OK — 637 packages in ~30 s |
 | V2 | Lint | `npm run lint` | OK — exit 0, no findings |
 | V3 | Typecheck (app + scripts) | `npm run typecheck` | OK — exit 0 |
-| V4 | Unit/integration tests | `npm test` | OK — 82 files, 1285 passed / 1 skipped, 0 failed (~75 s) |
+| V4 | Unit/integration tests | `npm test` | OK — 82 files, 1289 passed / 1 skipped, 0 failed (~75 s) |
 | V5 | Production build | `npm run build` | OK — compiled in 23.2 s; 236 static/SSG pages generated |
 | V6 | Prod config validator, no env | `npm run config:validate` | **Fails closed as designed** — exit 1, 9 errors (`APP_URL`, `NEXTAUTH_SECRET`, `JWT_SECRET`, `PORT`, …). The validator works; a production boot without real env is refused |
 | V7 | `prisma migrate deploy` (scratch DB) | `DATABASE_URL=file:/tmp/… npx prisma migrate deploy` | **Not possible** — `binaries.prisma.sh` is unreachable from this environment. The repository's supported offline path is `scripts/apply-deploy-schema.mjs` (V9–V11). This is a sandbox restriction, not a code defect |
@@ -48,6 +48,9 @@ Nothing in this document is inferred from documentation alone.
 | V19 | Readiness probe live (this change) | `curl /api/ready` on the production build | HTTP 200 — `{"ready":true,"reason":"OK"}`; `cache-control: no-store`; no internals disclosed; unauthenticated via `PUBLIC_API_PATHS` |
 | V20 | Readiness probe, negative drill | Same build with `DATABASE_URL=file:/nonexistent-dir-xyz/alo.db` | HTTP 503 — `{"ready":false,"reason":"DATABASE_UNREACHABLE"}`; `/api/health` 503; nothing leaked |
 | V21 | Health classifier gap found and fixed by V20 | libsql wording `Unable to open connection to local database` | Was misclassified `QUERY_FAILED`; now `DATABASE_UNREACHABLE` (`src/lib/health.ts` + regression test in `tests/readiness.test.ts`) |
+| V22 | PR #47 audit: public-path matcher too loose | `PUBLIC_API_PATHS` raw `startsWith` exempted lookalikes (`/api/readyx`) from rate limit + session guard | Fixed with segment-bounded `isPublicApiPath()`; regression tests assert `/api/ready` public, `/api/readyx` and `/api/healthz` → 401 |
+| V23 | PR #47 audit: dependency advisories | `npm audit` (omitting dev) | 1 moderate: GHSA-mfr8-8qww-v76h (next 16.3.0–16.4.4). Fixed by `npm audit fix` (next 16.4.3 → 16.4.6, within ^16); post-fix audit: 0 vulnerabilities; full suite + build re-verified |
+| V24 | PR #47 re-verification after fixes | lint / typecheck / tests / build / migration check | exit 0 / exit 0 / 1289 passed / OK (236 pages) / `apply-deploy-schema --check` → `problems: []` |
 
 V16/V17 are measurements of **this build running in a single-process sandbox**, not a capacity claim. No production host was measured and the 500-concurrent-user target is **not verified** (see §6).
 

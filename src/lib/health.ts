@@ -252,7 +252,7 @@ export interface ReadinessReport {
  *
  * Liveness ("is the process alive?") and readiness ("may this instance receive
  * traffic?") are different questions and get different endpoints: `/api/health`
- * carries the full diagnostic payload for operators, `/ready` carries the bare
+ * carries the full diagnostic payload for operators, `/api/ready` carries the bare
  * minimum a balancer needs and never a connection string, path or host detail.
  * Readiness reuses the same probes as the health report, so a green readiness
  * can never disagree with a healthy status.
