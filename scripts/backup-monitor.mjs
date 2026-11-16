@@ -10,6 +10,8 @@
  *   - the newest archive's sidecar checksum does not match (transport corruption)
  *   - the newest archive is missing its .sha256 sidecar (unverifiable transport)
  *   - sizeBytes is zero / verification did not pass  (archive not trustworthy)
+ *   - no successful RESTORE TEST within --restore-test-max-days (default 31d)
+ *     when --restore-test-log is set                       (M8, when configured)
  *
  * Exit codes: 0 healthy, 1 alert raised, 2 usage/configuration error.
  *
@@ -20,6 +22,12 @@
  *   --webhook <https url>                POST the alert JSON to a generic webhook
  *                                        (or $ALO_BACKUP_ALERT_WEBHOOK if set).
  *   (always)                             Print the JSON report to stdout.
+ *
+ * Restore-test log: append one JSON line per drill, e.g.
+ *   echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":true,\"archive\":\"<file>\",\"durationMs\":1234}" \
+ *     >> /var/backups/alo/restore-drills.jsonl
+ * With --restore-test-log set, the monitor alerts when the log is missing or
+ * the newest ok entry is older than --restore-test-max-days (default 31).
  *
  * Typical wiring (see deploy/systemd/alo-backup-monitor.* and docs/operations/
  * DISASTER-RECOVERY.md §7): run after the nightly backup and hourly from a timer.
@@ -37,6 +45,8 @@ function parseArgs(argv) {
     verifyArchive: true,
     notifyDb: process.env.ALO_BACKUP_NOTIFY_DB || "",
     webhook: process.env.ALO_BACKUP_ALERT_WEBHOOK || "",
+    restoreTestLog: process.env.ALO_BACKUP_RESTORE_TEST_LOG || "",
+    restoreTestMaxDays: Number(process.env.ALO_BACKUP_RESTORE_TEST_MAX_DAYS ?? 31) || 31,
     json: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -49,9 +59,13 @@ function parseArgs(argv) {
     else if (arg === "--no-verify-archive") a.verifyArchive = false;
     else if (arg === "--notify-db") a.notifyDb = next();
     else if (arg === "--webhook") a.webhook = next();
+    else if (arg === "--restore-test-log") a.restoreTestLog = next();
+    else if (arg.startsWith("--restore-test-log=")) a.restoreTestLog = arg.slice(18);
+    else if (arg === "--restore-test-max-days") a.restoreTestMaxDays = Number(next());
+    else if (arg.startsWith("--restore-test-max-days=")) a.restoreTestMaxDays = Number(arg.slice(24));
     else if (arg === "--json") a.json = true;
     else if (arg === "--help" || arg === "-h") {
-      process.stdout.write("usage: backup-monitor.mjs [--status FILE] [--max-age-hours N] [--no-verify-archive] [--notify-db URL] [--webhook URL] [--json]\n");
+      process.stdout.write("usage: backup-monitor.mjs [--status FILE] [--max-age-hours N] [--no-verify-archive] [--notify-db URL] [--webhook URL] [--restore-test-log FILE] [--restore-test-max-days N] [--json]\n");
       process.exit(0);
     } else {
       process.stderr.write(`backup-monitor: unknown argument '${arg}'\n`);
@@ -60,6 +74,10 @@ function parseArgs(argv) {
   }
   if (!Number.isFinite(a.maxAgeHours) || a.maxAgeHours <= 0) {
     process.stderr.write("backup-monitor: --max-age-hours must be a positive number\n");
+    process.exit(2);
+  }
+  if (!Number.isFinite(a.restoreTestMaxDays) || a.restoreTestMaxDays <= 0) {
+    process.stderr.write("backup-monitor: --restore-test-max-days must be a positive number\n");
     process.exit(2);
   }
   return a;
@@ -125,6 +143,43 @@ if (!status) {
       })();
       if (expected !== actual) alerts.push(`archive ${status.lastSuccess.file} failed sha256 re-verification (sidecar ${expected.slice(0, 12)}… != actual ${actual.slice(0, 12)}…)`);
       else observations.archiveVerification = "sha256-ok";
+    }
+  }
+}
+
+
+// M8: restore-drill history. A backup that is never restored is not a backup; alert when no drill is recorded.
+if (args.restoreTestLog) {
+  observations.restoreTest = { log: args.restoreTestLog, maxAgeDays: args.restoreTestMaxDays };
+  const raw = (() => { try { return fs.readFileSync(args.restoreTestLog, "utf8"); } catch { return null; } })();
+  if (raw === null) {
+    alerts.push(`no restore-test log at ${args.restoreTestLog} (no successful restore drill on record)`);
+  } else {
+    let latestOk = NaN;
+    let total = 0;
+    for (const line of raw.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const entry = JSON.parse(t);
+        total += 1;
+        const ok = entry.ok === true || entry.result === "ok" || entry.verified === true;
+        if (ok) {
+          const at = Date.parse(entry.at ?? "");
+          if (Number.isFinite(at) && (!Number.isFinite(latestOk) || at > latestOk)) latestOk = at;
+        }
+      } catch { /* tolerate non-JSON noise lines */ }
+    }
+    observations.restoreTest.entries = total;
+    if (!Number.isFinite(latestOk)) {
+      alerts.push("restore-test log exists but records no successful restore drill");
+    } else {
+      const ageDays = (Date.now() - latestOk) / 86_400_000;
+      observations.restoreTest.lastOkAt = new Date(latestOk).toISOString();
+      observations.restoreTest.ageDays = Number(ageDays.toFixed(2));
+      if (ageDays > args.restoreTestMaxDays) {
+        alerts.push(`last successful restore drill was ${ageDays.toFixed(1)} days ago (threshold ${args.restoreTestMaxDays} days)`);
+      }
     }
   }
 }

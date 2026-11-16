@@ -148,3 +148,47 @@ describe("backup-monitor", () => {
     expect(JSON.parse(res.stdout).alerts.join(" ")).toMatch(/sidecar/);
   });
 });
+
+describe("backup-monitor — M8 restore-drill history", () => {
+  it("exits 0 when a recent successful drill is recorded", () => {
+    const dir = path.join(workDir, "drill-ok");
+    const drillLog = path.join(dir, "restore-drills.jsonl");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(drillLog, `${JSON.stringify({ at: new Date().toISOString(), ok: true, archive: "t.alobak", durationMs: 900 })}\n`);
+    const statusFile = writeStatus(dir, {});
+    const res = run(["--status", statusFile, "--no-verify-archive", "--restore-test-log", drillLog, "--json"]);
+    expect(res.status).toBe(0);
+    expect(JSON.parse(res.stdout).observations.restoreTest.ageDays).toBeLessThan(1);
+  });
+
+  it("exits 1 when the drill log is missing", () => {
+    const dir = path.join(workDir, "drill-missing");
+    const statusFile = writeStatus(dir, {});
+    const res = run(["--status", statusFile, "--no-verify-archive", "--restore-test-log", path.join(dir, "nope.jsonl"), "--json"]);
+    expect(res.status).toBe(1);
+    expect(JSON.parse(res.stdout).alerts.join(" ")).toMatch(/restore-test log/i);
+  });
+
+  it("exits 1 when the newest successful drill is older than the threshold", () => {
+    const dir = path.join(workDir, "drill-stale");
+    const drillLog = path.join(dir, "restore-drills.jsonl");
+    fs.mkdirSync(dir, { recursive: true });
+    const stale = new Date(Date.now() - 45 * 86_400_000).toISOString();
+    fs.writeFileSync(drillLog, `${JSON.stringify({ at: stale, ok: true })}\n`);
+    const statusFile = writeStatus(dir, {});
+    const res = run(["--status", statusFile, "--no-verify-archive", "--restore-test-log", drillLog, "--restore-test-max-days", "31", "--json"]);
+    expect(res.status).toBe(1);
+    expect(JSON.parse(res.stdout).alerts.join(" ")).toMatch(/restore drill was 45\.0 days ago/i);
+  });
+
+  it("exits 1 when the log has no successful drill on record", () => {
+    const dir = path.join(workDir, "drill-none-ok");
+    const drillLog = path.join(dir, "restore-drills.jsonl");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(drillLog, `${JSON.stringify({ at: new Date().toISOString(), ok: false, error: "verify failed" })}\n`);
+    const statusFile = writeStatus(dir, {});
+    const res = run(["--status", statusFile, "--no-verify-archive", "--restore-test-log", drillLog, "--json"]);
+    expect(res.status).toBe(1);
+    expect(JSON.parse(res.stdout).alerts.join(" ")).toMatch(/no successful restore drill/i);
+  });
+});
