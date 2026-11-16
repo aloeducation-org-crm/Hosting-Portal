@@ -132,6 +132,19 @@ const BEARER_OR_SESSION_API_PATHS = [
   "/api/ai/operator",
 ];
 
+/**
+ * Segment-bounded matcher for public paths: `/api/health` and `/api/health/x`
+ * are public, `/api/healthz` is NOT. The previous raw `startsWith` let any
+ * future sibling whose name begins with a public path (e.g. `/api/readyx`)
+ * silently inherit both the rate-limit exemption and the session-guard
+ * exemption — the same class of bug `account-status.matchesPrefix` was written
+ * to prevent (SEC-06). Machine-authenticated and bearer paths were already
+ * segment-bounded; this aligns the public list with them.
+ */
+function isPublicApiPath(pathname: string): boolean {
+  return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 export function isMachineAuthenticatedApiPath(pathname: string): boolean {
   return HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
@@ -346,7 +359,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // General rate limiting
-  if (!PUBLIC_API_PATHS.some((p) => pathname.startsWith(p))) {
+  if (!isPublicApiPath(pathname)) {
     const entry = RATE_LIMIT.get(ip);
     if (entry && now < entry.resetAt) {
       if (entry.count >= RATE_MAX) {
@@ -412,7 +425,7 @@ export async function proxy(request: NextRequest) {
 
   if (
     pathname.startsWith("/api/") &&
-    !PUBLIC_API_PATHS.some((p) => pathname.startsWith(p)) &&
+    !isPublicApiPath(pathname) &&
     !isMachineAuthenticatedApiPath(pathname) &&
     !hasExplicitBearerAuth
   ) {

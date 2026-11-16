@@ -59,3 +59,44 @@ describe("buildReadinessReport", () => {
     expect(JSON.stringify(report)).not.toMatch(/alo\.db|db\.internal|5432|postgres:\/\//);
   });
 });
+
+/**
+ * Proxy-level regression for the public-path list (audit of PR #47):
+ * `/api/ready` must be reachable unauthenticated (load balancers have no
+ * session), but a lookalike sibling such as `/api/readyx` must NOT inherit
+ * the public exemption and must be rejected with 401 by the session guard.
+ */
+import { NextRequest } from "next/server";
+
+describe("proxy public-path matching is segment-bounded", () => {
+  process.env.NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET || "t".repeat(64);
+  process.env.JWT_SECRET = process.env.JWT_SECRET || "t".repeat(64);
+  process.env.APP_ENCRYPTION_KEY = process.env.APP_ENCRYPTION_KEY || "a".repeat(64);
+
+  const req = (path: string) =>
+    new NextRequest(new URL(path, "http://localhost:3000"), { method: "GET" });
+
+  it("serves /api/ready without a session", async () => {
+    const { proxy } = await import("@/proxy");
+    const res = await proxy(req("/api/ready"));
+    expect(res.status).not.toBe(401);
+  });
+
+  it("serves /api/ready/v1-children without a session", async () => {
+    const { proxy } = await import("@/proxy");
+    const res = await proxy(req("/api/ready/anything"));
+    expect(res.status).not.toBe(401);
+  });
+
+  it("does NOT exempt /api/readyx from authentication", async () => {
+    const { proxy } = await import("@/proxy");
+    const res = await proxy(req("/api/readyx"));
+    expect(res.status).toBe(401);
+  });
+
+  it("does NOT exempt /api/healthz from authentication either", async () => {
+    const { proxy } = await import("@/proxy");
+    const res = await proxy(req("/api/healthz"));
+    expect(res.status).toBe(401);
+  });
+});
