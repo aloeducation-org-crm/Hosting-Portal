@@ -1,7 +1,7 @@
 # Disaster Recovery Plan — ALO Hosting Portal
 
 **Maintained:** 2026-11-16 · **Verdict: NOT READY for production disaster recovery.**
-**Reason:** no production/staging restore drill has been executed on real infrastructure; no offsite destination exists; RPO/RTO are unmeasured. What exists is a verified local mechanism (encrypted backup → encrypted offsite-style copy → sha256 verification → decrypt → isolated restore), exercised end-to-end on scratch data. Do not advertise RPO/RTO until a timed staging drill proves them (§10).
+**Reason:** no production/staging restore drill has been executed on real infrastructure; no **production** offsite destination is designated (a drill-level offsite transfer to the operator-connected Google Drive was verified 2026-11-16, §11); RPO/RTO are unmeasured. What exists is a drill-verified mechanism (encrypted backup → upload/copy offsite → sha256 verification, Drive-attested for the Drive copy → decrypt → isolated restore → integrity checks), exercised end-to-end on scratch data. Do not advertise RPO/RTO until a timed staging drill proves them (§10).
 
 Companion documents: [`BACKUP-RESTORE.md`](./BACKUP-RESTORE.md) (runbook),
 [`docs/DATABASE-RECOVERY-RUNBOOK.md`](../DATABASE-RECOVERY-RUNBOOK.md),
@@ -109,6 +109,7 @@ Alert conditions (all → SUPER_ADMIN in-app Notification, type `backup-alert`):
 | M5 | Newest archive missing sidecar | High |
 | M6 | `sizeBytes` zero / verification incomplete | High |
 | M7 | No `offsite.verified: true` recorded | Warning (standing REL-05 gap) |
+| M8 | No successful restore drill within `--restore-test-max-days` (default 31d) of `--restore-test-log` | High |
 
 Also monitored on the panel: `/api/health` `databaseStatus`/`schemaStatus`; the
 monitor's alerts appear in the same notification bell as other SUPER_ADMIN events.
@@ -116,8 +117,9 @@ Thresholds: backup age > 26 h alerts; page-worthy = M1/M2/M4. An operator must
 acknowledge by running a manual backup + monitor; the alert self-clears on the next
 successful run (deterministic alert ids prevent re-spam of the same alert).
 
-**Not yet monitored:** restore-drill history, offsite storage availability, KEK age,
-retention compliance. These are gaps owned by the operator once a real offsite
+**Not yet monitored:** offsite storage availability, KEK age, retention compliance.
+Restore-drill history IS monitored when `--restore-test-log` is set (M8; enabled in
+the shipped unit). Remaining gaps are owned by the operator once a production offsite
 destination exists.
 
 ## 8. Disaster scenarios
@@ -164,8 +166,7 @@ verified mechanism and an operations plan — not a functioning disaster-recover
 
 ## 11. 2026-11-16 sandbox drill record (scratch data, not production)
 
-Executed in an isolated workspace against a seeded scratch SQLite DB and synthetic
-uploads/artifacts:
+Executed in an isolated workspace against a **copy of the repository's checked-in `db/custom.db`** (seeded development database, not customer production data) and synthetic uploads/artifacts:
 
 | Step | Result |
 |---|---|
@@ -175,6 +176,8 @@ uploads/artifacts:
 | `--verify-only` restore audit | Passed, 9/9 files verified |
 | Isolated `--target` restore | Passed; uploads/index.html, file-b.txt, persistent.txt, release.txt byte-identical; control-plane `app.db` passed `PRAGMA integrity_check` |
 | Audit-table export | Initially failed (`createdAt` column) → fixed to `timestamp`; verified in drill 3 |
+| Offsite transfer (operator-connected Google Drive) | OK — archive + sidecars uploaded 2026-11-16T21:33Z to `ALO Encrypted Backups (DRILL)`; Drive-attested sha256/md5 match the local file exactly; sidecars read back; identical bytes restored in isolation |
+| Restore-drill log + monitor (M8) | OK — drill recorded in `restore-drills.jsonl`; monitor exits healthy with it, exits 1 when stale/missing/failed |
 | Tamper tests (wrong KEK, flipped payload bit, header byte, bad sidecar, truncated file) | All fail closed (tests/encrypted-backup.test.ts) |
 | Monitor stale/failure/tamper cases → SUPER_ADMIN notification | Passed (tests/backup-monitor.test.ts), idempotent |
 

@@ -1,6 +1,6 @@
 # Known Limitations Register — ALO Hosting Portal
 
-**Maintained:** 2026-11-16 (DR update 2026-11-16, L9 revised, L21–L24 added) · Items here are **accepted, bounded gaps**, not aspirations.
+**Maintained:** 2026-11-16 (DR update 2026-11-16, L9/L21/L23 revised after 2026-11-16 Drive offsite drill; L21–L24 added) · Items here are **accepted, bounded gaps**, not aspirations.
 Each entry states the limitation, the impact, and the condition that closes it.
 "Not verified" is not the same as "broken" — it means no evidence was collected.
 
@@ -26,7 +26,7 @@ Each entry states the limitation, the impact, and the condition that closes it.
 | L18 | `archive/retired-2026-11-09/` retained in repo | Noise; risk of stale references | Never import from it; prune only with owner approval (snapshot value) |
 | L19 | No HA / no automated failover for the control plane | Planned maintenance = downtime; failure = manual restore | HA design lands (ADR-001 path) or maintenance windows documented |
 | L20 | Documentation completeness is indexed, not exhaustive | New readers may miss the right runbook | `docs/DOCUMENTATION-INDEX.md` kept current each release |
-| L21 | No offsite backup destination is configured (REL-05) | Local backups protect against accidental deletion only; a lost/ransomed host loses everything | Operator provisions object storage / remote host; uploaded copies sha256-verified; retention + deletion protection documented |
+| L21 | No offsite backup destination is configured for production (REL-05); operator-connected Google Drive was used for a verified 2026-11-16 drill upload only | Local backups protect against accidental deletion only; consumer Drive has no object-lock/versioning and custody sits with one personal account | Written owner decision on the production destination + uploaded copies sha256-verified weekly + retention + deletion protection documented |
 | L22 | No restore drill on real staging/production infrastructure | RPO/RTO unmeasured; the local 2026-11-16 scratch drill proves the mechanism only | Timed staging drill with production-like data; numbers published from it |
-| L23 | KEK is a file-based key (no managed KMS in this environment) | Static secret; manual rotation; host compromise + backup copies defeats confidentiality | Managed KMS/Vault transit or HSM-backed KEK with audit trail |
+| L23 | KEK is a file-based key (no managed KMS in this environment) | Static secret; rotation manual (KEK re-wrap is implemented via `scripts/backup-rewrap-kek.mjs`, tested); host compromise + backup copies defeats confidentiality | Managed KMS/Vault transit or HSM-backed KEK with audit trail; KEK escrow drill |
 | L24 | `BackupManifest.environmentVars` stores environment variable *values* in plaintext rows | Anyone with DB read access (or a DB backup) sees captured env values | Store names only (values stay in the secret store); migration + backfill; audit existing rows |

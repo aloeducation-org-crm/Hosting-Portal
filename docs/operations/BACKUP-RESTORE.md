@@ -54,9 +54,16 @@ Authenticated envelope encryption — no custom primitives:
 ### KEK rotation procedure
 
 1. Generate a new 256-bit KEK; install it as `.../backup-kek-2` (mode 0600) or in your secret store; set `ALO_BACKUP_KEK_ID=kek-2`.
-2. Keep `kek-1` available until every archive encrypted with it is past its retention window. To re-wrap: decrypt with kek-1 (`encrypted-restore.mjs --verify-only`), then re-encrypt/backup with kek-2. A dedicated re-wrap command is **not yet implemented** — planned, not operational.
-3. Inventory archives by `kekId` in their `.manifest.json` sidecars. Do not delete `kek-1` before the oldest `kek-1` archive ages out of retention.
-4. Emergency rotation (KEK compromise): rotate as in 1–3, treat ALL prior backups as confidentiality-compromised, rotate every credential stored inside backed-up hosts, and destroy old KEKs after the retention window. See DISASTER-RECOVERY.md scenario 6.
+2. Keep `kek-1` available until every archive encrypted with it is past its retention window.
+3. Re-wrap existing archives to the new KEK without touching the live database:
+   ```bash
+   node scripts/backup-rewrap-kek.mjs --from /var/backups/alo/alo-backup-<stamp>.alobak \
+     --new-key-file /etc/alo-hosting/backup-kek-2 --new-kek-id kek-2
+   # writes <stem>.rewrapped-kek-2.alobak (+ .sha256, .manifest.json); the original is byte-for-byte untouched
+   ```
+   The re-wrapped archive authenticates only under kek-2; the original stays valid under kek-1. `tests/backup-rewrap-kek.test.ts` covers this path end to end.
+4. Inventory archives by `kekId` in their `.manifest.json` sidecars. Do not delete `kek-1` before the oldest `kek-1` archive ages out of retention.
+5. Emergency rotation (KEK compromise): rotate as in 1–3, treat ALL prior backups as confidentiality-compromised, rotate every credential stored inside backed-up hosts, and destroy old KEKs after the retention window. See DISASTER-RECOVERY.md scenario 6.
 
 ### If KMS is unavailable (current state)
 
@@ -144,11 +151,13 @@ destination can be a mounted remote (sshfs/rclone mount of an object bucket, NAS
 different host over NFS); after copying, the destination copy is sha256 re-verified
 end-to-end and `backup-status.json` records `offsite.verified`.
 
-**Current status (2026-11-16): no offsite destination is configured. REL-05 remains
-BLOCKED.** The only connector reachable from the build workspace is Google Drive, whose
-authenticated account is a personal account with unrelated personal content — not an
-approved ALO destination, and no ALO data (even encrypted drill data) has been uploaded
-to it. To close REL-05 the operator must choose and provision one of:
+**Current status (2026-11-16): no production offsite destination is designated. REL-05
+remains open.** A drill-level offsite transfer to the operator-connected Google Drive
+was executed and verified 2026-11-16 (see the drill evidence below). The only connector
+reachable from the build workspace is Google Drive, whose authenticated account is a
+personal account with unrelated personal content — it is being used for drill artifacts
+only, and its use for production backups requires the owner's written decision. To
+close REL-05 the operator must choose and provision one of:
 
 - S3-compatible object storage in a second provider/region (recommended; versioning + object-lock for deletion protection), or
 - rsync/rclone over SSH to a host in a different failure domain, or
@@ -158,6 +167,19 @@ Once provisioned: point `--offsite-dir` at the mount (or add an upload step afte
 run), confirm `.sha256` re-verification in `backup-status.json`, and configure retention
 and alerting. Until then, this backup protects against accidental deletion and local
 file loss only — **not** against loss of the host or ransomware.
+
+**2026-11-16 Drive offsite drill (evidence).** With the operator-connected Google
+Drive account, the drill archive `alo-backup-20261116T210531Z-drill3.alobak`
+(155,961 bytes) was uploaded to the new Drive folder `ALO Encrypted Backups
+(DRILL)` (`1Ymx7hQaqlIJQZyZDgP4ffHt-zq6hCrYK`) together with its `.sha256` and
+`.manifest.json` sidecars. Drive-attested checksums match the local archive
+byte-for-byte (`sha256 4310fc07…`, `md5 c7e3179b…`, size 155,961); the sidecars
+were read back successfully; and those same bytes were decrypt-verified and
+isolated-restored (see §9). This proves the transfer-verify-restore path end to
+end — but it is **evidence for the mechanism**, not approval of consumer Drive as
+the production destination: it has no object-lock/versioning and concentrates
+backup custody in one personal account. The production destination remains the
+owner's decision (S3 object-lock in a second provider is recommended).
 
 Retention rules (binding): keep the newest 14 verified archives (`--keep`), prune only
 **after** the new archive is verified, never prune the newest valid backup, and never
@@ -177,6 +199,12 @@ themselves. To schedule: install the units, set `ALO_BACKUP_DIR`, `ALO_BACKUP_OF
 - Failed runs write `lastFailure` to `backup-status.json`; the hourly monitor reads it and alerts SUPER_ADMIN in-app (and optionally via webhook / `--notify-db`).
 - Retry: reruns are idempotent; a persistent failure stays visible until a successful run overwrites `lastFailure: null`. There is no hidden retry queue — the systemd timer re-fires on its next calendar slot, which doubles as the retry. For faster retry, re-run the service manually.
 - Size tracking and checksum are recorded per archive in `backup-status.json` and `<file>.manifest.json`; prune reports counts in the run output.
+- Restore-drill history: append one JSON line per successful drill to `/var/backups/alo/restore-drills.jsonl`:
+  ```bash
+  echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"ok\":true,\"archive\":\"<archive>\",\"durationMs\":1234}" \
+    >> /var/backups/alo/restore-drills.jsonl
+  ```
+  The monitor (`--restore-test-log`, enabled in the shipped unit) alerts when the newest successful drill is older than `--restore-test-max-days` (default 31) — an untested backup is not a backup.
 
 Cron alternative for hosts without systemd:
 
@@ -219,10 +247,13 @@ they say nothing about production RPO/RTO.**
 
 ## 10. Google Drive assessment (2026-11-16)
 
-Recorded because it is the only reachable offsite-like connector: the authenticated
-Drive account holds unrelated personal content and is unsuitable as an ALO backup
-destination. Consumer Drive also lacks object versioning/object-lock semantics, offers
-no deletion protection comparable to S3 object-lock, and would concentrate backup
-credentials with one personal account. Do not wire `ALO_BACKUP_*` to it. A Workspace
-shared drive with external retention tooling could be reconsidered by the owner; record
-that decision here if taken.
+The operator re-connected Google Drive and approved using it for drill evidence at
+2026-11-16 21:33Z. The drill archive above was uploaded to `ALO Encrypted Backups
+(DRILL)` and verified by Drive-attested sha256. **This is not yet approval for
+consumer Drive as the production destination** — which remains the owner's decision.
+Consumer Drive lacks object versioning/object-lock semantics and deletion protection
+comparable to S3 object-lock, and would concentrate backup custody in one personal
+account. Do not wire production `ALO_BACKUP_OFFSITE_DIR` to it without a written
+owner decision; if granted, schedule recurring uploads via `rclone --drive-root-folder-id`
+and record it here with retention evidence. S3 object-lock in a second provider/region
+remains the recommended destination.
