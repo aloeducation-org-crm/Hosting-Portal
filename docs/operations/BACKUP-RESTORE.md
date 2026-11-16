@@ -1,134 +1,228 @@
 # Backup and Restore Runbook
 
-> **Current capability: PARTIAL, with the two halves in very different states.**
->
-> - **Site files: implemented.** `helpers/alo-site-backup` writes a checksummed
->   archive; `helpers/alo-site-restore` verifies the SHA-256 before restoring and
->   aborts on mismatch. That is a real restore path.
-> - **Database: not implemented as an automated drill.** The orchestrated database
->   restore returns `NOT_IMPLEMENTED` rather than reporting a restore it did not
->   perform. Database restore is therefore a manual, verified procedure (§3).
->
-> Treat this document as the procedure to follow *and* as the list of what still
-> has to be built.
+**Maintained:** 2026-11-16 · **Status: mechanism implemented and drill-tested locally; NOT yet operational on production hosts. Disaster-recovery readiness is NOT claimed.**
 
-## 1. What is backed up
+Two parallel backup systems exist. Do not conflate them:
 
-| Asset | Mechanism | Location | Verified? |
-|---|---|---|---|
-| SQLite database | file copy / `/api/backups` | `/var/backups/alo-sites` | Creation tested; restore **not** |
-| Site files | `helpers/alo-site-backup create <domain>` → SHA-256 checksummed archive | `/var/backups/alo-sites/<domain>/` | **Implemented**; restore verifies the checksum and aborts on mismatch. Not executed as root here. |
-| Database restore (automated) | orchestrated worker | — | **`NOT_IMPLEMENTED`** — refuses rather than faking success |
-| Configuration | `/etc/alo-hosting/panel.env` | host only | **Not included** in any backup — copy it separately |
-| Certificates | `/etc/letsencrypt` | host | **Not included** |
-| Off-host copy | — | — | **Does not exist (REL-05, BLOCKED)** |
+| System | Scope | Status |
+|---|---|---|
+| Per-site backups (`/api/backups`, `helpers/alo-site-backup` / `alo-site-restore`) | Files of one hosted customer website | Implemented; site restore is checksum-verified; execution against production hosts unverified from this workspace |
+| Control-plane DR (`scripts/encrypted-backup.mjs` / `scripts/encrypted-restore.mjs` / `scripts/backup-monitor.mjs`) | The panel's own database and the artifacts listed below | Scripts + automated tests in repo. **Executed only in a local sandbox drill (scratch data). Not installed on any host.** |
 
-**RPO/RTO cannot be stated**, because there is no off-host destination and no
-timed drill. Any number would be invented.
+This document describes both. For incident scenarios, priorities and verification see
+[`docs/operations/DISASTER-RECOVERY.md`](./DISASTER-RECOVERY.md).
 
-## 2. Taking a backup
+---
+
+## 1. What the control-plane DR backup contains (and refuses)
+
+Categories (archive format `alobak/1`; every file sha256'd into the in-archive manifest):
+
+| Category | Contents | Notes |
+|---|---|---|
+| control-plane | `SQLite VACUUM INTO` snapshot of `DATABASE_URL` (`file:` URLs) | `PRAGMA integrity_check` + required core tables (`users`, `audit_logs`, `servers`, `hosting_sites`) verified before the archive is created. PostgreSQL/MariaDB control planes are **not** supported by this path yet |
+| audit | JSONL export of the 5,000 most recent `audit_logs` rows | Best-effort; the archive records a warning if the table is unreadable |
+| customer-db | `--customer-db-url` — SQLite (`file:`) snapshot or `pg_dump` of one customer database | One customer database per invocation; repeat per database |
+| application-data | `--application-data-dir` tree | Persistent app data |
+| artifacts | `--artifacts-dir` tree | Deployment artifacts (releases, dist/) |
+| uploads | `--uploads-dir` tree | Customer uploads |
+| config | `--config-file` (repeatable) — explicitly named non-secret files | Basename secret denylist (`.env*`, `*secret*`, `*token*`, `*credential*`, `*.pem`, `*.key`, `id_rsa`, `*.p12`) is enforced in code; a config file whose name looks secret is **refused**, never archived |
+| infrastructure | `--infrastructure-file` (repeatable) — e.g. systemd units, reverse-proxy config | Same denylist as config |
+
+**Secrets are never placed in archives.** The denylist is name-based and enforced at
+both ingest and restore. Secret material (KEK, `.env` values, API tokens) lives
+outside the backup set entirely — see §3. If a secret is found inside a staged
+directory tree it is skipped and recorded in the manifest's `skipped[]` array, and
+the archive itself carries no secret values.
+
+The payload manifest also records `hostname`, timestamps and sizes — no environment
+variable *values* are read, captured or stored. Sidecar `<file>.manifest.json` next
+to each archive is non-secret (file name, categories, sizes, sha256, KEK **id** — never
+key material or key file paths).
+
+## 2. Encryption
+
+Authenticated envelope encryption — no custom primitives:
+
+- **Payload**: AES-256-GCM with a fresh random 256-bit data-encryption key (DEK) and 96-bit nonce per archive.
+- **Key wrap**: the DEK is wrapped with a key-encryption key (KEK), AES-256-GCM, AAD-bound to the archive header and a magic prefix (`ALOBAK01`); the payload GCM's AAD binds the encrypted bytes to the header (including the claimed `plaintextSha256`) so any tampering with the header, wrap or payload fails authentication.
+- **Integrity**: GCM tag for the payload *and* wrap; plaintext SHA-256 re-verified after decrypt; outer `<file>.sha256` sidecar for transport; per-file SHA-256 re-verified from the decrypted manifest during every restore audit.
+- **KEK source**: `ALO_BACKUP_ENCRYPTION_KEY` (64 hex chars) or `ALO_BACKUP_KEY_FILE` (file must be mode 0600 and is refused if group/world-readable). Never logged, never written to the archive, never beside the encrypted file by default. KEK id recorded via `--kek-id` (default `kek-1`) for rotation bookkeeping.
+- **Self-check before keep**: after encryption the script immediately decrypts the archive and byte-compares SHA-256 of plaintext; on mismatch nothing is kept. Finalize is atomic (`.partial` → rename) so a failed run never replaces the last valid backup.
+- **Fail closed**: wrong KEK, tampered header/payload, bad sidecar, truncated file, or manifest mismatch all abort with a non-zero exit; no partial output is left behind (temp staging is always removed).
+
+### KEK rotation procedure
+
+1. Generate a new 256-bit KEK; install it as `.../backup-kek-2` (mode 0600) or in your secret store; set `ALO_BACKUP_KEK_ID=kek-2`.
+2. Keep `kek-1` available until every archive encrypted with it is past its retention window. To re-wrap: decrypt with kek-1 (`encrypted-restore.mjs --verify-only`), then re-encrypt/backup with kek-2. A dedicated re-wrap command is **not yet implemented** — planned, not operational.
+3. Inventory archives by `kekId` in their `.manifest.json` sidecars. Do not delete `kek-1` before the oldest `kek-1` archive ages out of retention.
+4. Emergency rotation (KEK compromise): rotate as in 1–3, treat ALL prior backups as confidentiality-compromised, rotate every credential stored inside backed-up hosts, and destroy old KEKs after the retention window. See DISASTER-RECOVERY.md scenario 6.
+
+### If KMS is unavailable (current state)
+
+This repository does not have access to a managed KMS. The approved alternative is a
+**file-based KEK with strict 0600 permissions, stored separately from the backup
+archives and managed by the host's secret tooling** (e.g. a root-only file outside
+the backup directory, delivered via configuration management). Operational risks you
+accept with this design, explicitly:
+
+- Compromise of the host that holds both KEK and archives breaks confidentiality.
+- The KEK is a static secret; rotation is manual (procedure above).
+- No hardware-backed non-exportability, no audit trail of KEK use, no automatic rotation.
+- Backups located on the same host as the KEK are single-point failures for both availability and confidentiality.
+
+Moving to a managed KMS (AWS KMS / GCP KMS / HashiCorp Vault transit) closes these and
+is an **operator decision**; the envelope format records `kekId` so a KMS-backed KEK
+can be introduced without changing the archive format.
+
+## 3. Key storage rules (binding)
+
+- The KEK is **never** committed to git, written into manifests, printed to logs, or stored beside the encrypted archive.
+- Backups on shared storage must not live on the same volume as the live database *and* the KEK.
+- Restoring a backup requires the KEK; losing the KEK makes every archive encrypted with it permanently unrecoverable. Keep an escrowed copy in a sealed, access-audited offline location (documented by the operator; not in this repo).
+
+## 4. Taking a backup
 
 ```bash
-# helper path -- <domain>, not a site id; destination is fixed at
-# /var/backups/alo-sites/<domain>/
+# minimum viable: control-plane + audit + any categories whose sources are given
+export DATABASE_URL=file:/var/lib/alo-hosting/production.db
+export ALO_BACKUP_ENCRYPTION_KEY=<64 hex chars>        # or: --key-file /etc/alo-hosting/backup-kek
+node scripts/encrypted-backup.mjs --out /var/backups/alo --label manual --json
+
+# typical scheduled run (adds app data, artifacts, uploads, config, infra, offsite copy)
+node scripts/encrypted-backup.mjs --out /var/backups/alo --label scheduled \
+  --application-data-dir /var/lib/alo-hosting/data \
+  --artifacts-dir /opt/alo-hosting/current \
+  --uploads-dir /var/lib/alo-hosting/uploads \
+  --config-file /etc/alo-hosting/panel.env.example   # example: a NON-secret file only
+  --infrastructure-file deploy/systemd/alo-hosting-panel.service \
+  --offsite-dir /mnt/offsite-backups                  # must be a MOUNTED REMOTE — see §6
+```
+
+Useful flags: `--keep N` (default `BACKUP_RETENTION_COUNT` or 14), `--category <name>`
+(repeatable; default = control-plane + every category whose source was provided),
+`--skip-audit`, `--status` (print current `backup-status.json` and exit),
+`--kek-id`, `--env-file` (read DATABASE_URL / ALO_BACKUP_ENCRYPTION_KEY from an env
+file without echoing it).
+
+A successful run prints JSON: archive path, size, sha256, categories, files, duration.
+`backup-status.json` (mode 0600) beside the archives is the machine-readable state the
+monitor reads.
+
+## 5. Verifying and restoring
+
+```bash
+# 1) transport checksum (fast, catches transport corruption)
+sha256sum -c /var/backups/alo/alo-backup-<stamp>.alobak.sha256
+
+# 2) cryptographic + semantic verify, restores nothing
+node scripts/encrypted-restore.mjs --from <archive> --verify-only --key-file /etc/alo-hosting/backup-kek --json
+
+# 3) isolated restore into a scratch directory (SAFE — never touches the live system)
+node scripts/encrypted-restore.mjs --from <archive> --target /tmp/restore-check --key-file ... --json
+
+# 4) destructive live restore — requires --yes, an explicit --db, and takes a
+#    fresh verified snapshot of the CURRENT database first; refuses otherwise
+node scripts/encrypted-restore.mjs --from <archive> --live --yes --db file:/var/lib/alo-hosting/production.db --key-file ...
+```
+
+Every restore mode performs, in order: outer sidecar check → decrypt (authenticates
+header/wrap/payload) → per-file SHA-256 re-verify from the in-archive manifest →
+`PRAGMA integrity_check` and core-table presence for SQLite snapshots → disk-space
+check with 10% headroom. The live mode additionally refuses if restoring would drop
+core tables that exist in the current database, and writes `.partial` then atomically
+renames into place.
+
+**Never overwrite production during routine testing.** Use `--target` for drills. Live
+restores are for actual incidents and require explicit human approval (§6 of
+DISASTER-RECOVERY.md).
+
+## 6. Offsite destination
+
+A second directory on the same disk **is not offsite**. `--offsite-dir` exists so the
+destination can be a mounted remote (sshfs/rclone mount of an object bucket, NAS, or a
+different host over NFS); after copying, the destination copy is sha256 re-verified
+end-to-end and `backup-status.json` records `offsite.verified`.
+
+**Current status (2026-11-16): no offsite destination is configured. REL-05 remains
+BLOCKED.** The only connector reachable from the build workspace is Google Drive, whose
+authenticated account is a personal account with unrelated personal content — not an
+approved ALO destination, and no ALO data (even encrypted drill data) has been uploaded
+to it. To close REL-05 the operator must choose and provision one of:
+
+- S3-compatible object storage in a second provider/region (recommended; versioning + object-lock for deletion protection), or
+- rsync/rclone over SSH to a host in a different failure domain, or
+- a managed snapshot service for the host volume plus this repository's archives for logical portability.
+
+Once provisioned: point `--offsite-dir` at the mount (or add an upload step after the
+run), confirm `.sha256` re-verification in `backup-status.json`, and configure retention
+and alerting. Until then, this backup protects against accidental deletion and local
+file loss only — **not** against loss of the host or ransomware.
+
+Retention rules (binding): keep the newest 14 verified archives (`--keep`), prune only
+**after** the new archive is verified, never prune the newest valid backup, and never
+delete an offsite copy while any local copy still depends on it for verification.
+
+## 7. Scheduling, retention and failure behavior
+
+Templates are provided under `deploy/systemd/` — `alo-encrypted-backup.service/.timer`
+(daily 02:30, `Persistent=true`) and `alo-backup-monitor.service/.timer` (hourly). They
+are **templates**: they are not installed or enabled anywhere and enable nothing by
+themselves. To schedule: install the units, set `ALO_BACKUP_DIR`, `ALO_BACKUP_OFFSITE_DIR`,
+`ALO_BACKUP_KEY_FILE` (or `ALO_BACKUP_ENCRYPTION_KEY`) in `/etc/alo-hosting/panel.env`, then
+`systemctl enable --now alo-encrypted-backup.timer`.
+
+- Duplicate scheduled runs are prevented by a lock file (`.encrypted-backup.lock`, pid-liveness + 6h max age); a live lock refuses a second run.
+- A failed run **never** replaces the last valid backup (atomic finalize; prune happens only after verification).
+- Failed runs write `lastFailure` to `backup-status.json`; the hourly monitor reads it and alerts SUPER_ADMIN in-app (and optionally via webhook / `--notify-db`).
+- Retry: reruns are idempotent; a persistent failure stays visible until a successful run overwrites `lastFailure: null`. There is no hidden retry queue — the systemd timer re-fires on its next calendar slot, which doubles as the retry. For faster retry, re-run the service manually.
+- Size tracking and checksum are recorded per archive in `backup-status.json` and `<file>.manifest.json`; prune reports counts in the run output.
+
+Cron alternative for hosts without systemd:
+
+```cron
+30 2 * * *  alo-panel  /usr/bin/node /opt/alo-hosting/current/scripts/encrypted-backup.mjs --out /var/backups/alo --label scheduled --offsite-dir /mnt/offsite-backups --key-file /etc/alo-hosting/backup-kek >> /var/log/alo-backup.log 2>&1
+7 * * * *   alo-panel  /usr/bin/node /opt/alo-hosting/current/scripts/backup-monitor.mjs --status /var/backups/alo/backup-status.json --notify-db file:/var/lib/alo-hosting/production.db >> /var/log/alo-backup-monitor.log 2>&1
+```
+
+## 8. Site files (separate system, unchanged)
+
+```bash
 sudo helpers/alo-site-backup create <domain>
-sudo helpers/alo-site-backup list <domain>
-
-# database (sqlite, consistent copy)
-sqlite3 "$DB_PATH" ".backup '/var/backups/alo-sites/alo-$(date -u +%Y%m%dT%H%M%SZ).db'"
+sudo helpers/alo-site-restore <domain> /var/backups/alo-sites/<domain>/<archive>.tar.gz
 ```
 
-Verify the copy before trusting it:
+The site restore helper verifies SHA-256 before overwriting and health-checks the site
+afterwards. Manual control-plane database restores (when the encrypted path cannot be
+used): take a current-state snapshot **first**, stop writers
+(`systemctl stop alo-hosting-panel alo-automation-worker`), `PRAGMA integrity_check` on
+the backup, move the live DB aside — never overwrite — install the backup at `0640`
+owned by `alo-panel`, start and require `/api/health` reason `OK`. Note
+`SCHEMA_OUT_OF_DATE` means the backup predates the code; do not run migration to fix it
+blindly (see `DATABASE-AND-MIGRATION-AUDIT.md`).
+
+## 9. Regularly scheduled restore rehearsal
+
+A backup is not a backup until it has been restored. The minimum honest rehearsal:
 
 ```bash
-sqlite3 /var/backups/alo-sites/alo-<stamp>.db "PRAGMA integrity_check;"
-# expected: ok
+node scripts/encrypted-backup.mjs --out /var/backups/alo --label rehearsal --json
+node scripts/encrypted-restore.mjs --from <archive> --target /tmp/rehearsal-restore --json
+# then run the test suite against the restored snapshot if schema-compatible
 ```
 
-Do **not** copy a live SQLite file with `cp`; a mid-write copy can be torn. Use
-`.backup` or stop the writer.
+Record the date, archive, duration and outcome in the ops log. There is **no CI-level
+scheduled drill yet** — add one when a staging host with the timer installed exists.
+The 2026-11-16 sandbox drill (scratch data) measured: archive ≈ 156 KB, 9 files,
+encrypt+verify ≈ 0.2 s, isolated restore ≈ 0.13–0.18 s — **local scratch numbers only;
+they say nothing about production RPO/RTO.**
 
-## 3. Restore — the honest procedure
+## 10. Google Drive assessment (2026-11-16)
 
-The product's automated restore refuses to run. Until REL-05 lands, restore is a
-manual, verified, rehearsal-first procedure:
-
-1. **Take a backup of the current state first**, even if it is broken. This is the
-   step people skip and later regret.
-2. Stop the writers:
-   ```bash
-   sudo systemctl stop alo-hosting-panel alo-automation-worker
-   ```
-3. For a **site** restore, use the helper instead of the manual steps below —
-   it verifies the checksum itself and aborts if it does not match:
-   ```bash
-   sudo helpers/alo-site-backup create <domain>
-   sudo helpers/alo-site-restore <domain> /var/backups/alo-sites/<domain>/<archive>.tar.gz
-   ```
-
-   The backup helper's actions are `create`, `list`, `cleanup` and `delete-one`,
-   all taking a validated domain. The restore helper takes the domain first and
-   the archive second, verifies `<archive>.sha256`, and health-checks the site
-   afterwards.
-   For a **database** restore, continue with the manual procedure.
-
-4. Verify the backup you intend to restore:
-   ```bash
-   sqlite3 /path/to/backup.db "PRAGMA integrity_check;"
-   ```
-5. Move the live database aside — **never overwrite it**:
-   ```bash
-   sudo mv "$DB_PATH" "$DB_PATH.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)"
-   ```
-6. Copy the verified backup into place and fix ownership (`1001:1001` for the
-   Docker layout, `alo-panel` for systemd):
-   ```bash
-   sudo install -o alo-panel -g alo-panel -m 0640 /path/to/backup.db "$DB_PATH"
-   ```
-7. Start and verify:
-   ```bash
-   sudo systemctl start alo-hosting-panel alo-automation-worker
-   curl -fsS http://127.0.0.1:3000/api/health | jq .
-   ```
-   `/api/health` must report reason `OK`. `SCHEMA_OUT_OF_DATE` means the restored
-   database predates the code — do **not** run a rebuild migration to fix it
-   without reading `DATABASE-AND-MIGRATION-AUDIT.md` first.
-8. Spot-check real data: log in, open a dashboard, confirm a recent deployment row
-   and a website exist.
-
-## 4. Restore rehearsal (required before trusting backups)
-
-A backup is unverified until it has been restored. Rehearse on a scratch database:
-
-```bash
-export DATABASE_URL="file:/tmp/rehearsal.db"
-node scripts/apply-deploy-schema.mjs
-# restore the backup into /tmp/rehearsal.db following steps 3–5 above,
-# then run the suite against it
-DATABASE_URL="file:/tmp/rehearsal.db" npm test
-```
-
-Record the date and the result. There is no scheduled drill in CI yet — this is
-gap #6 in `docs/audit/TEST-AND-COVERAGE-REPORT.md`.
-
-## 5. Disaster scenarios
-
-| Scenario | Action |
-|---|---|
-| Database corrupt | restore from the last verified backup; accept data loss back to that point |
-| Site files lost | `helpers/alo-site-restore <domain> <archive>` — checksum-verified |
-| Whole host lost | rebuild from `INSTALLATION.md`, restore DB and sites, re-issue certificates, re-enroll the agent |
-| Backup itself missing | **nothing can be recovered.** This is why the off-host destination is the highest-priority BLOCKED item |
-
-## 6. What must be built (REL-05)
-
-1. An off-host destination interface with at least one implementation (S3-
-   compatible, or rsync over SSH), credentials supplied by the operator.
-2. A restore **drill** worker that restores into a scratch database, runs
-   `PRAGMA integrity_check`, counts rows in a few known tables, and records the
-   result — replacing the current `NOT_IMPLEMENTED` refusal.
-3. A scheduled drill in CI or a timer, with the result surfaced on `/api/health`
-   or the monitoring endpoint.
-4. A published RPO/RTO derived from the drill, not from an intention.
-
-Until then, no document in this repository may claim a recovery capability.
+Recorded because it is the only reachable offsite-like connector: the authenticated
+Drive account holds unrelated personal content and is unsuitable as an ALO backup
+destination. Consumer Drive also lacks object versioning/object-lock semantics, offers
+no deletion protection comparable to S3 object-lock, and would concentrate backup
+credentials with one personal account. Do not wire `ALO_BACKUP_*` to it. A Workspace
+shared drive with external retention tooling could be reconsidered by the owner; record
+that decision here if taken.

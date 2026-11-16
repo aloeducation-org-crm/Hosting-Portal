@@ -1,6 +1,6 @@
 # Known Limitations Register — ALO Hosting Portal
 
-**Maintained:** 2026-11-16 · Items here are **accepted, bounded gaps**, not aspirations.
+**Maintained:** 2026-11-16 (DR update 2026-11-16, L9 revised, L21–L24 added) · Items here are **accepted, bounded gaps**, not aspirations.
 Each entry states the limitation, the impact, and the condition that closes it.
 "Not verified" is not the same as "broken" — it means no evidence was collected.
 
@@ -14,7 +14,7 @@ Each entry states the limitation, the impact, and the condition that closes it.
 | L6 | Hostinger Cloud capacity/credentials unverified | Public ingress design unproven | Hostinger API access + verification from the real host |
 | L7 | `prisma migrate deploy` unusable where `binaries.prisma.sh` is blocked | Schema changes must use `scripts/apply-deploy-schema.mjs` (offline-capable) | Egress allowlist or self-hosted engine mirror on hosts |
 | L8 | Customer DBaaS provisioning (MariaDB/PostgreSQL) tested only against helper stubs | Real database creation/rotation/access isolation unproven | One end-to-end provision on a host with `alo-database-helper` |
-| L9 | Backup encryption at rest is an ops procedure, not code | Theft of a backup file defeats confidentiality | Off-host copies encrypted (age/gpg) with key held separately; restore drill re-run |
+| L9 | Backup encryption code exists (`scripts/encrypted-backup.mjs`, AES-256-GCM envelope) but is not installed on any host | Backups taken today (if any) are not covered by the new design | Timer installed on production/staging + weekly observed successful runs + one isolated restore per month |
 | L10 | OBS Studio / CMake native builds not compiled in verification | "Native support" is planner-verified only | One real OBS build completing with artifacts hash-verified |
 | L11 | CSRF/rate-limit/tenant-isolation coverage is sampled across 264 routes | A route could deviate unnoticed | Route-by-route authorization audit or static guard; target: every `route.ts` names its tenant check |
 | L12 | In-memory rate limiter is per-process | Limits multiply by instance count | Shared Redis limiter (`REDIS_URL`) when running >1 replica |
@@ -26,3 +26,7 @@ Each entry states the limitation, the impact, and the condition that closes it.
 | L18 | `archive/retired-2026-11-09/` retained in repo | Noise; risk of stale references | Never import from it; prune only with owner approval (snapshot value) |
 | L19 | No HA / no automated failover for the control plane | Planned maintenance = downtime; failure = manual restore | HA design lands (ADR-001 path) or maintenance windows documented |
 | L20 | Documentation completeness is indexed, not exhaustive | New readers may miss the right runbook | `docs/DOCUMENTATION-INDEX.md` kept current each release |
+| L21 | No offsite backup destination is configured (REL-05) | Local backups protect against accidental deletion only; a lost/ransomed host loses everything | Operator provisions object storage / remote host; uploaded copies sha256-verified; retention + deletion protection documented |
+| L22 | No restore drill on real staging/production infrastructure | RPO/RTO unmeasured; the local 2026-11-16 scratch drill proves the mechanism only | Timed staging drill with production-like data; numbers published from it |
+| L23 | KEK is a file-based key (no managed KMS in this environment) | Static secret; manual rotation; host compromise + backup copies defeats confidentiality | Managed KMS/Vault transit or HSM-backed KEK with audit trail |
+| L24 | `BackupManifest.environmentVars` stores environment variable *values* in plaintext rows | Anyone with DB read access (or a DB backup) sees captured env values | Store names only (values stay in the secret store); migration + backfill; audit existing rows |
