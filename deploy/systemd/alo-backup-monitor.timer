@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly ALO Hosting backup monitor
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+AccuracySec=2min
+Unit=alo-backup-monitor.service
+
+[Install]
+WantedBy=timers.target

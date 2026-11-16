@@ -1,0 +1,18 @@
+[Unit]
+Description=ALO Hosting backup freshness/integrity monitor (SUPER_ADMIN alert)
+After=alo-encrypted-backup.service
+
+# TEMPLATE — alerts SUPER_ADMIN in-app when the newest backup is stale, the
+# last run failed, or the archive sidecar fails sha256 re-verification.
+# Monitor reads $ALO_BACKUP_DIR/backup-status.json; point --notify-db at the panel database.
+[Service]
+Type=oneshot
+User=alo-panel
+Group=alo-panel
+EnvironmentFile=-/etc/alo-hosting/panel.env
+ExecStart=/bin/sh -c '/usr/bin/node /opt/alo-hosting/current/scripts/backup-monitor.mjs --status "${ALO_BACKUP_DIR:-/var/backups/alo}/backup-status.json" --notify-db "${DATABASE_URL:-file:/var/lib/alo-hosting/production.db}"'
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/alo
