@@ -696,6 +696,10 @@ model BackupManifest {
   databaseDump    String?
   caddyConfig     String?
   systemdUnit     String?
+  /// SECURITY: never store environment variable VALUES here — that would place
+  /// secrets in plaintext rows that any reader of a DB backup can read. Store
+  /// NAMES only (e.g. ["DATABASE_URL", "STRIPE_API_KEY"]) or leave null; values
+  /// belong to the operator secret store. See docs/KNOWN-LIMITATIONS.md (L24).
   environmentVars Json?
   runtime         String?
   applicationPort Int?

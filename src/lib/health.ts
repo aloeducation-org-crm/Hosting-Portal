@@ -99,7 +99,7 @@ export function classifyDatabaseError(error: unknown): { reason: HealthReason; d
     return { reason: "SCHEMA_OUT_OF_DATE", detail };
   }
   if (
-    /unable to open database|can't open database|cannot open database|sqlite_cantopen|econnrefused|connection refused|connect econnrefused|enotfound|ehostunreach|etimedout|econnreset|epipe|server closed the connection|timed out|timeout|pool timeout|can't reach database server|network is unreachable/.test(
+    /unable to open database|unable to open connection|can't open database|cannot open database|sqlite_cantopen|econnrefused|connection refused|connect econnrefused|enotfound|ehostunreach|etimedout|econnreset|epipe|server closed the connection|timed out|timeout|pool timeout|can't reach database server|network is unreachable/.test(
       text,
     )
   ) {
@@ -236,6 +236,35 @@ export async function buildHealthReport(inputs: HealthInputs = {}): Promise<Heal
 /** HTTP status for a report. Unhealthy is 503 so a load balancer removes the instance. */
 export function httpStatusFor(report: HealthReport): number {
   return report.status === "healthy" ? 200 : 503;
+}
+
+export interface ReadinessReport {
+  /** True only when the control plane can serve traffic (database reachable, schema current). */
+  ready: boolean;
+  /** Stable machine-readable reason; mirrors HealthReason so alerts can share codes. */
+  reason: HealthReason;
+  uptimeSeconds: number;
+  timestamp: string;
+}
+
+/**
+ * Minimal readiness probe for load balancers and orchestrators.
+ *
+ * Liveness ("is the process alive?") and readiness ("may this instance receive
+ * traffic?") are different questions and get different endpoints: `/api/health`
+ * carries the full diagnostic payload for operators, `/api/ready` carries the bare
+ * minimum a balancer needs and never a connection string, path or host detail.
+ * Readiness reuses the same probes as the health report, so a green readiness
+ * can never disagree with a healthy status.
+ */
+export async function buildReadinessReport(inputs: HealthInputs = {}): Promise<ReadinessReport> {
+  const report = await buildHealthReport(inputs);
+  return {
+    ready: report.status === "healthy",
+    reason: report.reason,
+    uptimeSeconds: report.uptimeSeconds,
+    timestamp: report.timestamp,
+  };
 }
 
 /** Operator-facing sentence. Kept separate so the JSON stays machine-readable. */

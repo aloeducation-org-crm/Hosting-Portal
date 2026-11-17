@@ -52,6 +52,8 @@ export const RESERVED_SERVICE_NAMES: readonly string[] = [
   "alo-deploy-worker",
   "alo-server-hosting",
   "alo-port-8080-validator",
+  "alo-encrypted-backup",
+  "alo-backup-monitor",
   ALO_SERVER_SPEC.controlPlane.pm2App, // "alo-hosting"
 ];
 
