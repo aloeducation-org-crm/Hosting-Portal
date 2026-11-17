@@ -154,6 +154,7 @@ the tracked database is never mutated by a test run.
 Full runbook: [DEPLOY.md](DEPLOY.md) and
 [docs/DEPLOYMENT-AND-ROLLBACK.md](docs/DEPLOYMENT-AND-ROLLBACK.md).
 Git-connected auto-deploy: [docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md).
+Free-tier service directory: [docs/FREE-FOR-DEV-CATALOG.md](docs/FREE-FOR-DEV-CATALOG.md).
 Roadmap honesty: [docs/ROADMAP-STATUS.md](docs/ROADMAP-STATUS.md).
 
 ## Security notes
