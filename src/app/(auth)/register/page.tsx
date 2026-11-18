@@ -164,7 +164,7 @@ export default function RegisterPage() {
           Request ALO Labs Portal Access
         </CardTitle>
         <CardDescription className="text-slate-500">
-          New accounts require email verification and administrator approval
+          Verify your email. During the pilot, a super administrator must also approve your account.
         </CardDescription>
       </CardHeader>
 
@@ -226,7 +226,7 @@ export default function RegisterPage() {
               <CheckCircle2 className="h-4 w-4 text-[#E8501A]" />
             </div>
             <span className="text-[11px] text-slate-500 mt-0.5 block">
-              Standard member role. Organization and operator permissions are assigned by an administrator upon approval.
+              You’re registering as a standard member. Signup approval does not grant operator permissions.
             </span>
           </div>
 

@@ -18,6 +18,7 @@ const LOGIN_RATE_WINDOW_MS = 60_000;
 const AI_RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const AI_RATE_MAX = 30;
 const AI_RATE_WINDOW_MS = 60_000;
+const PILOT_OPT_OUT = "/api/messaging/unsubscribe"; // exact path, token-authenticated
 const STRICT_PUBLIC_PATHS = new Set([
   "/api/auth/login",
   "/api/auth/callback/credentials",
@@ -26,6 +27,7 @@ const STRICT_PUBLIC_PATHS = new Set([
   "/api/auth/mfa-challenge",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
+  "/api/auth/verify-email",
   "/api/contact",
   "/api/newsletter",
   // Public storefront domain availability lookup (registry RDAP, no session needed).
@@ -39,7 +41,8 @@ function applySecurityHeaders(target: NextResponse, corsOrigin: string | null, p
     target.headers.set("X-Frame-Options", "SAMEORIGIN");
   }
   target.headers.set("X-XSS-Protection", "1; mode=block");
-  target.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  target.headers.set("Referrer-Policy", pathname === PILOT_OPT_OUT ? "no-referrer" : "strict-origin-when-cross-origin");
+  if (pathname === PILOT_OPT_OUT) target.headers.set("Cache-Control", "no-store");
   target.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   target.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   target.headers.set("Cross-Origin-Opener-Policy", process.env.CROSS_ORIGIN_OPENER_POLICY || "same-origin");
@@ -84,7 +87,7 @@ const PUBLIC_API_PATHS = [
   "/api/internal/sites/ssl-status",
   "/api/contact",
   "/api/newsletter",
-  "/api/marketing",
+  "/api/marketing/domain-check",
   // GitHub webhooks are authenticated by HMAC-SHA256 signature, not a session.
   "/api/github/webhook",
   // OAuth callback is CSRF-protected by the one-time state cookie.
@@ -142,6 +145,7 @@ const BEARER_OR_SESSION_API_PATHS = [
  * segment-bounded; this aligns the public list with them.
  */
 function isPublicApiPath(pathname: string): boolean {
+  if (pathname === PILOT_OPT_OUT) return true;
   return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
@@ -281,8 +285,10 @@ export async function proxy(request: NextRequest) {
       (!!requestHost && originHost === requestHost && (originProto === "https" || originProto === requestProtocol)));
   const corsOrigin = origin && (sameOrigin || corsOrigins.includes(origin)) ? origin : null;
 
-  // No wildcard origins are allowed. A configured origin must match exactly.
-  if (pathname.startsWith("/api/") && origin && !corsOrigin) {
+  // The token-only opt-out must accept form POSTs from mailbox services;
+  // this does not give them CORS read access or any session authority.
+  // All other origins must match exactly.
+  if (pathname.startsWith("/api/") && origin && !corsOrigin && pathname !== PILOT_OPT_OUT) {
     return applySecurityHeaders(
       NextResponse.json({ success: false, message: "Origin not allowed" }, { status: 403 }),
       corsOrigin,
@@ -359,7 +365,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // General rate limiting
-  if (!isPublicApiPath(pathname)) {
+  if (!isPublicApiPath(pathname) || pathname === PILOT_OPT_OUT) {
     const entry = RATE_LIMIT.get(ip);
     if (entry && now < entry.resetAt) {
       if (entry.count >= RATE_MAX) {
@@ -575,6 +581,8 @@ export async function proxy(request: NextRequest) {
     // tick. Neither uses cookies, so neither is CSRF-able, and each route
     // re-verifies its own credential.
     !isMachineAuthenticatedApiPath(pathname) &&
+    // The one-click unsubscribe endpoint authenticates only an opt-out token.
+    pathname !== PILOT_OPT_OUT &&
     // CSRF is an attack on ambient session authority. With no session cookie
     // there is none to abuse, so pre-authentication flows (login, signup, email
     // verification, MFA challenge, NextAuth's own callback) are not required to

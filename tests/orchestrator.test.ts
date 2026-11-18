@@ -372,6 +372,14 @@ describe("durable orchestrator", () => {
     await o.complete(b.jobId, "worker-b", contracts.ok({ done: true }, "finished"));
   });
 
+  it("does not admit two different queued jobs past the same-key limit under contention", async () => {
+    const o = new Orchestrator({ maxConcurrentPerKey: 1 }).withWorker(echoWorker());
+    const lockKey = `race-${crypto.randomUUID()}`;
+    const jobs = await Promise.all(["a", "b"].map((value) => o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value }, lockKey })));
+    const claimed = await Promise.all(jobs.map((job, index) => o.claimSpecific(`contender-${index}`, job.jobId)));
+    expect(claimed.filter(Boolean)).toHaveLength(1);
+  });
+
   it("lets two jobs run concurrently when they use different lock keys", async () => {
     const o = new Orchestrator({ maxConcurrentPerKey: 1 }).withWorker(echoWorker());
     const a = await o.enqueue({ actor: testActor(), kind: "BUILD_TEST", input: { value: "par-a" }, lockKey: `p-${crypto.randomUUID()}` });
@@ -502,7 +510,7 @@ describe("backoff maths", () => {
 // ── The production worker catalogue ─────────────────────────────────────────
 
 describe("worker catalogue", () => {
-  it("registers all fifteen specialized workers with declared risk and scopes", () => {
+  it("registers the specialized workers with declared risk and scopes", () => {
     const list = listWorkers();
     expect(list.map((w) => w.kind).sort()).toEqual(
       [
@@ -521,6 +529,7 @@ describe("worker catalogue", () => {
         "PLATFORM_OPS",
         "AI_DIAGNOSIS",
         "NATIVE_BUILD_PLAN",
+        "STATIC_HOSTING",
       ].sort(),
     );
     for (const worker of list) {

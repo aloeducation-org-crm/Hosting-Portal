@@ -38,6 +38,7 @@ describe("SEC-11: reserved platform service names", () => {
     for (const name of [
       "alo-hosting-panel",
       "alo-automation-worker",
+      "alo-static-edge",
       "alo-server-hosting",
       "alo-port-8080-validator",
       "alo-hosting",
@@ -88,8 +89,8 @@ describe("SEC-11: reserved platform service names", () => {
 });
 
 describe("SEC-11: reserved platform ports", () => {
-  it("refuses the panel's ports, including the stale 3051 and the Docker 8080", () => {
-    for (const port of [3051, 3000, 8080]) {
+  it("refuses the panel and managed static edge ports", () => {
+    for (const port of [3051, 3000, 8080, 3187]) {
       expect(isReservedPlatformPort(port)).toBe(true);
       expect(() => assertBaselineDeploySettings({ port })).toThrow(HostLevelSettingError);
     }

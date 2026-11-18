@@ -7,10 +7,11 @@
  * documented environment variables, valid shells/links, and Prisma/SQLite
  * parity. It prints a JSON report and exits non-zero on any FAIL.
  *
- * Read-only: it never writes to the repository or the database.
+ * Read-only for the repository and configured database; migration checks use a disposable copy.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -126,7 +127,7 @@ for (const f of files.filter((f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f))) {
 // NODE_ENV etc. are runtime-injected; TEST_LOOKUP_EXIT and
 // AUTOMATION_TEST_MISSING_CREDENTIAL exist only inside test files as
 // deliberately-missing-then-present credential fixtures, not app config.
-const runtimeVars = new Set(["HOME", "PATH", "HOSTNAME", "NEXT_RUNTIME", "NEXT_PHASE", "npm_lifecycle_event", "npm_package_version", "NODE_ENV", "PORT", "TEST_LOOKUP_EXIT", "AUTOMATION_TEST_MISSING_CREDENTIAL"]);
+const runtimeVars = new Set(["HOME", "PATH", "HOSTNAME", "NEXT_RUNTIME", "NEXT_PHASE", "npm_lifecycle_event", "npm_package_version", "NODE_ENV", "PORT", "TEST_LOOKUP_EXIT", "AUTOMATION_TEST_MISSING_CREDENTIAL", "LIVE_STATIC_FIXTURE_REPO", "NODE_EXTRA_CA_CERTS"]);
 const undocumented = [...used].filter((k) => !envKeys.includes(k) && !runtimeVars.has(k));
 check("all app env vars are documented", undocumented.length === 0, undocumented.join(", "));
 
@@ -164,16 +165,24 @@ for (const f of files.filter((f) => f.endsWith(".md"))) {
 }
 check("no broken local markdown links", brokenLinks.length === 0, brokenLinks.slice(0, 8).join("; "));
 
-// 7 — Prisma schema / SQLite parity (read-only).
+// 7 — Prisma schema / SQLite parity after migrations. Never edit the tracked fixture.
+const schemaDir = mkdtempSync(path.join(os.tmpdir(), "alo-repo-schema-audit-"));
 try {
   const { createClient } = await import("@libsql/client");
   const schema = read("prisma/schema.prisma");
   const models = [...schema.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)].map((m) => ({ name: m[1], body: m[2] }));
   const modelNames = new Set(models.map((m) => m.name));
   const tables = models.map((m) => m.body.match(/@@map\("([^"]+)"\)/)?.[1] ?? m.name);
-  const client = createClient({ url: `file:${abs("db/custom.db")}` });
+  const target = path.join(schemaDir, "candidate.db");
+  const backup = path.join(schemaDir, "pre-migration.db");
+  copyFileSync(abs("db/custom.db"), target);
+  copyFileSync(target, backup);
+  execFileSync(process.execPath, [abs("scripts/apply-deploy-schema.mjs"), "--allow-rebuild", "--backup", backup], {
+    cwd: ROOT, env: { ...process.env, DATABASE_URL: `file:${target}` }, stdio: "pipe", timeout: 30_000,
+  });
+  const client = createClient({ url: `file:${target}` });
   const present = new Set((await client.execute("SELECT name FROM sqlite_master WHERE type='table'")).rows.map((r) => String(r.name)));
-  check(`all ${tables.length} Prisma tables exist in db/custom.db`, tables.every((t) => present.has(t)), tables.filter((t) => !present.has(t)).join(", "));
+  check(`all ${tables.length} Prisma tables exist after migrating the development fixture`, tables.every((t) => present.has(t)), tables.filter((t) => !present.has(t)).join(", "));
   const missingColumns = [];
   for (const m of models) {
     const table = m.body.match(/@@map\("([^"]+)"\)/)?.[1] ?? m.name;
@@ -188,12 +197,14 @@ try {
       if (!cols.has(col)) missingColumns.push(`${table}.${col}`);
     }
   }
-  check("all Prisma scalar columns exist in db/custom.db", missingColumns.length === 0, missingColumns.join(", "));
+  check("all Prisma scalar columns exist after migrating the development fixture", missingColumns.length === 0, missingColumns.join(", "));
   const integrity = await client.execute("PRAGMA integrity_check");
   check("SQLite integrity_check is ok", integrity.rows[0]?.integrity_check === "ok");
   client.close();
 } catch (e) {
   check("Prisma/SQLite parity", false, e.message);
+} finally {
+  rmSync(schemaDir, { recursive: true, force: true });
 }
 
 // 8 — No published seed passwords anywhere in code.

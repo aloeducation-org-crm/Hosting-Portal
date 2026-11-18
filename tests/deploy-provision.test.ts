@@ -76,18 +76,26 @@ describe("dynamic port allocation", () => {
 describe("alo-nginx-helper", () => {
   let availDir: string;
   let enabledDir: string;
+  let binDir: string;
+  let calls: string;
 
   beforeAll(() => {
     availDir = fs.mkdtempSync(path.join(os.tmpdir(), "alo-nginx-avail-"));
     enabledDir = fs.mkdtempSync(path.join(os.tmpdir(), "alo-nginx-enabled-"));
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), "alo-nginx-bin-"));
+    calls = path.join(binDir, "nginx.calls");
+    fs.writeFileSync(path.join(binDir, "nginx"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$NGINX_TEST_CALLS"\n', { mode: 0o700 });
   });
 
   afterAll(() => {
     fs.rmSync(availDir, { recursive: true, force: true });
     fs.rmSync(enabledDir, { recursive: true, force: true });
+    fs.rmSync(binDir, { recursive: true, force: true });
   });
 
-  const env = () => ({ NGINX_SITES_AVAILABLE: availDir, NGINX_SITES_ENABLED: enabledDir });
+  const env = () => ({ NGINX_SITES_AVAILABLE: availDir, NGINX_SITES_ENABLED: enabledDir,
+    PATH: `${binDir}:${process.env.PATH}`, NGINX_TEST_CALLS: calls,
+  });
 
   it("passes bash syntax validation", () => {
     expect(() => execFileSync("bash", ["-n", NGINX_HELPER], { encoding: "utf8" })).not.toThrow();
@@ -104,6 +112,7 @@ describe("alo-nginx-helper", () => {
     expect(text).toContain("proxy_pass http://127.0.0.1:3063;");
     expect(text).toContain("location /.well-known/acme-challenge/");
     expect(fs.existsSync(path.join(enabledDir, "app.example.com"))).toBe(true);
+    expect(fs.readFileSync(calls, "utf8").trim().split("\n")).toEqual(["-t", "-s reload"]);
   });
 
   it("site-add is idempotent for a matching upstream port", () => {

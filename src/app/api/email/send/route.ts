@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession } from '@/lib/auth';
+import { requireSuperAdmin } from '@/lib/auth';
 import { sendEmail } from '@/lib/smtp';
 import { createAuditLog } from '@/lib/audit';
 
@@ -14,7 +14,8 @@ function handleErr(e: unknown): NextResponse {
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await requireSession(request);
+    // Operator-only utility, not a customer or campaign fallback.
+    const user = await requireSuperAdmin(request);
     const body = await request.json();
     const { to, subject, html, text, from } = body as {
       to: string;

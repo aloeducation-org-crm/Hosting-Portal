@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { requireSession, isAdminRole } from "@/lib/auth";
 import { apiError, apiSuccess, type ApiResponse } from "@/lib/response";
 import { createAuditLog } from "@/lib/audit";
+import { campaignDeliveryCounts, canQueuePilotMessages, ownerCanSend, queuePilotCampaign } from "@/lib/messaging/control";
 import {
   buildUtmTrackingUrl,
   generateMarketingKit,
@@ -64,11 +65,11 @@ const MarketingActionSchema = z.discriminatedUnion("action", [
     source: z.string().max(80).default("digital-marketing"),
     dealTitle: z.string().max(160).optional(),
     dealValue: z.number().min(0).max(100_000_000).optional(),
-    subscribeNewsletter: z.boolean().default(true),
   }),
   z.object({
     action: z.literal("add_subscriber"),
     email: z.string().email(),
+    optedIn: z.literal(true),
   }),
   z.object({
     action: z.literal("remove_subscriber"),
@@ -86,9 +87,6 @@ function handleErr(e: unknown): NextResponse {
   if (e && typeof e === "object" && "status" in e) {
     const a = e as ApiResponse;
     return NextResponse.json(a, { status: a.status });
-  }
-  if (e instanceof Error) {
-    return NextResponse.json(apiError(e.message, "BAD_REQUEST", undefined, 400), { status: 400 });
   }
   return NextResponse.json(apiError("Internal server error"), { status: 500 });
 }
@@ -112,10 +110,7 @@ export async function GET(request: NextRequest) {
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
-      db.newsletter.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 100,
-      }),
+      isAdmin ? db.newsletter.findMany({ orderBy: { createdAt: "desc" }, take: 100 }) : [],
       db.crmContact.findMany({
         where: userScope,
         orderBy: { createdAt: "desc" },
@@ -138,9 +133,8 @@ export async function GET(request: NextRequest) {
       }),
     ]);
 
-    const totalSent = campaigns.reduce((sum, c) => sum + c.sentCount, 0);
-    const totalOpens = campaigns.reduce((sum, c) => sum + c.openCount, 0);
-    const totalClicks = campaigns.reduce((sum, c) => sum + c.clickCount, 0);
+    const deliveryCounts = await campaignDeliveryCounts(campaigns.map(({ id }) => id));
+    const totalAccepted = [...deliveryCounts.values()].reduce((sum, value) => sum + value.accepted, 0);
     const pipelineValue = deals.reduce((sum, d) => sum + (d.value || 0), 0);
 
     return NextResponse.json(
@@ -151,11 +145,13 @@ export async function GET(request: NextRequest) {
           leadCount: leads.length,
           dealCount: deals.length,
           pipelineValue,
-          totalSent,
-          avgOpenRate: totalSent > 0 ? Number(((totalOpens / totalSent) * 100).toFixed(1)) : 0,
-          avgClickRate: totalSent > 0 ? Number(((totalClicks / totalSent) * 100).toFixed(1)) : 0,
+          totalAccepted,
         },
-        campaigns,
+        canQueuePilot: canQueuePilotMessages(user) && await ownerCanSend(db, user.id),
+        canManageLegacyNewsletter: isAdmin,
+        campaigns: campaigns.map(({ sentCount: _sent, sentAt: _time, ...campaign }) => ({
+          ...campaign, delivery: deliveryCounts.get(campaign.id) ?? null,
+        })),
         subscribers,
         leads,
         deals,
@@ -208,31 +204,18 @@ export async function POST(request: NextRequest) {
     }
 
     if (parsed.action === "create_campaign") {
-      const [subCount, leadEmailCount] = await Promise.all([
-        db.newsletter.count(),
-        db.crmContact.count({
-          where: {
-            email: { not: null },
-            ...(isAdmin ? {} : { userId: user.id }),
-          },
-        }),
-      ]);
-      const audienceCount = Math.max(1, subCount + leadEmailCount);
-      const now = new Date();
-
+      if (parsed.sendImmediately || parsed.scheduledAt) {
+        throw apiError("Save a draft, then confirm queueing. Scheduled sends are not enabled.", "EXPLICIT_DISPATCH_REQUIRED", undefined, 409);
+      }
       const campaign = await db.emailCampaign.create({
         data: {
           name: parsed.name.trim(),
           subject: parsed.subject.trim(),
           fromName: parsed.fromName?.trim() || "ALO Digital Growth",
           fromAddress: parsed.fromAddress?.trim() || user.email,
-          status: parsed.sendImmediately ? "sent" : parsed.scheduledAt ? "scheduled" : "draft",
+          status: "draft",
           content: parsed.content ?? null,
           textContent: parsed.textContent ?? null,
-          recipientCount: audienceCount,
-          sentCount: parsed.sendImmediately ? audienceCount : 0,
-          scheduledAt: parsed.scheduledAt ? new Date(parsed.scheduledAt) : null,
-          sentAt: parsed.sendImmediately ? now : null,
           userId: user.id,
         },
       });
@@ -245,42 +228,17 @@ export async function POST(request: NextRequest) {
         resourceType: "EmailCampaign",
         resourceId: campaign.id,
         result: "SUCCESS",
-        metadata: { status: campaign.status, recipientCount: audienceCount },
+        metadata: { status: "draft" },
       });
 
       return NextResponse.json(apiSuccess({ campaign }, "Marketing campaign saved"), { status: 201 });
     }
 
     if (parsed.action === "dispatch_campaign") {
-      const existing = await db.emailCampaign.findUnique({ where: { id: parsed.campaignId } });
-      if (!existing || (!isAdmin && existing.userId !== user.id)) {
-        return NextResponse.json(
-          apiError("Campaign not found", "NOT_FOUND", undefined, 404),
-          { status: 404 },
-        );
-      }
-      const subCount = await db.newsletter.count();
-      const recipients = Math.max(existing.recipientCount, subCount, 1);
-      const updated = await db.emailCampaign.update({
-        where: { id: existing.id },
-        data: {
-          status: "sent",
-          recipientCount: recipients,
-          sentCount: recipients,
-          sentAt: new Date(),
-        },
-      });
-      await createAuditLog({
-        actorId: user.id,
-        actorEmail: user.email,
-        actorRole: user.role,
-        action: "MARKETING_CAMPAIGN_DISPATCHED",
-        resourceType: "EmailCampaign",
-        resourceId: updated.id,
-        result: "SUCCESS",
-        metadata: { sentCount: recipients },
-      });
-      return NextResponse.json(apiSuccess({ campaign: updated }, `Campaign dispatched to ${recipients} recipient(s)`));
+      const result = await queuePilotCampaign(user, parsed.campaignId);
+      const status = result.duplicate ? 200 : 202;
+      return NextResponse.json(apiSuccess(result,
+        result.duplicate ? "Campaign already queued or processed" : "Campaign queued; delivery not yet confirmed", status), { status });
     }
 
     if (parsed.action === "capture_lead") {
@@ -315,14 +273,8 @@ export async function POST(request: NextRequest) {
               })
             : null;
 
-        if (parsed.subscribeNewsletter) {
-          await tx.newsletter.upsert({
-            where: { email: emailNorm },
-            update: {},
-            create: { email: emailNorm },
-          });
-        }
-
+        // CRM participation is not email consent, including for older clients
+        // still sending the discarded subscribeNewsletter property.
         return { contact, deal };
       });
 
@@ -333,13 +285,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (parsed.action === "add_subscriber") {
+      if (!isAdmin) throw apiError("Administrator required for the legacy newsletter list", "FORBIDDEN", undefined, 403);
       const emailNorm = parsed.email.trim().toLowerCase();
       const subscriber = await db.newsletter.upsert({
         where: { email: emailNorm },
         update: {},
         create: { email: emailNorm },
       });
-      return NextResponse.json(apiSuccess({ subscriber }, "Subscriber added to audience"), { status: 201 });
+      return NextResponse.json(apiSuccess({ subscriber }, "Legacy newsletter entry recorded (not a pilot recipient)"), { status: 201 });
     }
 
     // remove_subscriber

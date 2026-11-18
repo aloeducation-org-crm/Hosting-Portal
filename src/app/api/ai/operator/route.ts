@@ -634,24 +634,20 @@ export async function POST(request: NextRequest) {
         offerOrProduct: offer,
         targetAudience: String(params.targetAudience || "Digital businesses & agencies"),
       });
-      const subCount = Math.max(1, await db.newsletter.count());
       const campaign = await db.emailCampaign.create({
         data: {
           name: String(params.campaignName || `${brandName} AI Growth Campaign`),
           subject: kit.emailBroadcast.subject,
           fromName: brandName,
           fromAddress: user.email,
-          status: params.sendImmediately === true ? "sent" : "draft",
+          status: "draft",
           content: kit.emailBroadcast.htmlContent,
           textContent: kit.emailBroadcast.textContent,
-          recipientCount: subCount,
-          sentCount: params.sendImmediately === true ? subCount : 0,
-          sentAt: params.sendImmediately === true ? new Date() : null,
           userId: user.id,
         },
       });
       summaryBn = `বিল এজেন্ট এআই ৩৬০° মার্কেটিং কিট এবং "${campaign.name}" ইমেইল ক্যাম্পেইন তৈরি করেছে।`;
-      summaryEn = `Bill Agent AI generated a 360° marketing kit and created campaign "${campaign.name}".`;
+      summaryEn = `Bill Agent AI generated a 360° marketing kit and saved draft "${campaign.name}". Nothing was sent.`;
       actionResult = { campaign, kit };
     } else {
       // status_report

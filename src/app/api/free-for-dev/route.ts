@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { requireSession } from "@/lib/auth";
 import {
-  FREE_FOR_DEV_SOURCE,
+  catalogSource,
   getCategory,
   queryFreeServices,
 } from "@/lib/free-for-dev/catalog";
@@ -30,11 +30,15 @@ export async function GET(request: NextRequest) {
     await requireSession(request);
 
     const { searchParams } = new URL(request.url);
+    const catalog = searchParams.get("source") ?? "community";
+    if (catalog !== "community" && catalog !== "jixserver") {
+      return NextResponse.json(apiError("Unknown catalog source", "INVALID_SOURCE", undefined, 400), { status: 400 });
+    }
     const categoryId = (searchParams.get("category") ?? "").trim();
     const q = (searchParams.get("q") ?? "").trim();
     const limitRaw = (searchParams.get("limit") ?? "").trim();
 
-    if (categoryId && !getCategory(categoryId)) {
+    if (categoryId && !getCategory(categoryId, catalog)) {
       return NextResponse.json(apiError(`Unknown category "${categoryId}"`, "INVALID_CATEGORY", undefined, 400), {
         status: 400,
       });
@@ -51,12 +55,13 @@ export async function GET(request: NextRequest) {
     }
 
     const result = queryFreeServices({
+      source: catalog,
       categoryId: categoryId || undefined,
       q: q || undefined,
       limit,
     });
 
-    return NextResponse.json(apiSuccess({ source: FREE_FOR_DEV_SOURCE, ...result }));
+    return NextResponse.json(apiSuccess({ source: catalogSource(catalog), ...result }));
   } catch (e) {
     return handleErr(e);
   }

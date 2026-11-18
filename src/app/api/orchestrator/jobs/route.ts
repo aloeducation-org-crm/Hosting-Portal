@@ -82,6 +82,9 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(apiError("Validation failed", "VALIDATION_ERROR", parsed.error.flatten(), 400), { status: 400 });
     }
+    if (parsed.data.kind === "STATIC_HOSTING" || parsed.data.resourceType === "StaticHostingSite") {
+      return NextResponse.json(apiError("Use the managed static-hosting routes to request work for these sites.", "FORBIDDEN", undefined, 403), { status: 403 });
+    }
     const payload: EnqueueJobInput = {
       ...parsed.data,
       riskLevel: parsed.data.riskLevel as RiskLevel | undefined,

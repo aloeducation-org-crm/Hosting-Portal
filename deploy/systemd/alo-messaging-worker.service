@@ -1,0 +1,35 @@
+# Opt-in only. See docs/FREE-MESSAGING-PILOT.md before installing or enabling.
+[Unit]
+Description=ALO sister-company messaging pilot worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alo-messaging
+Group=alo-messaging
+WorkingDirectory=/opt/alo-hosting/current/.next/standalone
+EnvironmentFile=/etc/alo-hosting/messaging-worker.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/alo-hosting/current/.next/standalone/messaging-worker.cjs
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+UMask=0007
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+# At setup, grant only this account the shared DB/SQLite sidecar permissions.
+ReadWritePaths=/var/lib/alo-hosting
+InaccessiblePaths=-/etc/alo-hosting -/srv/alo-sites -/var/backups/alo-sites -/var/lib/alo-static
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

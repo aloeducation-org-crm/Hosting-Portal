@@ -1412,7 +1412,7 @@ const codeGenerationInput = z.object({
     projectId: z.string().min(1).max(128),
     baseCommit: z.string().regex(/^[a-f0-9]{40}$/),
     allowedPaths: z.array(z.string().min(1).max(240)).min(1).max(20),
-    snapshot: z.record(z.union([z.string(), z.null()])),
+    snapshot: z.record(z.string(), z.union([z.string(), z.null()])),
   }),
 });
 
@@ -1510,5 +1510,7 @@ import { platformWorker, workflowStepWorker, aiDiagnosisWorker } from "./platfor
 registerWorker(platformWorker);
 registerWorker(workflowStepWorker);
 registerWorker(aiDiagnosisWorker);
+import { staticHostingWorker } from "@/lib/hosting/static-worker";
+registerWorker(staticHostingWorker);
 
 export type { WorkerDefinition };

@@ -30,6 +30,7 @@
  * testable without a host.
  */
 
+import { STATIC_DEFAULT_PORT, staticHostingConfig } from "@/lib/hosting/static-config";
 import { ALO_SERVER_SPEC } from "./server-spec";
 
 /** Roles allowed to change host-level deployment settings. */
@@ -50,6 +51,8 @@ export const RESERVED_SERVICE_NAMES: readonly string[] = [
   "alo-hosting-panel",
   "alo-automation-worker",
   "alo-deploy-worker",
+  "alo-static-edge",
+  "alo-messaging-worker",
   "alo-server-hosting",
   "alo-port-8080-validator",
   "alo-encrypted-backup",
@@ -67,7 +70,7 @@ export const RESERVED_SERVICE_NAMES: readonly string[] = [
  * The union is the safe check.
  */
 export const RESERVED_PLATFORM_PORTS: readonly number[] = Array.from(
-  new Set([ALO_SERVER_SPEC.controlPlane.port, 3000, 3051, 8080]),
+  new Set([ALO_SERVER_SPEC.controlPlane.port, 3000, 3051, 8080, STATIC_DEFAULT_PORT]),
 );
 
 /** Fields that describe the host rather than the customer's application. */
@@ -96,7 +99,7 @@ export function isReservedServiceName(name: string | null | undefined): boolean 
 }
 
 export function isReservedPlatformPort(port: number): boolean {
-  return RESERVED_PLATFORM_PORTS.includes(port);
+  return RESERVED_PLATFORM_PORTS.includes(port) || staticHostingConfig()?.edgePort === port;
 }
 
 /**

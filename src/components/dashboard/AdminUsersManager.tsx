@@ -39,6 +39,9 @@ interface UserRecord {
   isActive: boolean;
   isLocked: boolean;
   emailVerified: string | null;
+  approvalRequired: boolean;
+  companyName: string | null;
+  signupApprovalStatus: "APPROVED" | "PENDING" | "REJECTED" | null;
   createdAt: string;
   role: {
     id: string;
@@ -64,6 +67,10 @@ export function AdminUsersManager() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const [canReview, setCanReview] = useState(false);
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const assignableRoles = canReview ? ROLE_OPTIONS : ROLE_OPTIONS.filter((r) => r !== "SUPER_ADMIN" && r !== "ADMIN");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -77,19 +84,21 @@ export function AdminUsersManager() {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
       if (roleFilter !== "ALL") params.set("role", roleFilter);
+      if (pendingOnly) params.set("review", "pending");
       const res = await fetch(`/api/users?${params.toString()}`, {
         credentials: "include",
       });
       const body = await res.json();
       if (res.ok && body.success) {
         setUsers(body.data.users || []);
+        setCanReview(body.data.canReviewSignup === true);
       }
     } catch {
       toast.error("Failed to load users");
     } finally {
       setLoading(false);
     }
-  }, [search, roleFilter]);
+  }, [search, roleFilter, pendingOnly]);
 
   useEffect(() => {
     let active = true;
@@ -157,6 +166,23 @@ export function AdminUsersManager() {
     } catch {
       toast.error("Failed to update user role");
     }
+  }
+
+  async function review(user: UserRecord, action: "approve" | "reject") {
+    if (!confirm(`${action === "approve" ? "Approve sign-in" : "Reject signup"} for ${user.email}?`)) return;
+    setReviewing(user.id);
+    try {
+      const response = await fetch("/api/admin/users/approve", {
+        method: "PATCH", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user.id, action }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.success) throw new Error(body.message || "Could not review account");
+      toast.success("Account review recorded");
+      await fetchUsers();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not review account");
+    } finally { setReviewing(null); }
   }
 
   async function handleToggleActive(user: UserRecord) {
@@ -261,7 +287,10 @@ export function AdminUsersManager() {
             Platform Accounts ({users.length})
           </CardTitle>
           <CardDescription className="text-xs">
-            Role-based access control across Admin, Reseller, and Client accounts
+            New pilot signups need email verification and approval from a super administrator.
+            <Button size="sm" variant="ghost" onClick={() => setPendingOnly(!pendingOnly)}>
+              {pendingOnly ? "Show all accounts" : "Show pending reviews"}
+            </Button>
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -282,22 +311,24 @@ export function AdminUsersManager() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {users.map((u) => (
-                    <tr key={u.id} className="hover:bg-slate-50/70">
+                  {users.map((u) => {
+                    const mayEdit = canReview || (!u.approvalRequired && assignableRoles.includes(u.role.name));
+                    return <tr key={u.id} className="hover:bg-slate-50/70">
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">
                           {u.name || "Unnamed"}
                         </div>
-                        <div className="text-xs text-slate-500">{u.email}</div>
+                        <div className="text-xs text-slate-500">{u.email}{u.companyName ? ` · ${u.companyName}` : ""}</div>
                       </td>
                       <td className="px-4 py-3">
                         <select
                           aria-label={`Role for ${u.email}`}
                           value={u.role?.name || "CLIENT"}
+                          disabled={!mayEdit || u.approvalRequired}
                           onChange={(e) => handleChangeRole(u.id, e.target.value)}
                           className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-800"
                         >
-                          {ROLE_OPTIONS.map((ro) => (
+                          {[...new Set([u.role?.name ?? "CLIENT", ...assignableRoles])].map((ro) => (
                             <option key={ro} value={ro}>
                               {ro}
                             </option>
@@ -305,7 +336,11 @@ export function AdminUsersManager() {
                         </select>
                       </td>
                       <td className="px-4 py-3">
-                        {u.isActive ? (
+                        {u.approvalRequired ? (
+                          <Badge variant="outline" className="text-xs">
+                            {u.signupApprovalStatus === "REJECTED" ? "Rejected" : u.emailVerified ? "Pending approval" : "Awaiting email verification"}
+                          </Badge>
+                        ) : u.isActive ? (
                           <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
                             <CheckCircle2 className="h-3 w-3 mr-1" />
                             Active
@@ -321,25 +356,22 @@ export function AdminUsersManager() {
                         {u._count?.websites ?? 0}
                       </td>
                       <td className="px-4 py-3 text-right space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleToggleActive(u)}
-                          className="h-7 text-xs"
-                        >
-                          {u.isActive ? "Suspend" : "Activate"}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteUser(u)}
-                          className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
+                        {u.approvalRequired ? (
+                          canReview && u.signupApprovalStatus !== "REJECTED" && <>
+                            <Button variant="outline" size="sm" disabled={!u.emailVerified || reviewing !== null} onClick={() => void review(u, "approve")}>Approve</Button>
+                            <Button variant="ghost" size="sm" disabled={reviewing !== null} onClick={() => void review(u, "reject")}>Reject</Button>
+                          </>
+                        ) : mayEdit && <>
+                          <Button variant="outline" size="sm" onClick={() => handleToggleActive(u)} className="h-7 text-xs">
+                            {u.isActive ? "Suspend" : "Activate"}
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteUser(u)} aria-label={`Delete ${u.email}`} className="h-7 text-xs text-red-600 hover:text-red-700 hover:bg-red-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>}
                       </td>
-                    </tr>
-                  ))}
+                    </tr>;
+                  })}
                 </tbody>
               </table>
             </div>
@@ -353,7 +385,7 @@ export function AdminUsersManager() {
           <DialogHeader>
             <DialogTitle>Create New Platform User</DialogTitle>
             <DialogDescription>
-              Provision an Admin, Reseller, or Client account with immediate access.
+              Create a platform account. During the pilot it needs email verification and super-admin review before sign-in.
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateUser} className="space-y-4">
@@ -396,7 +428,7 @@ export function AdminUsersManager() {
                 onChange={(e) => setNewRole(e.target.value)}
                 className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
               >
-                {ROLE_OPTIONS.map((ro) => (
+                {assignableRoles.map((ro) => (
                   <option key={ro} value={ro}>
                     {ro}
                   </option>

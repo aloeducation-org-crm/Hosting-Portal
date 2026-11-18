@@ -1,0 +1,41 @@
+# Manual, staging-only template. Not installed by the panel release workflow.
+# Place in nginx's http context after replacing the example zone, cert and port.
+# This zone must be on a different registrable domain from the panel and API.
+limit_req_zone $binary_remote_addr zone=alo_static_requests:10m rate=20r/s;
+limit_conn_zone $binary_remote_addr zone=alo_static_connections:10m;
+
+server {
+    listen 443 ssl;
+    server_name *.sites.example.net;
+    ssl_certificate /etc/nginx/tls/static/fullchain.pem;
+    ssl_certificate_key /etc/nginx/tls/static/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    limit_req zone=alo_static_requests burst=40 nodelay;
+    limit_conn alo_static_connections 20;
+    limit_req_status 429;
+    limit_conn_status 429;
+    client_max_body_size 1k;
+    client_header_timeout 5s;
+    keepalive_timeout 5s;
+    send_timeout 10s;
+
+    # Traffic is public and must never carry panel authentication or hit a
+    # panel fallback. Do not cache/rewrite edge responses or verification paths.
+    location / {
+        proxy_pass http://127.0.0.1:3187;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_hide_header Set-Cookie;
+        proxy_intercept_errors off;
+        proxy_cache off;
+        gzip off;
+        proxy_connect_timeout 3s;
+        proxy_send_timeout 10s;
+        proxy_read_timeout 10s;
+    }
+}

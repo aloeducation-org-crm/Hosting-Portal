@@ -3,9 +3,10 @@
  * copy of db/custom.db before `@/lib/db` is evaluated, so these tests cannot
  * write into the tracked development database. See tests/helpers/isolated-db.ts.
  */
-import { teardownIsolatedDb } from "./helpers/isolated-db";
+import { isolatedDbPath, teardownIsolatedDb } from "./helpers/isolated-db";
 import crypto from "crypto";
-import { describe, expect, it, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
+import { describe, expect, it, afterAll, beforeAll } from "vitest";
 import { NextRequest } from "next/server";
 import { encode } from "next-auth/jwt";
 import { db } from "@/lib/db";
@@ -45,6 +46,11 @@ async function buildAuthRequest(
 }
 
 describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source AI Providers", () => {
+  beforeAll(() => {
+    execFileSync(process.execPath, ["scripts/apply-deploy-schema.mjs", "--migration", "20261118190000_pilot_messaging"], {
+      env: { ...process.env, DATABASE_URL: `file:${isolatedDbPath}` }, stdio: "pipe",
+    });
+  });
   const createdIds = {
     subscriptions: [] as string[],
     orders: [] as string[],
@@ -52,7 +58,6 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     campaigns: [] as string[],
     contacts: [] as string[],
     deals: [] as string[],
-    newsletters: [] as string[],
     promptTemplates: [] as string[],
     secrets: [] as string[],
     apiKeys: [] as string[],
@@ -78,9 +83,6 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     }
     if (createdIds.campaigns.length) {
       await db.emailCampaign.deleteMany({ where: { id: { in: createdIds.campaigns } } });
-    }
-    if (createdIds.newsletters.length) {
-      await db.newsletter.deleteMany({ where: { email: { in: createdIds.newsletters } } });
     }
     if (createdIds.promptTemplates.length) {
       await db.promptTemplate.deleteMany({ where: { id: { in: createdIds.promptTemplates } } });
@@ -211,7 +213,7 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     const user = await db.user.findFirst({ where: { isActive: true } });
     expect(user).toBeTruthy();
 
-    // 1. Capture lead -> CRM Contact + Deal + Newsletter
+    // 1. Capture a CRM contact and deal without implicitly signing up for email.
     const uniqueEmail = `mkt-lead-${Date.now()}@alolabs.net`;
     const leadReq = await buildAuthRequest("http://localhost:3000/api/marketing", user!.email, {
       method: "POST",
@@ -234,7 +236,7 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     expect(leadJson.data.deal.value).toBe(499);
     createdIds.contacts.push(leadJson.data.contact.id);
     createdIds.deals.push(leadJson.data.deal.id);
-    createdIds.newsletters.push(uniqueEmail);
+    expect(await db.newsletter.findUnique({ where: { email: uniqueEmail } })).toBeNull();
 
     // 2. Build & persist UTM link
     const utmReq = await buildAuthRequest("http://localhost:3000/api/marketing", user!.email, {
@@ -254,7 +256,7 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     expect(utmJson.data.savedRecord.id).toBeTruthy();
     createdIds.promptTemplates.push(utmJson.data.savedRecord.id);
 
-    // 3. Create & dispatch email broadcast
+    // 3. Save a real draft; ordinary accounts must not simulate dispatch
     const campReq = await buildAuthRequest("http://localhost:3000/api/marketing", user!.email, {
       method: "POST",
       body: {
@@ -276,8 +278,10 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     });
     const dispRes = await postMarketing(dispReq);
     const dispJson = await dispRes.json();
-    expect(dispRes.status).toBe(200);
-    expect(dispJson.data.campaign.status).toBe("sent");
+    expect(dispRes.status).toBe(403);
+    expect(dispJson.error.code).toBe("PILOT_ONLY");
+    const saved = await db.emailCampaign.findUniqueOrThrow({ where: { id: campJson.data.campaign.id } });
+    expect(saved).toMatchObject({ status: "draft", sentCount: 0, sentAt: null });
 
     // 4. GET /api/marketing metrics
     const getReq = await buildAuthRequest("http://localhost:3000/api/marketing", user!.email);

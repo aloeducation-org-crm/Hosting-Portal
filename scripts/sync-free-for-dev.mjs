@@ -13,28 +13,43 @@
  *   node scripts/sync-free-for-dev.mjs --readme FILE    # parse a local copy
  *   node scripts/sync-free-for-dev.mjs --commit SHA     # record provenance
  *
- * Read-only against the network; the only file it writes is data.json.
+ *   node scripts/sync-free-for-dev.mjs --source jixserver --commit SHA
+ *
+ * The requested jixserver snapshot retains titles and URLs only. Its pricing
+ * statements are historical and its README has no separate license notice.
+ * Writes only the selected snapshot.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const OUTPUT = path.join(ROOT, "src", "lib", "free-for-dev", "data.json");
-const RAW_README_URL = "https://api.github.com/repos/ripienaar/free-for-dev/readme";
+const SOURCES = {
+  community: { repo: "ripienaar/free-for-dev", file: "data.json" },
+  jixserver: { repo: "jixserver/free-for-dev", file: "jixserver.json" },
+};
 
 function parseArgs(argv) {
-  const args = { readme: null, commit: null };
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--readme") args.readme = argv[i + 1] ?? null;
-    else if (argv[i] === "--commit") args.commit = argv[i + 1] ?? null;
+  const args = { readme: null, commit: null, source: "community" };
+  for (let i = 0; i < argv.length; i += 2) {
+    const flag = argv[i];
+    const arg = argv[i + 1];
+    if (!arg || arg.startsWith("--") || !["--readme", "--commit", "--source"].includes(flag)) {
+      throw new Error("Expected --readme FILE, --source community|jixserver, or --commit SHA");
+    }
+    args[flag.slice(2)] = arg;
   }
+  if (!Object.hasOwn(SOURCES, args.source) || (args.commit && !/^[a-f0-9]{40}$/.test(args.commit))) throw new Error("Invalid catalog source or commit");
+  if (args.source === "jixserver" && !args.commit) throw new Error("The historical snapshot requires a pinned commit");
   return args;
 }
 
-async function fetchReadme() {
-  const res = await fetch(RAW_README_URL, {
+async function fetchReadme(source, commit) {
+  const url = new URL(`https://api.github.com/repos/${source.repo}/readme`);
+  if (commit) url.searchParams.set("ref", commit);
+  const res = await fetch(url, {
     headers: { Accept: "application/vnd.github.raw+json", "User-Agent": "alo-hosting-portal-sync" },
+    redirect: "error", signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`Upstream fetch failed: HTTP ${res.status}`);
   return res.text();
@@ -149,40 +164,55 @@ function parseList(markdown) {
   return categories.filter((c) => c.services.length > 0);
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const markdown = args.readme ? readFileSync(args.readme, "utf8") : null;
-  const run = markdown !== null ? Promise.resolve(markdown) : fetchReadme();
-
-  run
-    .then((text) => {
-      const categories = parseList(text);
-      const total = categories.reduce((n, c) => n + c.services.length, 0);
-      if (total < 100) throw new Error(`Parsed only ${total} services — refusing to overwrite data.json`);
-
-      const data = {
-        source: {
-          name: "free-for.dev",
-          listUrl: "https://free-for.dev/",
-          repoUrl: "https://github.com/ripienaar/free-for-dev",
-          commit: args.commit,
-          syncedAt: new Date().toISOString().slice(0, 10),
-          attribution:
-            "Service names, links and free-tier limits curated from the community-maintained free-for.dev list (ripienaar/free-for-dev). Free tiers change frequently — verify with the provider before relying on them.",
-        },
-        categories,
-      };
-
-      mkdirSync(path.dirname(OUTPUT), { recursive: true });
-      writeFileSync(OUTPUT, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-      console.log(`Wrote ${OUTPUT}`);
-      console.log(`Categories: ${categories.length}`);
-      console.log(`Services:   ${total}`);
-    })
-    .catch((err) => {
-      console.error(err.message ?? String(err));
-      process.exitCode = 1;
-    });
+function parseHistoricalLinks(markdown) {
+  const categories = [];
+  const ids = new Set();
+  let category;
+  for (const line of markdown.split(/\r?\n/)) {
+    const heading = line.match(/^##\s+(.+?)\s*$/);
+    if (heading) {
+      const label = stripMarkdown(heading[1]);
+      const id = slugifyAnchor(label);
+      category = { id, label, anchor: id, services: [] };
+      categories.push(category);
+      continue;
+    }
+    if (!category || !/^\s*[*-]\s+/.test(line)) continue;
+    const link = line.match(/^\s*[*-]\s+\[([^\]]+)\]\(((?:https?:\/\/|stun:)[^)\s]+)\)/i);
+    if (!link) throw new Error(`Unrecognized historical entry in ${category.label}`);
+    const name = stripMarkdown(link[1]);
+    category.services.push({ id: slugifyId(name, ids), name, url: link[2] });
+  }
+  return categories.filter((item) => item.services.length > 0);
 }
 
-main();
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const selected = SOURCES[args.source];
+  const historical = args.source === "jixserver";
+  const markdown = args.readme ? readFileSync(args.readme, "utf8") : await fetchReadme(selected, args.commit);
+  const categories = historical ? parseHistoricalLinks(markdown) : parseList(markdown);
+  const total = categories.reduce((n, c) => n + c.services.length, 0);
+  if (total < (historical ? 400 : 100)) throw new Error(`Parsed only ${total} services — refusing to overwrite catalog`);
+  const repoUrl = `https://github.com/${selected.repo}`;
+  const data = {
+    source: {
+      name: historical ? selected.repo : "free-for.dev",
+      listUrl: historical ? `${repoUrl}/blob/${args.commit}/README.md` : "https://free-for.dev/",
+      repoUrl,
+      commit: args.commit,
+      syncedAt: new Date().toISOString().slice(0, 10),
+      ...(historical ? { historical: true } : {}),
+      attribution: historical
+        ? "Names and links from the requested jixserver snapshot. Historical directory only: licensing, availability and free plans are not verified."
+        : "Service names, links and free-tier limits curated from the community-maintained free-for.dev list (ripienaar/free-for-dev). Free tiers change frequently — verify with the provider before relying on them.",
+    },
+    categories,
+  };
+  const output = path.join(ROOT, "src", "lib", "free-for-dev", selected.file);
+  mkdirSync(path.dirname(output), { recursive: true });
+  writeFileSync(output, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  console.log(`Wrote ${output} (${categories.length} categories, ${total} listings)`);
+}
+
+main().catch((error) => { console.error(error.message); process.exitCode = 1; });

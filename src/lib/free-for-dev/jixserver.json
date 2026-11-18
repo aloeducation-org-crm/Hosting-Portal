@@ -1,0 +1,2580 @@
+{
+  "source": {
+    "name": "jixserver/free-for-dev",
+    "listUrl": "https://github.com/jixserver/free-for-dev/blob/a6d2501c4d2566a3f518f08e51a23923edf65734/README.md",
+    "repoUrl": "https://github.com/jixserver/free-for-dev",
+    "commit": "a6d2501c4d2566a3f518f08e51a23923edf65734",
+    "syncedAt": "2026-11-18",
+    "historical": true,
+    "attribution": "Names and links from the requested jixserver snapshot. Historical directory only: licensing, availability and free plans are not verified."
+  },
+  "categories": [
+    {
+      "id": "source-code-repos",
+      "label": "Source Code Repos",
+      "anchor": "source-code-repos",
+      "services": [
+        {
+          "id": "bitbucket-org",
+          "name": "bitbucket.org",
+          "url": "https://bitbucket.org/"
+        },
+        {
+          "id": "chiselapp-com",
+          "name": "chiselapp.com",
+          "url": "http://chiselapp.com/"
+        },
+        {
+          "id": "github-com",
+          "name": "github.com",
+          "url": "https://github.com/"
+        },
+        {
+          "id": "about-gitlab-com",
+          "name": "about.gitlab.com",
+          "url": "https://about.gitlab.com/"
+        },
+        {
+          "id": "hub-jazz-net",
+          "name": "hub.jazz.net",
+          "url": "https://hub.jazz.net/"
+        },
+        {
+          "id": "visualstudio-com",
+          "name": "visualstudio.com",
+          "url": "https://www.visualstudio.com/"
+        },
+        {
+          "id": "plasticscm-com",
+          "name": "plasticscm.com",
+          "url": "https://plasticscm.com/"
+        },
+        {
+          "id": "cloud-google-com",
+          "name": "cloud.google.com",
+          "url": "https://cloud.google.com/tools/cloud-repositories/"
+        },
+        {
+          "id": "buddy-works",
+          "name": "buddy.works",
+          "url": "https://buddy.works/"
+        },
+        {
+          "id": "codebasehq-com",
+          "name": "codebasehq.com",
+          "url": "https://www.codebasehq.com/"
+        },
+        {
+          "id": "notabug",
+          "name": "NotABug",
+          "url": "https://notabug.org"
+        },
+        {
+          "id": "deveo",
+          "name": "Deveo",
+          "url": "https://deveo.com/"
+        }
+      ]
+    },
+    {
+      "id": "tools-for-teams-and-collaboration",
+      "label": "Tools for Teams and Collaboration",
+      "anchor": "tools-for-teams-and-collaboration",
+      "services": [
+        {
+          "id": "scinote-net",
+          "name": "scinote.net",
+          "url": "http://scinote.net"
+        },
+        {
+          "id": "appear-in",
+          "name": "appear.in",
+          "url": "https://appear.in/"
+        },
+        {
+          "id": "meet-jit-si",
+          "name": "meet.jit.si",
+          "url": "https://meet.jit.si/"
+        },
+        {
+          "id": "flowdock-com",
+          "name": "flowdock.com",
+          "url": "https://www.flowdock.com/"
+        },
+        {
+          "id": "slack-com",
+          "name": "slack.com",
+          "url": "https://slack.com/"
+        },
+        {
+          "id": "hipchat-com",
+          "name": "hipchat.com",
+          "url": "https://hipchat.com/"
+        },
+        {
+          "id": "gitter-im",
+          "name": "gitter.im",
+          "url": "https://gitter.im/"
+        },
+        {
+          "id": "hangouts-google-com",
+          "name": "hangouts.google.com",
+          "url": "https://hangouts.google.com/"
+        },
+        {
+          "id": "seafile-com",
+          "name": "seafile.com",
+          "url": "https://www.seafile.com/"
+        },
+        {
+          "id": "sameroom-io",
+          "name": "sameroom.io",
+          "url": "https://sameroom.io/"
+        },
+        {
+          "id": "yammer-com",
+          "name": "yammer.com",
+          "url": "https://www.yammer.com/"
+        },
+        {
+          "id": "helpmonks-com",
+          "name": "helpmonks.com",
+          "url": "https://helpmonks.com/"
+        },
+        {
+          "id": "typetalk-in",
+          "name": "typetalk.in",
+          "url": "http://www.typetalk.in/"
+        },
+        {
+          "id": "talky-io",
+          "name": "talky.io",
+          "url": "https://talky.io/"
+        },
+        {
+          "id": "sourcetalk-net",
+          "name": "sourcetalk.net",
+          "url": "http://sourcetalk.net/"
+        },
+        {
+          "id": "helplightning-com",
+          "name": "helplightning.com",
+          "url": "https://www.helplightning.com/"
+        },
+        {
+          "id": "evernote-com",
+          "name": "evernote.com",
+          "url": "https://evernote.com/"
+        },
+        {
+          "id": "wunderlist-com",
+          "name": "wunderlist.com",
+          "url": "https://www.wunderlist.com/"
+        },
+        {
+          "id": "doodle-com",
+          "name": "doodle.com",
+          "url": "http://doodle.com/"
+        },
+        {
+          "id": "sendtoinc-com",
+          "name": "sendtoinc.com",
+          "url": "https://sendtoinc.com/"
+        },
+        {
+          "id": "zoom-us",
+          "name": "zoom.us",
+          "url": "https://zoom.us/"
+        },
+        {
+          "id": "ideascale-com",
+          "name": "ideascale.com",
+          "url": "https://ideascale.com/"
+        },
+        {
+          "id": "filehero-io",
+          "name": "filehero.io",
+          "url": "https://filehero.io/"
+        },
+        {
+          "id": "wistia-com",
+          "name": "wistia.com",
+          "url": "http://wistia.com/"
+        },
+        {
+          "id": "cnverg-com",
+          "name": "cnverg.com",
+          "url": "http://cnverg.com/"
+        }
+      ]
+    },
+    {
+      "id": "code-quality",
+      "label": "Code Quality",
+      "anchor": "code-quality",
+      "services": [
+        {
+          "id": "tachikoma-io",
+          "name": "tachikoma.io",
+          "url": "http://tachikoma.io/"
+        },
+        {
+          "id": "gemnasium-com",
+          "name": "gemnasium.com",
+          "url": "https://gemnasium.com/"
+        },
+        {
+          "id": "deppbot-com",
+          "name": "deppbot.com",
+          "url": "https://www.deppbot.com/"
+        },
+        {
+          "id": "landscape-io",
+          "name": "landscape.io",
+          "url": "https://landscape.io/"
+        },
+        {
+          "id": "codeclimate-com",
+          "name": "codeclimate.com",
+          "url": "https://codeclimate.com/"
+        },
+        {
+          "id": "houndci-com",
+          "name": "houndci.com",
+          "url": "https://houndci.com/"
+        },
+        {
+          "id": "coveralls-io",
+          "name": "coveralls.io",
+          "url": "https://coveralls.io/"
+        },
+        {
+          "id": "scrutinizer-ci-com",
+          "name": "scrutinizer-ci.com",
+          "url": "https://scrutinizer-ci.com/"
+        },
+        {
+          "id": "codecov-io",
+          "name": "codecov.io",
+          "url": "https://codecov.io/"
+        },
+        {
+          "id": "insight-sensiolabs-com",
+          "name": "insight.sensiolabs.com",
+          "url": "https://insight.sensiolabs.com/"
+        },
+        {
+          "id": "codacy-com",
+          "name": "codacy.com",
+          "url": "https://codacy.com/"
+        },
+        {
+          "id": "pullreview-com",
+          "name": "pullreview.com",
+          "url": "https://www.pullreview.com/"
+        },
+        {
+          "id": "gocover-io",
+          "name": "gocover.io",
+          "url": "http://gocover.io/"
+        },
+        {
+          "id": "goreportcard-com",
+          "name": "goreportcard.com",
+          "url": "http://goreportcard.com/"
+        },
+        {
+          "id": "inch-ci-org",
+          "name": "inch-ci.org",
+          "url": "http://inch-ci.org/"
+        },
+        {
+          "id": "scan-coverity-com",
+          "name": "scan.coverity.com",
+          "url": "https://scan.coverity.com/"
+        },
+        {
+          "id": "webceo-com",
+          "name": "webceo.com",
+          "url": "https://www.webceo.com/"
+        },
+        {
+          "id": "zoompf-com",
+          "name": "zoompf.com",
+          "url": "https://zoompf.com/"
+        },
+        {
+          "id": "websitetest-com",
+          "name": "websitetest.com",
+          "url": "http://websitetest.com/"
+        },
+        {
+          "id": "gtmetrix-com",
+          "name": "gtmetrix.com",
+          "url": "https://gtmetrix.com/"
+        },
+        {
+          "id": "browserling-com",
+          "name": "browserling.com",
+          "url": "https://www.browserling.com/"
+        },
+        {
+          "id": "loadfocus-com",
+          "name": "loadfocus.com",
+          "url": "https://loadfocus.com/"
+        },
+        {
+          "id": "versioneye-com",
+          "name": "versioneye.com",
+          "url": "https://www.versioneye.com/"
+        },
+        {
+          "id": "beanstalkapp-com",
+          "name": "beanstalkapp.com",
+          "url": "http://beanstalkapp.com/"
+        },
+        {
+          "id": "testanywhere-co",
+          "name": "testanywhere.co",
+          "url": "https://testanywhere.co/"
+        },
+        {
+          "id": "srcclr-com",
+          "name": "srcclr.com",
+          "url": "https://srcclr.com/"
+        },
+        {
+          "id": "blamewarrior-com",
+          "name": "blamewarrior.com",
+          "url": "https://blamewarrior.com/"
+        },
+        {
+          "id": "gerrithub-io",
+          "name": "gerrithub.io",
+          "url": "https://review.gerrithub.io/"
+        },
+        {
+          "id": "reviewable-io",
+          "name": "reviewable.io",
+          "url": "https://reviewable.io/"
+        },
+        {
+          "id": "sonarqube-com",
+          "name": "sonarqube.com",
+          "url": "https://sonarqube.com"
+        }
+      ]
+    },
+    {
+      "id": "code-search-and-browsing",
+      "label": "Code Search and Browsing",
+      "anchor": "code-search-and-browsing",
+      "services": [
+        {
+          "id": "libraries-io",
+          "name": "libraries.io",
+          "url": "https://libraries.io/"
+        },
+        {
+          "id": "sourcegraph-com",
+          "name": "sourcegraph.com",
+          "url": "https://sourcegraph.com/"
+        },
+        {
+          "id": "searchcode-com",
+          "name": "searchcode.com",
+          "url": "https://searchcode.com/"
+        }
+      ]
+    },
+    {
+      "id": "ci-cd",
+      "label": "CI / CD",
+      "anchor": "ci-cd",
+      "services": [
+        {
+          "id": "codefresh-io",
+          "name": "codefresh.io",
+          "url": "https://codefresh.io"
+        },
+        {
+          "id": "codeship-com",
+          "name": "codeship.com",
+          "url": "https://codeship.com/"
+        },
+        {
+          "id": "circleci-com",
+          "name": "circleci.com",
+          "url": "https://circleci.com/"
+        },
+        {
+          "id": "stackahoy-io",
+          "name": "stackahoy.io",
+          "url": "https://stackahoy.io"
+        },
+        {
+          "id": "travis-ci-org",
+          "name": "travis-ci.org",
+          "url": "https://travis-ci.org/"
+        },
+        {
+          "id": "wercker-com",
+          "name": "wercker.com",
+          "url": "http://wercker.com/"
+        },
+        {
+          "id": "drone-io",
+          "name": "drone.io",
+          "url": "https://drone.io/"
+        },
+        {
+          "id": "semaphoreci-com",
+          "name": "semaphoreci.com",
+          "url": "https://semaphoreci.com/"
+        },
+        {
+          "id": "shippable-com",
+          "name": "shippable.com",
+          "url": "https://app.shippable.com/"
+        },
+        {
+          "id": "snap-ci-com",
+          "name": "snap-ci.com",
+          "url": "https://snap-ci.com/"
+        },
+        {
+          "id": "appveyor-com",
+          "name": "appveyor.com",
+          "url": "http://www.appveyor.com/"
+        },
+        {
+          "id": "github-com-2",
+          "name": "github.com",
+          "url": "https://github.com/ligurio/Continuous-Integration-services"
+        },
+        {
+          "id": "ftploy-com",
+          "name": "ftploy.com",
+          "url": "http://ftploy.com/"
+        },
+        {
+          "id": "deployhq-com",
+          "name": "deployhq.com",
+          "url": "http://www.deployhq.com/"
+        },
+        {
+          "id": "hub-jazz-net-2",
+          "name": "hub.jazz.net",
+          "url": "https://hub.jazz.net/"
+        },
+        {
+          "id": "styleci-io",
+          "name": "styleci.io",
+          "url": "https://styleci.io/"
+        },
+        {
+          "id": "bitrise-io",
+          "name": "bitrise.io",
+          "url": "https://www.bitrise.io/"
+        },
+        {
+          "id": "saucelabs-com",
+          "name": "saucelabs.com",
+          "url": "https://saucelabs.com/"
+        },
+        {
+          "id": "buddybuild-com",
+          "name": "buddybuild.com",
+          "url": "https://www.buddybuild.com/"
+        },
+        {
+          "id": "gitlab-com",
+          "name": "gitlab.com",
+          "url": "https://about.gitlab.com/gitlab-ci/"
+        },
+        {
+          "id": "dependencyci-com",
+          "name": "dependencyci.com",
+          "url": "https://dependencyci.com/"
+        }
+      ]
+    },
+    {
+      "id": "automated-browser-testing",
+      "label": "Automated Browser Testing",
+      "anchor": "automated-browser-testing",
+      "services": [
+        {
+          "id": "gridlastic-com",
+          "name": "gridlastic.com",
+          "url": "https://www.gridlastic.com/"
+        },
+        {
+          "id": "browserstack-com",
+          "name": "browserstack.com",
+          "url": "https://www.browserstack.com/"
+        },
+        {
+          "id": "everystep-automation-com",
+          "name": "everystep-automation.com",
+          "url": "https://www.everystep-automation.com/"
+        },
+        {
+          "id": "applitools-com",
+          "name": "Applitools.com",
+          "url": "https://applitools.com/"
+        }
+      ]
+    },
+    {
+      "id": "security-and-pki",
+      "label": "Security and PKI",
+      "anchor": "security-and-pki",
+      "services": [
+        {
+          "id": "pyup-io",
+          "name": "pyup.io",
+          "url": "https://pyup.io"
+        },
+        {
+          "id": "threatconnect-com",
+          "name": "threatconnect.com",
+          "url": "https://www.threatconnect.com"
+        },
+        {
+          "id": "crypteron-com",
+          "name": "crypteron.com",
+          "url": "https://www.crypteron.com/"
+        },
+        {
+          "id": "snyk-io",
+          "name": "snyk.io",
+          "url": "https://snyk.io"
+        },
+        {
+          "id": "vaddy-net",
+          "name": "vaddy.net",
+          "url": "http://vaddy.net/"
+        },
+        {
+          "id": "letsencrypt-org",
+          "name": "letsencrypt.org",
+          "url": "https://letsencrypt.org/"
+        },
+        {
+          "id": "globalsign-com",
+          "name": "globalsign.com",
+          "url": "https://www.globalsign.com/en/ssl/ssl-open-source/"
+        },
+        {
+          "id": "stormpath-com",
+          "name": "stormpath.com",
+          "url": "https://stormpath.com/"
+        },
+        {
+          "id": "auth0-com",
+          "name": "auth0.com",
+          "url": "https://auth0.com/"
+        },
+        {
+          "id": "getclef-com",
+          "name": "getclef.com",
+          "url": "https://getclef.com/"
+        },
+        {
+          "id": "ringcaptcha-com",
+          "name": "ringcaptcha.com",
+          "url": "https://ringcaptcha.com/"
+        },
+        {
+          "id": "ssllabs-com",
+          "name": "ssllabs.com",
+          "url": "https://www.ssllabs.com/ssltest/"
+        },
+        {
+          "id": "qualys-com",
+          "name": "qualys.com",
+          "url": "https://www.qualys.com/forms/freescan/owasp/"
+        },
+        {
+          "id": "alienvault-com",
+          "name": "alienvault.com",
+          "url": "https://www.alienvault.com/open-threat-exchange/reputation-monitor"
+        },
+        {
+          "id": "duo-com",
+          "name": "duo.com",
+          "url": "https://duo.com/"
+        },
+        {
+          "id": "tinfoilsecurity-com",
+          "name": "tinfoilsecurity.com",
+          "url": "https://www.tinfoilsecurity.com/"
+        },
+        {
+          "id": "acunetix-com",
+          "name": "acunetix.com",
+          "url": "https://www.acunetix.com/free-network-security-scanner/"
+        },
+        {
+          "id": "ponycheckup-com",
+          "name": "ponycheckup.com",
+          "url": "https://www.ponycheckup.com/"
+        },
+        {
+          "id": "foxpass-com",
+          "name": "foxpass.com",
+          "url": "https://www.foxpass.com/"
+        },
+        {
+          "id": "opswatgears-com",
+          "name": "opswatgears.com",
+          "url": "https://www.opswatgears.com/"
+        },
+        {
+          "id": "bitninja-io",
+          "name": "bitninja.io",
+          "url": "https://bitninja.io/"
+        },
+        {
+          "id": "onelogin-com",
+          "name": "onelogin.com",
+          "url": "https://www.onelogin.com/"
+        },
+        {
+          "id": "logintc-com",
+          "name": "logintc.com",
+          "url": "https://www.logintc.com/"
+        },
+        {
+          "id": "report-uri-io",
+          "name": "report-uri.io",
+          "url": "https://report-uri.io/"
+        },
+        {
+          "id": "cloudsploit-com",
+          "name": "cloudsploit.com",
+          "url": "https://cloudsploit.com/"
+        }
+      ]
+    },
+    {
+      "id": "management-system",
+      "label": "Management System",
+      "anchor": "management-system",
+      "services": [
+        {
+          "id": "bitnami-com",
+          "name": "bitnami.com",
+          "url": "https://bitnami.com/"
+        },
+        {
+          "id": "visualops-io",
+          "name": "visualops.io",
+          "url": "http://visualops.io/"
+        },
+        {
+          "id": "jamf-com",
+          "name": "jamf.com",
+          "url": "https://www.jamf.com/"
+        }
+      ]
+    },
+    {
+      "id": "log-management",
+      "label": "Log Management",
+      "anchor": "log-management",
+      "services": [
+        {
+          "id": "papertrailapp-com",
+          "name": "papertrailapp.com",
+          "url": "https://papertrailapp.com/"
+        },
+        {
+          "id": "logentries-com",
+          "name": "logentries.com",
+          "url": "https://logentries.com/"
+        },
+        {
+          "id": "loggly-com",
+          "name": "loggly.com",
+          "url": "https://www.loggly.com/"
+        },
+        {
+          "id": "sematext-com",
+          "name": "sematext.com",
+          "url": "https://sematext.com//logsene"
+        },
+        {
+          "id": "sumologic-com",
+          "name": "sumologic.com",
+          "url": "https://www.sumologic.com/"
+        },
+        {
+          "id": "logz-io",
+          "name": "logz.io",
+          "url": "http://logz.io/"
+        }
+      ]
+    },
+    {
+      "id": "translation-management",
+      "label": "Translation Management",
+      "anchor": "translation-management",
+      "services": [
+        {
+          "id": "lingohub-com",
+          "name": "lingohub.com",
+          "url": "https://lingohub.com/"
+        },
+        {
+          "id": "getlocalization-com",
+          "name": "getlocalization.com",
+          "url": "https://www.getlocalization.com/"
+        },
+        {
+          "id": "webtranslateit-com",
+          "name": "webtranslateit.com",
+          "url": "http://webtranslateit.com/"
+        },
+        {
+          "id": "transifex-com",
+          "name": "transifex.com",
+          "url": "https://www.transifex.com/"
+        },
+        {
+          "id": "oneskyapp-com",
+          "name": "oneskyapp.com",
+          "url": "http://www.oneskyapp.com/"
+        },
+        {
+          "id": "crowdin-com",
+          "name": "crowdin.com",
+          "url": "https://crowdin.com/"
+        },
+        {
+          "id": "instant-cm",
+          "name": "instant.cm",
+          "url": "https://instant.cm/"
+        }
+      ]
+    },
+    {
+      "id": "monitoring",
+      "label": "Monitoring",
+      "anchor": "monitoring",
+      "services": [
+        {
+          "id": "cloudsploit-com-2",
+          "name": "cloudsploit.com",
+          "url": "https://cloudSploit.com"
+        },
+        {
+          "id": "opbeat-com",
+          "name": "opbeat.com",
+          "url": "https://opbeat.com/"
+        },
+        {
+          "id": "checkmy-ws",
+          "name": "checkmy.ws",
+          "url": "https://checkmy.ws/en/solutions/free-forever-for-foss/"
+        },
+        {
+          "id": "appneta-com",
+          "name": "appneta.com",
+          "url": "http://www.appneta.com/"
+        },
+        {
+          "id": "thousandeyes-com",
+          "name": "thousandeyes.com",
+          "url": "https://www.thousandeyes.com/"
+        },
+        {
+          "id": "datadoghq-com",
+          "name": "datadoghq.com",
+          "url": "https://www.datadoghq.com/"
+        },
+        {
+          "id": "stackdriver-com",
+          "name": "stackdriver.com",
+          "url": "http://www.stackdriver.com/"
+        },
+        {
+          "id": "keymetrics-io",
+          "name": "keymetrics.io",
+          "url": "https://keymetrics.io/"
+        },
+        {
+          "id": "newrelic-com",
+          "name": "newrelic.com",
+          "url": "https://newrelic.com/"
+        },
+        {
+          "id": "nodequery-com",
+          "name": "nodequery.com",
+          "url": "https://nodequery.com/"
+        },
+        {
+          "id": "watchsumo-com",
+          "name": "watchsumo.com",
+          "url": "http://www.watchsumo.com/"
+        },
+        {
+          "id": "runscope-com",
+          "name": "runscope.com",
+          "url": "https://www.runscope.com/"
+        },
+        {
+          "id": "circonus-com",
+          "name": "circonus.com",
+          "url": "http://www.circonus.com/"
+        },
+        {
+          "id": "uptimerobot-com",
+          "name": "uptimerobot.com",
+          "url": "https://uptimerobot.com/"
+        },
+        {
+          "id": "statuscake-com",
+          "name": "statuscake.com",
+          "url": "https://www.statuscake.com/"
+        },
+        {
+          "id": "bmc-com",
+          "name": "bmc.com",
+          "url": "http://www.bmc.com/truesightpulse/"
+        },
+        {
+          "id": "ghostinspector-com",
+          "name": "ghostinspector.com",
+          "url": "https://ghostinspector.com/"
+        },
+        {
+          "id": "java-monitor-com",
+          "name": "java-monitor.com",
+          "url": "http://java-monitor.com/forum/welcome.php/"
+        },
+        {
+          "id": "sematext-com-2",
+          "name": "sematext.com",
+          "url": "https://sematext.com/"
+        },
+        {
+          "id": "stathat-com",
+          "name": "stathat.com",
+          "url": "https://www.stathat.com/"
+        },
+        {
+          "id": "skylight-io",
+          "name": "skylight.io",
+          "url": "https://www.skylight.io/"
+        },
+        {
+          "id": "appdynamics-com",
+          "name": "appdynamics.com",
+          "url": "https://www.appdynamics.com/"
+        },
+        {
+          "id": "deadmanssnitch-com",
+          "name": "deadmanssnitch.com",
+          "url": "https://deadmanssnitch.com/"
+        },
+        {
+          "id": "librato-com",
+          "name": "librato.com",
+          "url": "https://www.librato.com/"
+        },
+        {
+          "id": "freeboard-io",
+          "name": "freeboard.io",
+          "url": "https://freeboard.io/"
+        },
+        {
+          "id": "loader-io",
+          "name": "loader.io",
+          "url": "https://loader.io/"
+        },
+        {
+          "id": "speedchecker-xyz",
+          "name": "speedchecker.xyz",
+          "url": "http://probeapi.speedchecker.xyz/"
+        },
+        {
+          "id": "blackfire-io",
+          "name": "blackfire.io",
+          "url": "https://blackfire.io/"
+        },
+        {
+          "id": "apimetrics-io",
+          "name": "apimetrics.io",
+          "url": "http://apimetrics.io/"
+        },
+        {
+          "id": "opsdash-com",
+          "name": "opsdash.com",
+          "url": "https://www.opsdash.com/"
+        },
+        {
+          "id": "healthchecks-io",
+          "name": "healthchecks.io",
+          "url": "https://healthchecks.io"
+        },
+        {
+          "id": "appbeat-io",
+          "name": "appbeat.io",
+          "url": "https://appbeat.io"
+        },
+        {
+          "id": "dnsspy-io",
+          "name": "dnsspy.io",
+          "url": "https://dnsspy.io"
+        },
+        {
+          "id": "monique-io",
+          "name": "monique.io",
+          "url": "https://monique.io"
+        }
+      ]
+    },
+    {
+      "id": "crash-and-exception-handling",
+      "label": "Crash and Exception Handling",
+      "anchor": "crash-and-exception-handling",
+      "services": [
+        {
+          "id": "rollbar-com",
+          "name": "rollbar.com",
+          "url": "https://rollbar.com/"
+        },
+        {
+          "id": "bugsnag-com",
+          "name": "bugsnag.com",
+          "url": "https://bugsnag.com/"
+        },
+        {
+          "id": "sentry-io",
+          "name": "sentry.io",
+          "url": "https://sentry.io/"
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "label": "Search",
+      "anchor": "search",
+      "services": [
+        {
+          "id": "algolia-com",
+          "name": "algolia.com",
+          "url": "https://www.algolia.com/"
+        },
+        {
+          "id": "swiftype-com",
+          "name": "swiftype.com",
+          "url": "https://swiftype.com/"
+        },
+        {
+          "id": "bonsai-io",
+          "name": "bonsai.io",
+          "url": "https://bonsai.io/"
+        },
+        {
+          "id": "searchly-com",
+          "name": "searchly.com",
+          "url": "http://www.searchly.com/"
+        },
+        {
+          "id": "indexisto-com",
+          "name": "indexisto.com",
+          "url": "https://indexisto.com/"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "label": "Email",
+      "anchor": "email",
+      "services": [
+        {
+          "id": "mailinator-com",
+          "name": "mailinator.com",
+          "url": "https://www.mailinator.com/"
+        },
+        {
+          "id": "sparkpost-com",
+          "name": "sparkpost.com",
+          "url": "https://www.sparkpost.com/"
+        },
+        {
+          "id": "mailgun-com",
+          "name": "mailgun.com",
+          "url": "https://www.mailgun.com/"
+        },
+        {
+          "id": "tinyletter-com",
+          "name": "tinyletter.com",
+          "url": "https://tinyletter.com/"
+        },
+        {
+          "id": "mailchimp-com",
+          "name": "mailchimp.com",
+          "url": "http://mailchimp.com/"
+        },
+        {
+          "id": "sendloop-com",
+          "name": "sendloop.com",
+          "url": "https://sendloop.com/"
+        },
+        {
+          "id": "sendgrid-com",
+          "name": "sendgrid.com",
+          "url": "https://sendgrid.com/"
+        },
+        {
+          "id": "phplist-com",
+          "name": "phplist.com",
+          "url": "https://phplist.com/"
+        },
+        {
+          "id": "mailjet-com",
+          "name": "mailjet.com",
+          "url": "https://www.mailjet.com/"
+        },
+        {
+          "id": "sendinblue-com",
+          "name": "sendinblue.com",
+          "url": "https://www.sendinblue.com/"
+        },
+        {
+          "id": "mailtrap-io",
+          "name": "mailtrap.io",
+          "url": "https://mailtrap.io/"
+        },
+        {
+          "id": "postmarkapp-com",
+          "name": "postmarkapp.com",
+          "url": "https://postmarkapp.com/"
+        },
+        {
+          "id": "zoho-com",
+          "name": "zoho.com",
+          "url": "https://www.zoho.com/mail/"
+        },
+        {
+          "id": "domain-yandex-com",
+          "name": "domain.yandex.com",
+          "url": "https://domain.yandex.com/domains_add/"
+        },
+        {
+          "id": "pawnmail-com",
+          "name": "pawnmail.com",
+          "url": "http://pawnmail.com"
+        },
+        {
+          "id": "moosend-com",
+          "name": "moosend.com",
+          "url": "http://moosend.com/"
+        },
+        {
+          "id": "debugmail-io",
+          "name": "debugmail.io",
+          "url": "https://debugmail.io/"
+        },
+        {
+          "id": "mailboxlayer-com",
+          "name": "mailboxlayer.com",
+          "url": "https://mailboxlayer.com/"
+        },
+        {
+          "id": "mailcatcher-me",
+          "name": "mailcatcher.me",
+          "url": "http://mailcatcher.me/"
+        },
+        {
+          "id": "yopmail-fr",
+          "name": "yopmail.fr",
+          "url": "http://www.yopmail.fr/en/"
+        },
+        {
+          "id": "kickbox-io",
+          "name": "kickbox.io",
+          "url": "http://kickbox.io/"
+        },
+        {
+          "id": "inumbo-com",
+          "name": "inumbo.com",
+          "url": "http://inumbo.com/"
+        },
+        {
+          "id": "biz-mail-ru",
+          "name": "biz.mail.ru",
+          "url": "https://biz.mail.ru/"
+        },
+        {
+          "id": "maildocker-com",
+          "name": "maildocker.com",
+          "url": "http://maildocker.com"
+        },
+        {
+          "id": "sendpulse-com",
+          "name": "sendpulse.com",
+          "url": "https://sendpulse.com"
+        },
+        {
+          "id": "pepipost-com",
+          "name": "pepipost.com",
+          "url": "http://www.pepipost.com"
+        },
+        {
+          "id": "elasticemail-com",
+          "name": "elasticemail.com",
+          "url": "https://elasticemail.com"
+        },
+        {
+          "id": "appmail-io",
+          "name": "appmail.io",
+          "url": "https://appmail.io"
+        },
+        {
+          "id": "mail-tester-com",
+          "name": "mail-tester.com",
+          "url": "https://www.mail-tester.com"
+        }
+      ]
+    },
+    {
+      "id": "cdn-and-protection",
+      "label": "CDN and Protection",
+      "anchor": "cdn-and-protection",
+      "services": [
+        {
+          "id": "cloudflare-com",
+          "name": "cloudflare.com",
+          "url": "https://www.cloudflare.com/"
+        },
+        {
+          "id": "bootstrapcdn-com",
+          "name": "bootstrapcdn.com",
+          "url": "http://www.bootstrapcdn.com/"
+        },
+        {
+          "id": "cdnjs-com",
+          "name": "cdnjs.com",
+          "url": "https://cdnjs.com/"
+        },
+        {
+          "id": "jsdelivr-com",
+          "name": "jsdelivr.com",
+          "url": "http://www.jsdelivr.com/"
+        },
+        {
+          "id": "developers-google-com",
+          "name": "developers.google.com",
+          "url": "https://developers.google.com/speed/libraries/"
+        },
+        {
+          "id": "asp-net",
+          "name": "asp.net",
+          "url": "https://www.asp.net/ajax/cdn/"
+        },
+        {
+          "id": "toranproxy-com",
+          "name": "toranproxy.com",
+          "url": "https://toranproxy.com/"
+        },
+        {
+          "id": "rawgit-com",
+          "name": "rawgit.com",
+          "url": "https://rawgit.com/"
+        },
+        {
+          "id": "incapsula-com",
+          "name": "incapsula.com",
+          "url": "https://www.incapsula.com/"
+        },
+        {
+          "id": "fastly-com",
+          "name": "fastly.com",
+          "url": "https://www.fastly.com/"
+        },
+        {
+          "id": "athenalayer-com",
+          "name": "athenalayer.com",
+          "url": "http://athenalayer.com/"
+        },
+        {
+          "id": "section-io",
+          "name": "section.io",
+          "url": "https://www.section.io/"
+        },
+        {
+          "id": "netdepot-com",
+          "name": "netdepot.com",
+          "url": "https://www.netdepot.com/cdn/"
+        },
+        {
+          "id": "speeder-io",
+          "name": "speeder.io",
+          "url": "https://speeder.io/"
+        },
+        {
+          "id": "jare-io",
+          "name": "jare.io",
+          "url": "http://www.jare.io"
+        },
+        {
+          "id": "codepunker-com",
+          "name": "codepunker.com",
+          "url": "https://www.codepunker.com/tools/cdn"
+        }
+      ]
+    },
+    {
+      "id": "paas",
+      "label": "PaaS",
+      "anchor": "paas",
+      "services": [
+        {
+          "id": "cloud-google-com-2",
+          "name": "cloud.google.com",
+          "url": "https://cloud.google.com/appengine/"
+        },
+        {
+          "id": "engineyard-com",
+          "name": "engineyard.com",
+          "url": "https://engineyard.com/"
+        },
+        {
+          "id": "azure-microsoft-com",
+          "name": "azure.microsoft.com",
+          "url": "https://azure.microsoft.com/"
+        },
+        {
+          "id": "appharbor-com",
+          "name": "appharbor.com",
+          "url": "https://appharbor.com/"
+        },
+        {
+          "id": "heroku-com",
+          "name": "heroku.com",
+          "url": "https://www.heroku.com/"
+        },
+        {
+          "id": "firebase-com",
+          "name": "firebase.com",
+          "url": "https://www.firebase.com/"
+        },
+        {
+          "id": "bluemix-net",
+          "name": "bluemix.net",
+          "url": "https://console.ng.bluemix.net/"
+        },
+        {
+          "id": "outsystems-com",
+          "name": "outsystems.com",
+          "url": "http://www.outsystems.com/"
+        },
+        {
+          "id": "platform-telerik-com",
+          "name": "platform.telerik.com",
+          "url": "https://platform.telerik.com/"
+        },
+        {
+          "id": "scn-sap-com",
+          "name": "scn.sap.com",
+          "url": "https://scn.sap.com/docs/DOC-56411"
+        },
+        {
+          "id": "mendix-com",
+          "name": "mendix.com",
+          "url": "https://www.mendix.com/"
+        },
+        {
+          "id": "pythonanywhere-com",
+          "name": "pythonanywhere.com",
+          "url": "https://www.pythonanywhere.com/"
+        },
+        {
+          "id": "configure-it",
+          "name": "configure.it",
+          "url": "http://www.configure.it/"
+        },
+        {
+          "id": "elastx-com",
+          "name": "elastx.com",
+          "url": "http://elastx.com/start/easypaas/"
+        },
+        {
+          "id": "pagodabox-io",
+          "name": "pagodabox.io",
+          "url": "http://pagodabox.io/"
+        },
+        {
+          "id": "cloudandheat-com",
+          "name": "cloudandheat.com",
+          "url": "https://www.cloudandheat.com/"
+        },
+        {
+          "id": "zeit-co-now",
+          "name": "zeit.co/now",
+          "url": "https://zeit.co/now"
+        },
+        {
+          "id": "sandstorm-io",
+          "name": "sandstorm.io",
+          "url": "https://sandstorm.io/"
+        },
+        {
+          "id": "gearhost-com",
+          "name": "gearhost.com",
+          "url": "https://www.gearhost.com/pricing"
+        }
+      ]
+    },
+    {
+      "id": "baas",
+      "label": "BaaS",
+      "anchor": "baas",
+      "services": [
+        {
+          "id": "apigee-com",
+          "name": "apigee.com",
+          "url": "http://docs.apigee.com/api-baas"
+        },
+        {
+          "id": "appacitive-com",
+          "name": "appacitive.com",
+          "url": "http://appacitive.com/"
+        },
+        {
+          "id": "bip-io",
+          "name": "bip.io",
+          "url": "https://bip.io/"
+        },
+        {
+          "id": "blockspring-com",
+          "name": "blockspring.com",
+          "url": "https://www.blockspring.com/"
+        },
+        {
+          "id": "kinvey-com",
+          "name": "kinvey.com",
+          "url": "http://www.kinvey.com/"
+        },
+        {
+          "id": "konacloud-io",
+          "name": "konacloud.io",
+          "url": "http://konacloud.io/"
+        },
+        {
+          "id": "layer-com",
+          "name": "layer.com",
+          "url": "https://layer.com/"
+        },
+        {
+          "id": "quickblox-com",
+          "name": "quickblox.com",
+          "url": "http://quickblox.com/"
+        },
+        {
+          "id": "pushbots-com",
+          "name": "pushbots.com",
+          "url": "https://pushbots.com/"
+        },
+        {
+          "id": "onesignal-com",
+          "name": "onesignal.com",
+          "url": "https://onesignal.com/"
+        },
+        {
+          "id": "getstream-io",
+          "name": "getstream.io",
+          "url": "https://getstream.io/"
+        },
+        {
+          "id": "tyk-io",
+          "name": "tyk.io",
+          "url": "https://tyk.io/"
+        },
+        {
+          "id": "iron-io",
+          "name": "iron.io",
+          "url": "http://www.iron.io/"
+        },
+        {
+          "id": "stackhut-com",
+          "name": "stackhut.com",
+          "url": "http://stackhut.com/"
+        },
+        {
+          "id": "pubnub-com",
+          "name": "pubnub.com",
+          "url": "https://www.pubnub.com/"
+        },
+        {
+          "id": "reappt-io",
+          "name": "reappt.io",
+          "url": "https://reappt.io"
+        },
+        {
+          "id": "webtask-io",
+          "name": "webtask.io",
+          "url": "https://webtask.io/"
+        },
+        {
+          "id": "zapier-com",
+          "name": "zapier.com",
+          "url": "https://zapier.com/"
+        },
+        {
+          "id": "stackstorm-com",
+          "name": "stackstorm.com",
+          "url": "https://stackstorm.com/"
+        },
+        {
+          "id": "simperium-com",
+          "name": "simperium.com",
+          "url": "https://simperium.com/"
+        },
+        {
+          "id": "stamplay-com",
+          "name": "stamplay.com",
+          "url": "https://stamplay.com/"
+        }
+      ]
+    },
+    {
+      "id": "web-hosting",
+      "label": "Web Hosting",
+      "anchor": "web-hosting",
+      "services": [
+        {
+          "id": "closeheat-com",
+          "name": "closeheat.com",
+          "url": "https://closeheat.com/"
+        },
+        {
+          "id": "serverpilot-io",
+          "name": "serverpilot.io",
+          "url": "https://serverpilot.io/"
+        },
+        {
+          "id": "sourceforge-net",
+          "name": "sourceforge.net",
+          "url": "https://sourceforge.net/"
+        },
+        {
+          "id": "devport-co",
+          "name": "devport.co",
+          "url": "http://devport.co/"
+        },
+        {
+          "id": "netlify-com",
+          "name": "netlify.com",
+          "url": "https://www.netlify.com/"
+        },
+        {
+          "id": "pantheon-io",
+          "name": "pantheon.io",
+          "url": "https://pantheon.io/"
+        },
+        {
+          "id": "acquia-com",
+          "name": "acquia.com",
+          "url": "https://www.acquia.com/"
+        },
+        {
+          "id": "bitballoon-com",
+          "name": "bitballoon.com",
+          "url": "https://www.bitballoon.com/"
+        },
+        {
+          "id": "readthedocs-org",
+          "name": "readthedocs.org",
+          "url": "https://readthedocs.org/"
+        },
+        {
+          "id": "bubble-is",
+          "name": "bubble.is",
+          "url": "https://bubble.is/"
+        },
+        {
+          "id": "contentful-com",
+          "name": "contentful.com",
+          "url": "https://www.contentful.com/"
+        },
+        {
+          "id": "tilda-cc",
+          "name": "tilda.cc",
+          "url": "https://tilda.cc/"
+        },
+        {
+          "id": "surge-sh",
+          "name": "surge.sh",
+          "url": "https://surge.sh/"
+        }
+      ]
+    },
+    {
+      "id": "dns",
+      "label": "DNS",
+      "anchor": "dns",
+      "services": [
+        {
+          "id": "freedns-afraid-org",
+          "name": "freedns.afraid.org",
+          "url": "https://freedns.afraid.org/"
+        },
+        {
+          "id": "dns-he-net",
+          "name": "dns.he.net",
+          "url": "https://dns.he.net/"
+        },
+        {
+          "id": "luadns-com",
+          "name": "luadns.com",
+          "url": "http://www.luadns.com/"
+        },
+        {
+          "id": "domain-yandex-com-2",
+          "name": "domain.yandex.com",
+          "url": "https://domain.yandex.com/domains_add/"
+        },
+        {
+          "id": "selectel-com",
+          "name": "selectel.com",
+          "url": "https://selectel.com/services/dns/"
+        },
+        {
+          "id": "cloudns-net",
+          "name": "cloudns.net",
+          "url": "https://www.cloudns.net/"
+        },
+        {
+          "id": "ns1-com",
+          "name": "ns1.com",
+          "url": "https://ns1.com/"
+        },
+        {
+          "id": "zonewatcher-com",
+          "name": "zonewatcher.com",
+          "url": "https://zonewatcher.com"
+        }
+      ]
+    },
+    {
+      "id": "iaas",
+      "label": "IaaS",
+      "anchor": "iaas",
+      "services": [
+        {
+          "id": "aws-amazon-com",
+          "name": "aws.amazon.com",
+          "url": "https://aws.amazon.com/free/"
+        },
+        {
+          "id": "exoscale-ch",
+          "name": "exoscale.ch",
+          "url": "https://www.exoscale.ch/"
+        },
+        {
+          "id": "developer-rackspace-com",
+          "name": "developer.rackspace.com",
+          "url": "https://developer.rackspace.com/"
+        },
+        {
+          "id": "cloud-google-com-compute",
+          "name": "cloud.google.com/compute",
+          "url": "https://cloud.google.com/compute/"
+        },
+        {
+          "id": "virtzone-net",
+          "name": "virtzone.net",
+          "url": "http://www.virtzone.net/"
+        },
+        {
+          "id": "backblaze-com",
+          "name": "backblaze.com",
+          "url": "https://backblaze.com/b2/"
+        },
+        {
+          "id": "trystack-org",
+          "name": "trystack.org",
+          "url": "http://trystack.org/"
+        },
+        {
+          "id": "dply-co",
+          "name": "dply.co",
+          "url": "https://dply.co/"
+        }
+      ]
+    },
+    {
+      "id": "dbaas",
+      "label": "DBaaS",
+      "anchor": "dbaas",
+      "services": [
+        {
+          "id": "cloudant-com",
+          "name": "cloudant.com",
+          "url": "https://cloudant.com/"
+        },
+        {
+          "id": "orchestrate-io",
+          "name": "orchestrate.io",
+          "url": "https://orchestrate.io/"
+        },
+        {
+          "id": "redislabs-com",
+          "name": "redislabs.com",
+          "url": "https://redislabs.com/redis-cloud"
+        },
+        {
+          "id": "backand-com",
+          "name": "backand.com",
+          "url": "https://www.backand.com/"
+        },
+        {
+          "id": "zenginehq-com",
+          "name": "zenginehq.com",
+          "url": "http://www.zenginehq.com/"
+        },
+        {
+          "id": "redsmin-com",
+          "name": "redsmin.com",
+          "url": "https://redsmin.com/"
+        },
+        {
+          "id": "graphstory-com",
+          "name": "graphstory.com",
+          "url": "http://graphstory.com/"
+        },
+        {
+          "id": "elephantsql-com",
+          "name": "elephantsql.com",
+          "url": "http://www.elephantsql.com/"
+        },
+        {
+          "id": "graphenedb-com",
+          "name": "graphenedb.com",
+          "url": "http://www.graphenedb.com/"
+        },
+        {
+          "id": "mlab-com",
+          "name": "mlab.com",
+          "url": "https://mlab.com/"
+        },
+        {
+          "id": "mongodb-atlas",
+          "name": "MongoDB Atlas",
+          "url": "https://www.mongodb.com/cloud/atlas"
+        },
+        {
+          "id": "scalingo-com",
+          "name": "scalingo.com",
+          "url": "https://scalingo.com/"
+        },
+        {
+          "id": "skyvia-com",
+          "name": "skyvia.com",
+          "url": "https://skyvia.com/"
+        },
+        {
+          "id": "airtable-com",
+          "name": "airtable.com",
+          "url": "https://airtable.com/"
+        },
+        {
+          "id": "fieldbook-com",
+          "name": "fieldbook.com",
+          "url": "https://fieldbook.com/"
+        },
+        {
+          "id": "iriscouch-com",
+          "name": "iriscouch.com",
+          "url": "http://www.iriscouch.com/"
+        },
+        {
+          "id": "spreadsheetdb-io",
+          "name": "spreadsheetdb.io",
+          "url": "https://www.spreadsheetdb.io"
+        }
+      ]
+    },
+    {
+      "id": "stun-webrtc-web-socket-servers-and-other-routers",
+      "label": "STUN, WebRTC, Web Socket Servers and Other Routers",
+      "anchor": "stun-webrtc-web-socket-servers-and-other-routers",
+      "services": [
+        {
+          "id": "scaledrone-com",
+          "name": "scaledrone.com",
+          "url": "https://www.scaledrone.com/"
+        },
+        {
+          "id": "pusher-com",
+          "name": "pusher.com",
+          "url": "https://pusher.com/"
+        },
+        {
+          "id": "stun-stun-l-google-com-19302",
+          "name": "stun:stun.l.google.com:19302",
+          "url": "stun:stun.l.google.com:19302"
+        },
+        {
+          "id": "stun-global-stun-twilio-com-3478-transport-udp",
+          "name": "stun:global.stun.twilio.com:3478?transport=udp",
+          "url": "stun:global.stun.twilio.com:3478?transport=udp"
+        },
+        {
+          "id": "segment-com",
+          "name": "segment.com",
+          "url": "https://segment.com/"
+        },
+        {
+          "id": "ngrok-com",
+          "name": "ngrok.com",
+          "url": "https://ngrok.com/"
+        },
+        {
+          "id": "cloudamqp-com",
+          "name": "cloudamqp.com",
+          "url": "https://www.cloudamqp.com/"
+        },
+        {
+          "id": "meetfinch-com",
+          "name": "meetfinch.com",
+          "url": "https://meetfinch.com/"
+        }
+      ]
+    },
+    {
+      "id": "issue-tracking-and-project-management",
+      "label": "Issue Tracking and Project Management",
+      "anchor": "issue-tracking-and-project-management",
+      "services": [
+        {
+          "id": "bitrix24-com",
+          "name": "bitrix24.com",
+          "url": "https://www.bitrix24.com/"
+        },
+        {
+          "id": "pivotaltracker-com",
+          "name": "pivotaltracker.com",
+          "url": "http://www.pivotaltracker.com/"
+        },
+        {
+          "id": "atlassian-com",
+          "name": "atlassian.com",
+          "url": "https://atlassian.com/opensource/overview"
+        },
+        {
+          "id": "kanbantool-com",
+          "name": "kanbantool.com",
+          "url": "http://kanbantool.com/"
+        },
+        {
+          "id": "kanbanflow-com",
+          "name": "kanbanflow.com",
+          "url": "https://kanbanflow.com/"
+        },
+        {
+          "id": "kanbanery-com",
+          "name": "kanbanery.com",
+          "url": "https://kanbanery.com/"
+        },
+        {
+          "id": "zenhub-io",
+          "name": "zenhub.io",
+          "url": "https://zenhub.io/"
+        },
+        {
+          "id": "trello-com",
+          "name": "trello.com",
+          "url": "https://trello.com/"
+        },
+        {
+          "id": "producteev-com",
+          "name": "producteev.com",
+          "url": "https://producteev.com/"
+        },
+        {
+          "id": "fogcreek-com",
+          "name": "fogcreek.com",
+          "url": "http://fogcreek.com/fogbugz/"
+        },
+        {
+          "id": "waffle-io",
+          "name": "waffle.io",
+          "url": "https://waffle.io/"
+        },
+        {
+          "id": "huboard-com",
+          "name": "huboard.com",
+          "url": "https://huboard.com/"
+        },
+        {
+          "id": "taiga-io",
+          "name": "taiga.io",
+          "url": "https://taiga.io/"
+        },
+        {
+          "id": "jetbrains-com",
+          "name": "jetbrains.com",
+          "url": "https://jetbrains.com/youtrack/buy/open_source_incloud.jsp"
+        },
+        {
+          "id": "github-com-3",
+          "name": "github.com",
+          "url": "https://github.com/"
+        },
+        {
+          "id": "asana-com",
+          "name": "asana.com",
+          "url": "https://asana.com/"
+        },
+        {
+          "id": "acunote-com",
+          "name": "acunote.com",
+          "url": "http://acunote.com/"
+        },
+        {
+          "id": "gliffy-com",
+          "name": "gliffy.com",
+          "url": "http://gliffy.com/"
+        },
+        {
+          "id": "cacoo-com",
+          "name": "cacoo.com",
+          "url": "https://cacoo.com/"
+        },
+        {
+          "id": "draw-io",
+          "name": "draw.io",
+          "url": "https://www.draw.io/"
+        },
+        {
+          "id": "hub-jazz-net-3",
+          "name": "hub.jazz.net",
+          "url": "https://hub.jazz.net/"
+        },
+        {
+          "id": "leankit-com",
+          "name": "leankit.com",
+          "url": "http://leankit.com/"
+        },
+        {
+          "id": "visualstudio-com-2",
+          "name": "visualstudio.com",
+          "url": "https://www.visualstudio.com//products/what-is-visual-studio-online-vs"
+        },
+        {
+          "id": "testlio-com",
+          "name": "testlio.com",
+          "url": "https://testlio.com/"
+        },
+        {
+          "id": "vivifyscrum-com",
+          "name": "vivifyscrum.com",
+          "url": "https://vivifyscrum.com/"
+        },
+        {
+          "id": "targetprocess-com",
+          "name": "targetprocess.com",
+          "url": "http://targetprocess.com/"
+        },
+        {
+          "id": "overv-io",
+          "name": "overv.io",
+          "url": "https://overv.io/"
+        },
+        {
+          "id": "taskulu-com",
+          "name": "taskulu.com",
+          "url": "https://taskulu.com/"
+        },
+        {
+          "id": "contriber-com",
+          "name": "contriber.com",
+          "url": "https://contriber.com/"
+        },
+        {
+          "id": "planitpoker-com",
+          "name": "planitpoker.com",
+          "url": "http://planitpoker.com/"
+        },
+        {
+          "id": "ubertesters-com",
+          "name": "ubertesters.com",
+          "url": "https://ubertesters.com/"
+        },
+        {
+          "id": "jetbrains-com-2",
+          "name": "jetbrains.com",
+          "url": "https://www.jetbrains.com/youtrack/buy/#edition=incloud"
+        }
+      ]
+    },
+    {
+      "id": "storage-and-media-processing",
+      "label": "Storage and Media Processing",
+      "anchor": "storage-and-media-processing",
+      "services": [
+        {
+          "id": "aerofs-com",
+          "name": "aerofs.com",
+          "url": "https://aerofs.com/"
+        },
+        {
+          "id": "bintray-com",
+          "name": "bintray.com",
+          "url": "https://bintray.com/"
+        },
+        {
+          "id": "cloudinary-com",
+          "name": "cloudinary.com",
+          "url": "http://cloudinary.com/"
+        },
+        {
+          "id": "plot-ly",
+          "name": "plot.ly",
+          "url": "https://plot.ly/"
+        },
+        {
+          "id": "transloadit-com",
+          "name": "transloadit.com",
+          "url": "https://transloadit.com/"
+        },
+        {
+          "id": "podio-com",
+          "name": "podio.com",
+          "url": "https://podio.com/"
+        },
+        {
+          "id": "shrinkray-io",
+          "name": "shrinkray.io",
+          "url": "https://shrinkray.io/"
+        },
+        {
+          "id": "imagefly-io",
+          "name": "imagefly.io",
+          "url": "http://imagefly.io/"
+        },
+        {
+          "id": "kraken-io",
+          "name": "kraken.io",
+          "url": "https://kraken.io/"
+        },
+        {
+          "id": "placehold-it",
+          "name": "placehold.it",
+          "url": "https://placehold.it/"
+        },
+        {
+          "id": "placekitten-com",
+          "name": "placekitten.com",
+          "url": "https://placekitten.com/"
+        },
+        {
+          "id": "placepenguin-com",
+          "name": "placepenguin.com",
+          "url": "http://placepenguin.com/"
+        },
+        {
+          "id": "embed-ly",
+          "name": "embed.ly",
+          "url": "http://embed.ly/"
+        },
+        {
+          "id": "backhub-co",
+          "name": "backhub.co",
+          "url": "https://backhub.co/"
+        },
+        {
+          "id": "otixo-com",
+          "name": "otixo.com",
+          "url": "http://otixo.com/"
+        },
+        {
+          "id": "tinypng-com",
+          "name": "tinypng.com",
+          "url": "https://tinypng.com/"
+        },
+        {
+          "id": "filestack-com",
+          "name": "filestack.com",
+          "url": "https://filestack.com/"
+        },
+        {
+          "id": "packagecloud-io",
+          "name": "packagecloud.io",
+          "url": "https://packagecloud.io/"
+        },
+        {
+          "id": "image-charts-com",
+          "name": "image-charts.com",
+          "url": "https://image-charts.com/"
+        }
+      ]
+    },
+    {
+      "id": "design-and-ui",
+      "label": "Design and UI",
+      "anchor": "design-and-ui",
+      "services": [
+        {
+          "id": "pixlr-com",
+          "name": "pixlr.com",
+          "url": "http://pixlr.com/"
+        },
+        {
+          "id": "imagebin-ca",
+          "name": "imagebin.ca",
+          "url": "http://imagebin.ca/"
+        },
+        {
+          "id": "cloudconvert-com",
+          "name": "cloudconvert.com",
+          "url": "https://cloudconvert.com/"
+        },
+        {
+          "id": "resizeappicon-com",
+          "name": "resizeappicon.com",
+          "url": "https://resizeappicon.com/"
+        },
+        {
+          "id": "vectr-com",
+          "name": "vectr.com",
+          "url": "https://vectr.com/"
+        },
+        {
+          "id": "walkme-com",
+          "name": "walkme.com",
+          "url": "http://walkme.com/"
+        },
+        {
+          "id": "marvelapp-com",
+          "name": "marvelapp.com",
+          "url": "https://marvelapp.com/"
+        },
+        {
+          "id": "zeplin",
+          "name": "Zeplin",
+          "url": "https://zeplin.io/"
+        }
+      ]
+    },
+    {
+      "id": "data-visualization-on-maps",
+      "label": "Data Visualization on Maps",
+      "anchor": "data-visualization-on-maps",
+      "services": [
+        {
+          "id": "geocoder-opencagedata-com",
+          "name": "geocoder.opencagedata.com",
+          "url": "https://geocoder.opencagedata.com/"
+        },
+        {
+          "id": "datamaps-co",
+          "name": "datamaps.co",
+          "url": "https://datamaps.co/"
+        },
+        {
+          "id": "geocod-io",
+          "name": "geocod.io",
+          "url": "http://geocod.io/"
+        },
+        {
+          "id": "gogeo-io",
+          "name": "gogeo.io",
+          "url": "http://gogeo.io/"
+        },
+        {
+          "id": "cartodb-com",
+          "name": "cartodb.com",
+          "url": "https://cartodb.com/"
+        },
+        {
+          "id": "giscloud-com",
+          "name": "giscloud.com",
+          "url": "http://giscloud.com/"
+        },
+        {
+          "id": "latlon-io",
+          "name": "latlon.io",
+          "url": "https://latlon.io/"
+        },
+        {
+          "id": "mapbox-com",
+          "name": "mapbox.com",
+          "url": "https://mapbox.com/"
+        }
+      ]
+    },
+    {
+      "id": "package-build-system",
+      "label": "Package Build System",
+      "anchor": "package-build-system",
+      "services": [
+        {
+          "id": "build-opensuse-org",
+          "name": "build.opensuse.org",
+          "url": "https://build.opensuse.org/"
+        },
+        {
+          "id": "copr-fedoraproject-org",
+          "name": "copr.fedoraproject.org",
+          "url": "https://copr.fedoraproject.org/"
+        },
+        {
+          "id": "help-launchpad-net",
+          "name": "help.launchpad.net",
+          "url": "https://help.launchpad.net/Packaging"
+        }
+      ]
+    },
+    {
+      "id": "ide-and-code-editing",
+      "label": "IDE and Code Editing",
+      "anchor": "ide-and-code-editing",
+      "services": [
+        {
+          "id": "c9-io",
+          "name": "c9.io",
+          "url": "https://c9.io/"
+        },
+        {
+          "id": "koding-com",
+          "name": "koding.com",
+          "url": "http://www.koding.com/"
+        },
+        {
+          "id": "codeanywhere-com",
+          "name": "codeanywhere.com",
+          "url": "https://codeanywhere.com/"
+        },
+        {
+          "id": "codenvy-com",
+          "name": "codenvy.com",
+          "url": "https://codenvy.com/"
+        },
+        {
+          "id": "visualstudio-com-3",
+          "name": "visualstudio.com",
+          "url": "http://visualstudio.com/community"
+        },
+        {
+          "id": "code-visualstudio-com",
+          "name": "code.visualstudio.com",
+          "url": "http://code.visualstudio.com/"
+        },
+        {
+          "id": "cloud-sagemath-com",
+          "name": "cloud.sagemath.com",
+          "url": "https://cloud.sagemath.com/"
+        },
+        {
+          "id": "wakatime-com",
+          "name": "wakatime.com",
+          "url": "https://wakatime.com/"
+        },
+        {
+          "id": "apiary-io",
+          "name": "apiary.io",
+          "url": "https://apiary.io/"
+        },
+        {
+          "id": "mockable-io",
+          "name": "mockable.io",
+          "url": "https://www.mockable.io/"
+        },
+        {
+          "id": "jetbrains-com-3",
+          "name": "jetbrains.com",
+          "url": "https://jetbrains.com/products.html"
+        },
+        {
+          "id": "stackhive-com",
+          "name": "stackhive.com",
+          "url": "http://stackhive.com/"
+        },
+        {
+          "id": "tadpoledb-com",
+          "name": "tadpoledb.com",
+          "url": "http://tadpoledb.com/"
+        },
+        {
+          "id": "codepen-io",
+          "name": "codepen.io",
+          "url": "https://codepen.io/"
+        }
+      ]
+    },
+    {
+      "id": "analytics-events-and-statistics",
+      "label": "Analytics, Events and Statistics",
+      "anchor": "analytics-events-and-statistics",
+      "services": [
+        {
+          "id": "analytics-google-com",
+          "name": "analytics.google.com",
+          "url": "https://analytics.google.com/"
+        },
+        {
+          "id": "heapanalytics-com",
+          "name": "heapanalytics.com",
+          "url": "https://heapanalytics.com/"
+        },
+        {
+          "id": "sematext-com-3",
+          "name": "sematext.com",
+          "url": "https://sematext.com//search-analytics"
+        },
+        {
+          "id": "usabilityhub-com",
+          "name": "usabilityhub.com",
+          "url": "https://usabilityhub.com/"
+        },
+        {
+          "id": "gosquared-com",
+          "name": "gosquared.com",
+          "url": "https://gosquared.com/"
+        },
+        {
+          "id": "mixpanel-com",
+          "name": "mixpanel.com",
+          "url": "https://mixpanel.com/"
+        },
+        {
+          "id": "amplitude-com",
+          "name": "amplitude.com",
+          "url": "https://amplitude.com/"
+        },
+        {
+          "id": "keen-io",
+          "name": "keen.io",
+          "url": "https://keen.io/"
+        },
+        {
+          "id": "inspectlet-com",
+          "name": "inspectlet.com",
+          "url": "http://inspectlet.com/"
+        },
+        {
+          "id": "mousestats-com",
+          "name": "mousestats.com",
+          "url": "https://mousestats.com/"
+        },
+        {
+          "id": "metrica-yandex-com",
+          "name": "metrica.yandex.com",
+          "url": "https://metrica.yandex.com/"
+        },
+        {
+          "id": "hotjar-com",
+          "name": "hotjar.com",
+          "url": "https://hotjar.com/"
+        },
+        {
+          "id": "imprace-com",
+          "name": "imprace.com",
+          "url": "http://imprace.com/"
+        },
+        {
+          "id": "baremetrics-com",
+          "name": "baremetrics.com",
+          "url": "https://baremetrics.com/"
+        },
+        {
+          "id": "optimizely-com",
+          "name": "optimizely.com",
+          "url": "https://optimizely.com"
+        },
+        {
+          "id": "expensify-com",
+          "name": "expensify.com",
+          "url": "https://expensify.com/"
+        },
+        {
+          "id": "ironsource-atom",
+          "name": "ironSource atom",
+          "url": "http://www.ironsrc.com/data-flow-management/"
+        },
+        {
+          "id": "botan-io",
+          "name": "botan.io",
+          "url": "http://botan.io/"
+        }
+      ]
+    },
+    {
+      "id": "international-mobile-number-verification-api-and-sdk",
+      "label": "International Mobile Number Verification API and SDK",
+      "anchor": "international-mobile-number-verification-api-and-sdk",
+      "services": [
+        {
+          "id": "cognalys-com",
+          "name": "cognalys.com",
+          "url": "https://cognalys.com/"
+        },
+        {
+          "id": "numverify-com",
+          "name": "numverify.com",
+          "url": "https://numverify.com/"
+        },
+        {
+          "id": "sumome-com",
+          "name": "sumome.com",
+          "url": "https://sumome.com/"
+        }
+      ]
+    },
+    {
+      "id": "payment-billing-integration",
+      "label": "Payment / Billing Integration",
+      "anchor": "payment-billing-integration",
+      "services": [
+        {
+          "id": "braintreepayments-com",
+          "name": "braintreepayments.com",
+          "url": "https://braintreepayments.com/"
+        },
+        {
+          "id": "taxratesapi-avalara-com",
+          "name": "taxratesapi.avalara.com",
+          "url": "http://taxratesapi.avalara.com/"
+        },
+        {
+          "id": "currencylayer-com",
+          "name": "currencylayer.com",
+          "url": "https://currencylayer.com/"
+        },
+        {
+          "id": "vatlayer-com",
+          "name": "vatlayer.com",
+          "url": "https://vatlayer.com/"
+        }
+      ]
+    },
+    {
+      "id": "docker-related",
+      "label": "Docker Related",
+      "anchor": "docker-related",
+      "services": [
+        {
+          "id": "arukas-cloud",
+          "name": "Arukas Cloud",
+          "url": "https://arukas.io/"
+        },
+        {
+          "id": "docker-cloud",
+          "name": "Docker Cloud",
+          "url": "https://cloud.docker.com"
+        },
+        {
+          "id": "docker-hub",
+          "name": "Docker Hub",
+          "url": "https://hub.docker.com"
+        },
+        {
+          "id": "quay-io",
+          "name": "quay.io",
+          "url": "https://quay.io/"
+        },
+        {
+          "id": "canister-io",
+          "name": "canister.io",
+          "url": "https://canister.io/"
+        }
+      ]
+    },
+    {
+      "id": "vagrant-related",
+      "label": "Vagrant Related",
+      "anchor": "vagrant-related",
+      "services": [
+        {
+          "id": "atlas-hashicorp-com",
+          "name": "atlas.hashicorp.com",
+          "url": "https://atlas.hashicorp.com/boxes/search"
+        },
+        {
+          "id": "vagrantbox-es",
+          "name": "vagrantbox.es",
+          "url": "http://vagrantbox.es/"
+        }
+      ]
+    },
+    {
+      "id": "miscellaneous",
+      "label": "Miscellaneous",
+      "anchor": "miscellaneous",
+      "services": [
+        {
+          "id": "apichangelog-com",
+          "name": "apichangelog.com",
+          "url": "https://apichangelog.com/"
+        },
+        {
+          "id": "docsapp-io",
+          "name": "docsapp.io",
+          "url": "https://www.docsapp.io/"
+        },
+        {
+          "id": "instadiff-com",
+          "name": "instadiff.com",
+          "url": "http://www.instadiff.com/"
+        },
+        {
+          "id": "fullcontact-com",
+          "name": "fullcontact.com",
+          "url": "https://fullcontact.com/developer/pricing/"
+        },
+        {
+          "id": "formlets-com",
+          "name": "formlets.com",
+          "url": "https://formlets.com/"
+        },
+        {
+          "id": "superfeedr-com",
+          "name": "superfeedr.com",
+          "url": "https://superfeedr.com/"
+        },
+        {
+          "id": "screenshotlayer-com",
+          "name": "screenshotlayer.com",
+          "url": "https://screenshotlayer.com/"
+        },
+        {
+          "id": "screenshotmachine-com",
+          "name": "screenshotmachine.com",
+          "url": "https://screenshotmachine.com/"
+        },
+        {
+          "id": "readme-io",
+          "name": "readme.io",
+          "url": "https://readme.io/"
+        },
+        {
+          "id": "formaholic-com",
+          "name": "formaholic.com",
+          "url": "https://formaholic.com"
+        }
+      ]
+    },
+    {
+      "id": "apis-data-and-ml",
+      "label": "APIs, Data and ML",
+      "anchor": "apis-data-and-ml",
+      "services": [
+        {
+          "id": "dreamfactory-com",
+          "name": "dreamfactory.com",
+          "url": "http://dreamfactory.com/"
+        },
+        {
+          "id": "monkeylearn-com",
+          "name": "monkeylearn.com",
+          "url": "http://monkeylearn.com/"
+        },
+        {
+          "id": "wit-ai",
+          "name": "wit.ai",
+          "url": "https://wit.ai/"
+        },
+        {
+          "id": "wolfram-com",
+          "name": "wolfram.com",
+          "url": "https://wolfram.com/language/"
+        },
+        {
+          "id": "parsehub-com",
+          "name": "parsehub.com",
+          "url": "https://parsehub.com/"
+        },
+        {
+          "id": "import-io",
+          "name": "import.io",
+          "url": "https://import.io/"
+        },
+        {
+          "id": "wrapapi-com",
+          "name": "wrapapi.com",
+          "url": "https://wrapapi.com/"
+        },
+        {
+          "id": "algorithmia-com",
+          "name": "algorithmia.com",
+          "url": "https://algorithmia.com/"
+        },
+        {
+          "id": "bigml-com",
+          "name": "bigml.com",
+          "url": "https://bigml.com/"
+        },
+        {
+          "id": "mashape-com",
+          "name": "mashape.com",
+          "url": "https://www.mashape.com/"
+        },
+        {
+          "id": "dominodatalab-com",
+          "name": "dominodatalab.com",
+          "url": "https://www.dominodatalab.com"
+        },
+        {
+          "id": "havenondemand-com",
+          "name": "havenondemand.com",
+          "url": "https://www.havenondemand.com"
+        },
+        {
+          "id": "restlet-com",
+          "name": "restlet.com",
+          "url": "http://restlet.com/products/apispark/"
+        },
+        {
+          "id": "scrapinghub-com",
+          "name": "scrapinghub.com",
+          "url": "http://scrapinghub.com"
+        },
+        {
+          "id": "context-io",
+          "name": "context.io",
+          "url": "https://context.io"
+        },
+        {
+          "id": "cloudrail-com",
+          "name": "cloudrail.com",
+          "url": "https://cloudrail.com"
+        }
+      ]
+    },
+    {
+      "id": "other-free-resources",
+      "label": "Other Free Resources",
+      "anchor": "other-free-resources",
+      "services": [
+        {
+          "id": "github-com-foss-for-dev",
+          "name": "github.com - FOSS for Dev",
+          "url": "https://github.com/httpsGithubParty/FOSS-for-Dev"
+        },
+        {
+          "id": "github-com-free-for-nonprofit",
+          "name": "github.com - Free for nonprofit",
+          "url": "https://github.com/pborreli/free-for-nonprofit"
+        },
+        {
+          "id": "getawesomeness",
+          "name": "getawesomeness",
+          "url": "https://getawesomeness.herokuapp.com"
+        },
+        {
+          "id": "education-github-com",
+          "name": "education.github.com",
+          "url": "https://education.github.com/pack"
+        }
+      ]
+    }
+  ]
+}

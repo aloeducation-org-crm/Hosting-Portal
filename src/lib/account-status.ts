@@ -38,6 +38,33 @@
  * must be classified, and the classification can be asserted in a test.
  */
 
+/** Explicit approval is separate from the onboarding wizard. NULL is legacy. */
+export function initialSignupApproval(mode = process.env.SIGNUP_APPROVAL_MODE): "PENDING" | "APPROVED" {
+  return mode === "open" ? "APPROVED" : "PENDING";
+}
+
+/** Explicit pilot holds must also revoke existing sessions; legacy sessions retain their old semantics. */
+export function explicitSignupHold(status: string | null | undefined): boolean {
+  return status != null && status !== "APPROVED";
+}
+
+export function signupApprovalRequired(user: {
+  signupApprovalStatus?: string | null;
+  onboardingCompleted: boolean;
+  role: { name: string };
+}): boolean {
+  if (user.signupApprovalStatus != null) return explicitSignupHold(user.signupApprovalStatus);
+  // Preserve the old policy for rows created before migration.
+  return !user.onboardingCompleted && !["SUPER_ADMIN", "ADMIN"].includes(user.role.name);
+}
+
+export const SIGNUP_APPROVAL_MESSAGE = "Your account needs approval from a super administrator before you can sign in.";
+
+/** An ordinary admin must not be able to create, take over or promote a super admin. */
+export function canManageUserRole(actor: string, target: string): boolean {
+  return actor === "SUPER_ADMIN" || (actor === "ADMIN" && target !== "SUPER_ADMIN" && target !== "ADMIN");
+}
+
 export type AccountTier = "verification-exempt" | "verification-required" | "administrator-required";
 
 /**

@@ -51,14 +51,8 @@ interface EmailAccount {
 interface EmailCampaign {
   id: string
   subject: string
-  body: string
   status: string
-  recipientList: string
-  recipientCount: number
-  openCount: number
-  clickCount: number
-  scheduledAt: string | null
-  sentAt: string | null
+  delivery: { total: number; accepted: number; pending: number; unknown: number } | null
   createdAt: string
 }
 
@@ -84,7 +78,6 @@ export default function EmailView() {
   const [campaignForm, setCampaignForm] = useState({
     subject: '',
     body: '',
-    recipients: '',
   })
 
   const fetchAccounts = async () => {
@@ -103,7 +96,7 @@ export default function EmailView() {
       const res = await fetch('/api/email/campaigns', getAuthHeaders())
       if (!res.ok) throw new Error('Failed to fetch campaigns')
       const data = await res.json()
-      setCampaigns(data.campaigns || [])
+      setCampaigns(data.data || [])
     } catch (err) {
       setCampaigns([])
     }
@@ -127,7 +120,7 @@ export default function EmailView() {
           if (!res.ok) throw new Error('Failed to fetch campaigns')
           const data = await res.json()
           if (!cancelled) {
-            setCampaigns(data.campaigns || [])
+            setCampaigns(data.data || [])
             setError(null)
             setLoading(false)
           }
@@ -165,25 +158,20 @@ export default function EmailView() {
 
   const handleCreateCampaign = async () => {
     if (!campaignForm.subject.trim() || !campaignForm.body.trim()) return
-    const recipientLines = campaignForm.recipients
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean)
     try {
       const res = await fetch('/api/email/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({
           subject: campaignForm.subject,
-          body: campaignForm.body,
-          recipientList: JSON.stringify(recipientLines),
-          recipientCount: recipientLines.length,
+          name: campaignForm.subject.slice(0, 160),
+          textContent: campaignForm.body,
         }),
       })
       if (!res.ok) throw new Error('Failed to create campaign')
-      toast.success('Campaign created')
+      toast.success('Draft saved. Queue pilot sends from Digital Marketing.')
       setCampaignDialogOpen(false)
-      setCampaignForm({ subject: '', body: '', recipients: '' })
+      setCampaignForm({ subject: '', body: '' })
       await fetchCampaigns()
     } catch {
       toast.error('Failed to create campaign')
@@ -344,31 +332,23 @@ export default function EmailView() {
                       <TableRow>
                         <TableHead>Subject</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead>Recipients</TableHead>
-                        <TableHead>Open Rate</TableHead>
-                        <TableHead>Click Rate</TableHead>
-                        <TableHead>Sent Date</TableHead>
+                        <TableHead>Provider accepted</TableHead>
+                        <TableHead>Created</TableHead>
                         <TableHead className="w-20"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {campaigns.map((campaign) => {
-                        const openRate = campaign.recipientCount > 0 ? ((campaign.openCount / campaign.recipientCount) * 100).toFixed(1) : '0.0'
-                        const clickRate = campaign.recipientCount > 0 ? ((campaign.clickCount / campaign.recipientCount) * 100).toFixed(1) : '0.0'
                         return (
                           <TableRow key={campaign.id}>
                             <TableCell className="font-medium">{campaign.subject}</TableCell>
                             <TableCell>
                               <Badge variant="secondary" className={campaignStatusColor(campaign.status)}>
-                                {campaign.status}
+                                {campaign.delivery || campaign.status === 'draft' ? campaign.status : 'Legacy · unverified'}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-gray-500 text-sm">{campaign.recipientCount}</TableCell>
-                            <TableCell className="text-gray-500 text-sm">{openRate}%</TableCell>
-                            <TableCell className="text-gray-500 text-sm">{clickRate}%</TableCell>
-                            <TableCell className="text-gray-400 text-sm">
-                              {campaign.sentAt ? format(new Date(campaign.sentAt), 'MMM d, yyyy') : '-'}
-                            </TableCell>
+                            <TableCell className="text-gray-500 text-sm">{campaign.delivery ? `${campaign.delivery.accepted}/${campaign.delivery.total}` : '—'}</TableCell>
+                            <TableCell className="text-gray-400 text-sm">{format(new Date(campaign.createdAt), 'MMM d, yyyy')}</TableCell>
                             <TableCell>
                               <Button
                                 type="button"
@@ -431,7 +411,7 @@ export default function EmailView() {
       <Dialog open={campaignDialogOpen} onOpenChange={setCampaignDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create Campaign</DialogTitle>
+            <DialogTitle>Create Campaign Draft</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
@@ -451,18 +431,7 @@ export default function EmailView() {
                 rows={6}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Recipients (one email per line)</Label>
-              <Textarea
-                value={campaignForm.recipients}
-                onChange={(e) => setCampaignForm(f => ({ ...f, recipients: e.target.value }))}
-                placeholder={"user1@example.com\nuser2@example.com\nuser3@example.com"}
-                rows={4}
-              />
-              <p className="text-xs text-gray-400">
-                {campaignForm.recipients.split('\n').filter(l => l.trim()).length} recipient(s)
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">This saves a draft only. The approved pilot audience is managed separately in Digital Marketing.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCampaignDialogOpen(false)}>Cancel</Button>
@@ -483,16 +452,9 @@ export default function EmailView() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between py-1 border-b">
                 <span className="text-muted-foreground">Status</span>
-                <Badge variant="secondary">{selectedCampaign.status}</Badge>
+                <Badge variant="secondary">{selectedCampaign.delivery || selectedCampaign.status === 'draft' ? selectedCampaign.status : 'Legacy · unverified'}</Badge>
               </div>
-              <div className="flex justify-between py-1 border-b">
-                <span className="text-muted-foreground">Recipients</span>
-                <span className="font-semibold">{selectedCampaign.recipientCount}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b">
-                <span className="text-muted-foreground">Opens / Clicks</span>
-                <span>{selectedCampaign.openCount} opens · {selectedCampaign.clickCount} clicks</span>
-              </div>
+              <p className="text-muted-foreground">{selectedCampaign.delivery ? `${selectedCampaign.delivery.accepted}/${selectedCampaign.delivery.total} provider accepted · ${selectedCampaign.delivery.unknown} unknown. Delivery has not been confirmed.` : 'No provider receipts.'}</p>
             </div>
           )}
           <DialogFooter>

@@ -18,6 +18,7 @@ import {
   getService,
   queryFreeServices,
   countServices,
+  catalogSource,
 } from "@/lib/free-for-dev/catalog";
 
 describe("free-for-dev catalog data", () => {
@@ -72,6 +73,22 @@ describe("free-for-dev catalog data", () => {
   });
 });
 
+describe("the requested jixserver archive", () => {
+  it("keeps all provider links with a separate pinned provenance and no historical pricing claims", () => {
+    const archive = catalogSource("jixserver");
+    expect(archive).toMatchObject({ historical: true, commit: "a6d2501c4d2566a3f518f08e51a23923edf65734" });
+    expect(archive.listUrl).toContain(archive.commit);
+    const rows = queryFreeServices({ source: "jixserver" });
+    expect(rows.total).toBe(463);
+    expect(rows.categories).toHaveLength(36);
+    expect(new Set(rows.services.map((row) => row.id)).size).toBe(rows.total);
+    expect(rows.services.every((row) => /^(https?:\/\/|stun:)/.test(row.url) && !row.summary && !row.details.length)).toBe(true);
+    expect(queryFreeServices({ source: "jixserver", categoryId: "email" }).total).toBe(29);
+    expect(queryFreeServices({ source: "jixserver", categoryId: "iaas" }).total).toBeGreaterThan(0);
+    expect(queryFreeServices({ source: "jixserver", categoryId: "dbaas" }).total).toBeGreaterThan(0);
+  });
+});
+
 describe("free-for-dev catalog queries", () => {
   it("filters by category", () => {
     const result = queryFreeServices({ categoryId: "dns" });
@@ -116,7 +133,8 @@ describe("free-for-dev page wiring", () => {
 
     const comp = fs.readFileSync(path.resolve("src/components/dashboard/FreeForDevCenter.tsx"), "utf8");
     expect(comp).toContain("export function FreeForDevCenter");
-    expect(comp).toContain('fetch("/api/free-for-dev"');
+    expect(comp).toContain('"/api/free-for-dev"');
+    expect(comp).toContain('"/api/free-for-dev?source=jixserver"');
     expect(comp).not.toContain("Math.random");
     expect(comp).not.toMatch(/mock|fake|dummy/i);
   });
