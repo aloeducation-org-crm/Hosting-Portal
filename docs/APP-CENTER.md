@@ -6,8 +6,8 @@ company installs the apps it wants with **its own branding and settings** —
 nothing about one tenant's configuration is shared with another's.
 
 Apps in the built-in catalog: **Accounting, CRM, HR, Projects, Helpdesk, AI,
-Documents, Website, Inventory, Marketing** — plus any custom app a platform
-admin creates.
+Documents, Website, Inventory, Marketing, Team Chat, and Cloud Projects
+(BaaS)** — plus any custom app a platform admin creates.
 
 ## Data model
 
@@ -19,7 +19,8 @@ Two tables, added by migration `20261028100000_app_center` (registered as
 | `app_definitions` | The catalog. One row per app (`slug` unique): name, summary, category, icon, accent color, `route` (deep link into the portal), `configSchema` (setting-field descriptors), `defaultSettings`, `status` (`active`/`hidden`), `isSystem` (built-ins are permanent). |
 | `company_apps` | One row per **(app, organization)** — unique index `company_apps_appId_organizationId_key`. Holds `enabled`, per-company `branding` overrides (`name`, `logoUrl`, `accentColor`) and `settings` overrides. FK cascade: deleting a definition or a company removes only its install rows. |
 
-`Organization.companyApps` is the back-relation. 85 → 87 Prisma models.
+`Organization.companyApps` is the back-relation. The migration adds the two
+App Center Prisma models without changing existing tables.
 
 **Effective view** (what a UI renders for a selected company) is computed by
 merging, never stored:

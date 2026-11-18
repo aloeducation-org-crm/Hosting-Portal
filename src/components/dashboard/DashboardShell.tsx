@@ -53,12 +53,14 @@ import {
   Package,
   Activity,
   Archive,
+  MessageCircle,
 } from "lucide-react";
 
 const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Cloud Projects (BaaS)", href: "/cloud", icon: Layers },
   { label: "App Center", href: "/apps", icon: LayoutGrid },
+  { label: "Team Chat", href: "/dashboard/communications", icon: MessageCircle },
   { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },
   { label: "AI Auto-Deploy", href: "/ai/auto-deploy", icon: Sparkles },

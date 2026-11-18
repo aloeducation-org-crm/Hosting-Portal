@@ -1,7 +1,7 @@
 # Deployment runbook — ALO Hosting Portal
 
 **Canonical application: the repository root.** There is exactly one
-`package.json`, one `prisma/schema.prisma` (SQLite, 119 models), one `src/`
+`package.json`, one `prisma/schema.prisma` (SQLite, 122 models), one `src/`
 tree, one `helpers/` tree and one `deploy/` tree. The legacy snapshot,
 duplicate helper/config/installer trees and duplicate Docker files were removed
 on 2026-11-09; see [AUDIT-REPORT.md](AUDIT-REPORT.md).

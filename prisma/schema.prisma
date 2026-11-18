@@ -255,8 +255,11 @@ model User {
   emailCampaigns     EmailCampaign[]
   alertRules         AlertRule[]
   usageRecords       UsageRecord[]
-  applications       Application[]
-  mfa                UserMfa?
+  applications             Application[]
+  createdChatConversations ChatConversation[] @relation("ChatConversationCreator")
+  chatParticipants         ChatParticipant[]
+  sentChatMessages         ChatMessage[]        @relation("ChatMessageSender")
+  mfa                      UserMfa?
 
   @@index([email])
   @@index([roleId])
@@ -321,10 +324,11 @@ model Organization {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  teams       Team[]
-  memberships Membership[]
-  websites    Website[]
-  companyApps CompanyApp[]
+  teams             Team[]
+  memberships       Membership[]
+  websites          Website[]
+  companyApps       CompanyApp[]
+  chatConversations ChatConversation[]
 
   @@index([ownerId])
   @@index([slug])
@@ -2272,6 +2276,67 @@ model CompanyApp {
   @@index([organizationId])
   @@index([appId])
   @@map("company_apps")
+}
+
+// ─── Self-hosted team chat ───────────────────────────────────────────────────
+// Tenant-scoped direct and group conversations. Access is participant-based,
+// while organization membership constrains who may be invited to a new room.
+
+model ChatConversation {
+  id             String    @id @default(uuid())
+  organizationId String
+  type           String    @default("GROUP") // DIRECT | GROUP
+  name           String?
+  directKey      String?   @unique // stable sorted participant key for one direct thread
+  createdById    String?
+  lastMessageAt  DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?             @relation("ChatConversationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@index([organizationId, lastMessageAt])
+  @@index([createdById])
+  @@map("chat_conversations")
+}
+
+model ChatParticipant {
+  id             String   @id @default(uuid())
+  conversationId String
+  userId         String
+  role           String   @default("MEMBER") // OWNER | MEMBER
+  muted          Boolean  @default(false)
+  joinedAt       DateTime @default(now())
+  lastReadAt     DateTime?
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id             String    @id @default(uuid())
+  conversationId String
+  senderId       String?
+  body           String
+  kind           String    @default("TEXT") // TEXT reserved for future typed messages
+  editedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?            @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
+  @@map("chat_messages")
 }
 
 // ─── Software Factory: Industry System Registry ─────────────────────────────

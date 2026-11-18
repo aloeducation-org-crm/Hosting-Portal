@@ -18,6 +18,8 @@ reports: use the commands below.
 | [`GIT-AUTODEPLOY.md`](GIT-AUTODEPLOY.md) | GitHub push → verified release pipeline |
 | [`DATABASE-RECOVERY-RUNBOOK.md`](DATABASE-RECOVERY-RUNBOOK.md) | SQLite recovery and drift handling |
 | [`ROADMAP-STATUS.md`](ROADMAP-STATUS.md) | honest capability status |
+| [`APP-CENTER.md`](APP-CENTER.md) | tenant app catalog, installation and branding model |
+| [`TEAM-CHAT.md`](TEAM-CHAT.md) | implemented self-hosted text-chat scope, security and API contract |
 | `../.env.example`, `../deploy/env/alo-hosting-panel.env.example` | the two environment templates |
 
 ## Historical records (do not read as current status)

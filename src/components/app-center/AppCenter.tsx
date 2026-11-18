@@ -28,6 +28,7 @@ import {
   Kanban,
   Palette,
   ReceiptText,
+  MessageCircle,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -137,6 +138,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Palette,
   ReceiptText,
   Building2,
+  MessageCircle,
 };
 
 function AppIcon({ name, className }: { name: string | null; className?: string }) {

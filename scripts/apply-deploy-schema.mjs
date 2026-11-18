@@ -123,6 +123,8 @@ const MIGRATIONS = [
   // Cloud Foundation v2: direct Git links, two-step deletion, sealed outbound
   // webhook material, worker bearer hashes, build cancellation and function RSS.
   { name: "20261104110000_cloud_foundation_v2", kind: "ADDITIVE" },
+  // Tenant-scoped self-hosted direct/group chat, participants and messages.
+  { name: "20261111120000_self_hosted_team_chat", kind: "ADDITIVE" },
   {
     name: "20261027093000_operation_jobs_platform_scope",
     kind: "REBUILD",
