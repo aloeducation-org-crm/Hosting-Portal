@@ -46,6 +46,7 @@ interface CatalogSource {
   commit: string | null;
   syncedAt: string;
   attribution: string;
+  historical?: boolean;
 }
 
 interface CatalogData {
@@ -63,36 +64,34 @@ export function FreeForDevCenter() {
   const [data, setData] = useState<CatalogData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<"community" | "jixserver">("community");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     try {
-      const res = await fetch("/api/free-for-dev", { cache: "no-store" });
+      const url = source === "jixserver" ? "/api/free-for-dev?source=jixserver" : "/api/free-for-dev";
+      const res = await fetch(url, { cache: "no-store", signal });
       const body = await res.json();
       if (!res.ok || !body.success) {
         throw new Error(body?.message ?? `catalog endpoint returned ${res.status}`);
       }
+      if (signal?.aborted) return;
       setData(body.data as CatalogData);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load the Free for Dev catalog");
+      if (!signal?.aborted) setError(e instanceof Error ? e.message : "Could not load the Free for Dev catalog");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, []);
+  }, [source]);
 
   useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      if (!cancelled) await load();
-    };
-    void tick();
-    return () => {
-      cancelled = true;
-    };
+    const controller = new AbortController();
+    void Promise.resolve().then(() => { if (!controller.signal.aborted) return load(controller.signal); });
+    return () => controller.abort();
   }, [load]);
 
   const visible = useMemo(() => {
@@ -126,8 +125,8 @@ export function FreeForDevCenter() {
           <h1 className="text-2xl font-bold text-slate-900 mt-1">Free for Dev</h1>
           <p className="text-sm text-slate-500">
             A directory of free-tier developer services — DNS, CDN, hosting, databases, email, monitoring and
-            more — curated from the community free-for.dev list. Free tiers change often: verify the current
-            limits with the provider before you rely on them.
+            more. These are directory listings, not connected services or promises of free usage.
+            Confirm current terms and limits before enrolling any provider.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -161,6 +160,15 @@ export function FreeForDevCenter() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2" aria-label="Catalog source">
+            {([ ["community", "Community directory"], ["jixserver", "Requested jixserver archive"] ] as const).map(([id, label]) => (
+              <Button key={id} variant={id === source ? "default" : "outline"} size="sm" disabled={loading} aria-pressed={id === source}
+                onClick={() => { if (id !== source) { setSource(id); setData(null); setCategory(""); setExpanded(new Set()); setError(null); } }}>
+                {label}
+              </Button>
+            ))}
+          </div>
+          {data?.source.historical && <p className="text-sm text-amber-800">Historical names and links only. Some listings have changed or shut down.</p>}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input

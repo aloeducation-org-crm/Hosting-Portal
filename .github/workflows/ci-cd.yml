@@ -198,9 +198,11 @@ jobs:
           test -s .next/standalone/automation-worker.cjs
           test -s .next/standalone/deploy-worker.cjs
           test -s .next/standalone/static-edge.cjs
+          test -s .next/standalone/messaging-worker.cjs
           node --check .next/standalone/automation-worker.cjs
           node --check .next/standalone/deploy-worker.cjs
           node --check .next/standalone/static-edge.cjs
+          node --check .next/standalone/messaging-worker.cjs
           # Every shipped unit must point at a bundle this build produced. A unit
           # whose ExecStart target is missing fails at start, after a release has
           # already been activated.
@@ -217,6 +219,8 @@ jobs:
                 ;;
             esac
           done
+      - name: Packaged signup and messaging smoke (loopback only)
+        run: node scripts/smoke-pilot-messaging.mjs
       # The digest travels inside the artifact and is also published as a job
       # output, so the host can prove the payload it received is the payload CI
       # built — and the two values can be compared in the run summary.

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { PilotMessagingPanel } from "./PilotMessagingPanel";
 import {
   BarChart3,
   CheckCircle2,
@@ -38,9 +39,7 @@ interface MarketingMetrics {
   leadCount: number;
   dealCount: number;
   pipelineValue: number;
-  totalSent: number;
-  avgOpenRate: number;
-  avgClickRate: number;
+  totalAccepted: number;
 }
 
 interface CampaignRow {
@@ -49,9 +48,7 @@ interface CampaignRow {
   subject: string;
   status: string;
   recipientCount: number;
-  sentCount: number;
-  openCount: number;
-  clickCount: number;
+  delivery: { total: number; accepted: number; unknown: number; pending: number } | null;
   createdAt: string;
 }
 
@@ -130,7 +127,8 @@ export function DigitalMarketingHub() {
   const [campName, setCampName] = useState("");
   const [campSubject, setCampSubject] = useState("");
   const [campBody, setCampBody] = useState("");
-  const [sendNow, setSendNow] = useState(false);
+  const [canQueuePilot, setCanQueuePilot] = useState(false);
+  const [canManageLegacyNewsletter, setCanManageLegacyNewsletter] = useState(false);
   const [savingCamp, setSavingCamp] = useState(false);
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const [newSubscriberEmail, setNewSubscriberEmail] = useState("");
@@ -161,6 +159,8 @@ export function DigitalMarketingHub() {
         throw new Error(body?.message || "Failed to load Digital Marketing Hub");
       }
       setMetrics(body.data.metrics);
+      setCanQueuePilot(body.data.canQueuePilot === true);
+      setCanManageLegacyNewsletter(body.data.canManageLegacyNewsletter === true);
       setCampaigns(body.data.campaigns ?? []);
       setSubscribers(body.data.subscribers ?? []);
       setLeads(body.data.leads ?? []);
@@ -287,13 +287,11 @@ export function DigitalMarketingHub() {
           name: campName,
           subject: campSubject,
           textContent: campBody,
-          content: `<div style="font-family:sans-serif;padding:20px">${campBody.replace(/\n/g, "<br/>")}</div>`,
-          sendImmediately: sendNow,
         }),
       });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body?.message || "Failed to save campaign");
-      toast.success(sendNow ? "Campaign dispatched!" : "Campaign saved as draft!");
+      toast.success("Campaign saved as draft");
       setCampName("");
       setCampSubject("");
       setCampBody("");
@@ -306,6 +304,7 @@ export function DigitalMarketingHub() {
   };
 
   const handleDispatchCampaign = async (campaignId: string) => {
+    if (!confirm("Queue this draft for all opted-in pilot email recipients? No paid route will be used.")) return;
     setDispatchingId(campaignId);
     try {
       const res = await fetch("/api/marketing", {
@@ -316,7 +315,7 @@ export function DigitalMarketingHub() {
       });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body?.message || "Dispatch failed");
-      toast.success(body.message || "Campaign sent!");
+      toast.success(body.message || "Campaign queued");
       await loadHub();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Dispatch failed");
@@ -327,17 +326,17 @@ export function DigitalMarketingHub() {
 
   const handleAddSubscriber = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSubscriberEmail.trim()) return;
+    if (!newSubscriberEmail.trim() || !confirm("Confirm this address separately opted in to the legacy newsletter. This does not add a pilot recipient.")) return;
     try {
       const res = await fetch("/api/marketing", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_subscriber", email: newSubscriberEmail.trim() }),
+        body: JSON.stringify({ action: "add_subscriber", email: newSubscriberEmail.trim(), optedIn: true }),
       });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body?.message || "Could not add subscriber");
-      toast.success("Subscriber added to audience");
+      toast.success("Legacy newsletter entry recorded");
       setNewSubscriberEmail("");
       await loadHub();
     } catch (err) {
@@ -406,12 +405,11 @@ export function DigitalMarketingHub() {
           source: leadSource,
           dealTitle: leadDealTitle || undefined,
           dealValue: leadDealValue ? Number(leadDealValue) : undefined,
-          subscribeNewsletter: true,
         }),
       });
       const body = await res.json();
       if (!res.ok || !body.success) throw new Error(body?.message || "Lead capture failed");
-      toast.success("Lead synced to CRM Contacts, Pipeline Deals & Newsletter!");
+      toast.success("Lead saved to CRM. No newsletter signup was recorded.");
       setLeadFirst("");
       setLeadLast("");
       setLeadEmail("");
@@ -482,7 +480,7 @@ export function DigitalMarketingHub() {
             </div>
             <div className="text-2xl font-bold mt-2">{metrics?.campaignCount ?? 0}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              {metrics?.totalSent ?? 0} total emails dispatched
+              {metrics?.totalAccepted ?? 0} accepted by provider (not delivery)
             </p>
           </CardContent>
         </Card>
@@ -490,12 +488,12 @@ export function DigitalMarketingHub() {
         <Card>
           <CardContent className="pt-5">
             <div className="flex items-center justify-between text-xs uppercase text-muted-foreground font-medium">
-              <span>Engagement Rate</span>
+              <span>Delivery Evidence</span>
               <BarChart3 className="h-4 w-4 text-violet-600" />
             </div>
-            <div className="text-2xl font-bold mt-2">{metrics?.avgOpenRate ?? 0}%</div>
+            <div className="text-lg font-semibold mt-2">Acceptance only</div>
             <p className="text-xs text-muted-foreground mt-1">
-              Open rate · {metrics?.avgClickRate ?? 0}% CTR
+              Delivery and engagement tracking are not enabled.
             </p>
           </CardContent>
         </Card>
@@ -772,7 +770,7 @@ export function DigitalMarketingHub() {
             <Card className="lg:col-span-5">
               <CardHeader>
                 <CardTitle className="text-base">Create Email Broadcast</CardTitle>
-                <CardDescription>Send immediately or save as draft to your Newsletter + CRM Lead audience.</CardDescription>
+                <CardDescription>Save a plain-text draft first. Only the approved pilot account can queue it, and only to opted-in pilot contacts.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
                 <form onSubmit={handleCreateCampaign} className="space-y-3">
@@ -788,16 +786,13 @@ export function DigitalMarketingHub() {
                     <Label>Message Body</Label>
                     <Textarea rows={4} placeholder="Write your announcement or offer..." value={campBody} onChange={(e) => setCampBody(e.target.value)} required />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Switch checked={sendNow} onCheckedChange={setSendNow} id="send-now" />
-                    <Label htmlFor="send-now" className="text-xs">Send immediately upon creation</Label>
-                  </div>
                   <Button type="submit" disabled={savingCamp} className="w-full bg-[#E8501A] hover:bg-[#d14413] text-white">
-                    <Send className="h-4 w-4 mr-2" /> {sendNow ? "Create & Dispatch Broadcast" : "Save Broadcast Draft"}
+                    <Send className="h-4 w-4 mr-2" /> Save Broadcast Draft
                   </Button>
                 </form>
 
-                <div className="border-t pt-4">
+                {canManageLegacyNewsletter && <div className="border-t pt-4">
+                  <p className="text-xs text-muted-foreground mb-2">Legacy newsletter entries are not used for pilot sends.</p>
                   <form onSubmit={handleAddSubscriber} className="flex gap-2">
                     <Input
                       type="email"
@@ -810,7 +805,7 @@ export function DigitalMarketingHub() {
                       <Plus className="h-4 w-4 mr-1" /> Add
                     </Button>
                   </form>
-                </div>
+                </div>}
               </CardContent>
             </Card>
 
@@ -827,11 +822,11 @@ export function DigitalMarketingHub() {
                       <div key={c.id} className="p-3 flex items-center justify-between gap-2 text-xs">
                         <div>
                           <div className="font-semibold text-sm">{c.name}</div>
-                          <div className="text-muted-foreground">Subject: {c.subject} · Recipients: {c.recipientCount}</div>
+                          <div className="text-muted-foreground">Subject: {c.subject}{c.delivery ? ` · ${c.delivery.accepted}/${c.delivery.total} provider accepted · ${c.delivery.pending} pending · ${c.delivery.unknown} unknown` : ""}</div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline">{c.status}</Badge>
-                          {c.status !== "sent" && (
+                          <Badge variant="outline">{c.delivery ? c.status.replaceAll("_", " ") : c.status === "draft" ? "Draft" : "Legacy · no receipt"}</Badge>
+                          {canQueuePilot && c.status === "draft" && (
                             <Button
                               type="button"
                               size="sm"
@@ -839,7 +834,7 @@ export function DigitalMarketingHub() {
                               disabled={dispatchingId === c.id}
                               onClick={() => void handleDispatchCampaign(c.id)}
                             >
-                              <Send className="h-3.5 w-3.5 mr-1" /> Send Now
+                              <Send className="h-3.5 w-3.5 mr-1" /> Queue Email
                             </Button>
                           )}
                         </div>
@@ -872,6 +867,7 @@ export function DigitalMarketingHub() {
               </CardContent>
             </Card>
           </div>
+          <div className="mt-5"><PilotMessagingPanel /></div>
         </TabsContent>
 
         {/* TAB 4: UTM Link & Attribution Builder */}
@@ -958,7 +954,7 @@ export function DigitalMarketingHub() {
             <Card className="lg:col-span-5">
               <CardHeader>
                 <CardTitle className="text-base">Capture Campaign Lead → CRM Pipeline</CardTitle>
-                <CardDescription>Atomically creates a CRM Contact, optional Sales Deal, and Newsletter subscription.</CardDescription>
+                <CardDescription>Creates a CRM contact and an optional sales deal. This does not subscribe the contact to email or SMS.</CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleCaptureLead} className="space-y-3">

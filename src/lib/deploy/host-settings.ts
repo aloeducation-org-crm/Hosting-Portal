@@ -52,6 +52,7 @@ export const RESERVED_SERVICE_NAMES: readonly string[] = [
   "alo-automation-worker",
   "alo-deploy-worker",
   "alo-static-edge",
+  "alo-messaging-worker",
   "alo-server-hosting",
   "alo-port-8080-validator",
   "alo-encrypted-backup",

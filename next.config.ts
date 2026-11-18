@@ -76,6 +76,16 @@ const nextConfig: NextConfig = {
         source: "/:path*",
         headers: baseHeaders,
       },
+      {
+        // The global Next headers otherwise override the route handler's
+        // stricter policy. This exact URL carries an unsubscribe-only token.
+        source: "/api/messaging/unsubscribe",
+        headers: [
+          { key: "Cache-Control", value: "no-store" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Content-Security-Policy", value: "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" },
+        ],
+      },
     ];
   },
   typescript: {

@@ -208,6 +208,12 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+enum SignupApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ─── User ────────────────────────────────────────────────────────────────────
 
 model User {
@@ -221,6 +227,7 @@ model User {
   roleId              String
   isActive            Boolean      @default(true)
   onboardingCompleted Boolean      @default(false)
+  signupApprovalStatus SignupApprovalStatus?
   onboardingStep      Int          @default(0)
   failedLoginAttempts Int          @default(0)
   isLocked            Boolean      @default(false)
@@ -1753,7 +1760,7 @@ model EmailCampaign {
   subject      String
   fromAddress  String?
   fromName     String?
-  status       String   @default("draft") // draft, scheduled, sending, sent, failed
+  status       String   @default("draft") // draft, queued, accepted, partial, review, not_sent; legacy states retained
   content      String?  // HTML body
   textContent  String?  // plain text body
   recipientCount Int    @default(0)
@@ -1769,10 +1776,101 @@ model EmailCampaign {
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
+  pilotMessages PilotMessage[]
+
   @@index([userId])
   @@index([status])
   @@index([scheduledAt])
   @@map("email_campaigns")
+}
+
+// ─── Sister-company messaging pilot ───────────────────────────────────────────
+
+enum PilotMessageChannel {
+  EMAIL
+  SMS
+}
+
+enum PilotMessageState {
+  QUEUED
+  SUBMITTING
+  ACCEPTED
+  NO_FREE_CAPACITY
+  SUPPRESSED
+  REJECTED
+  UNKNOWN
+  EXPIRED
+}
+
+enum PilotAttemptState {
+  STARTED
+  ACCEPTED
+  LIMIT
+  REJECTED
+  UNKNOWN
+}
+
+model PilotRecipient {
+  id          String              @id @default(uuid())
+  ownerId     String
+  channel     PilotMessageChannel
+  address     String
+  consentRef  String
+  consentAt   DateTime            @default(now())
+  suppressedAt DateTime?
+  unsubscribeHash String?         @unique
+  unsubscribeSecret String?
+
+  messages PilotMessage[]
+
+  @@unique([ownerId, channel, address])
+  @@map("pilot_recipients")
+}
+
+model PilotMessage {
+  id              String             @id @default(uuid())
+  ownerId         String
+  recipientId     String
+  channel         PilotMessageChannel
+  requestKey      String
+  campaignId      String?
+  smsText         String?
+  state           PilotMessageState  @default(QUEUED)
+  reason          String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  recipient PilotRecipient @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+  campaign  EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  attempts  PilotMessagingAttempt[]
+
+  @@unique([ownerId, requestKey])
+  @@index([ownerId, channel, createdAt])
+  @@index([ownerId, state, createdAt])
+  @@index([state, updatedAt])
+  @@index([campaignId, state])
+  @@map("pilot_messages")
+}
+
+// Every reservation consumes local quota, even if the request is rejected or
+// the worker crashes. No credentials or provider response bodies are stored.
+model PilotMessagingAttempt {
+  id           String            @id @default(uuid())
+  messageId    String
+  provider     String
+  state        PilotAttemptState @default(STARTED)
+  remoteId     String?
+  httpStatus   Int?
+  blockedUntil DateTime?
+  createdAt    DateTime          @default(now())
+  finishedAt   DateTime?
+
+  message PilotMessage @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@unique([messageId, provider])
+  @@index([provider, createdAt])
+  @@index([provider, blockedUntil])
+  @@map("pilot_messaging_attempts")
 }
 
 // ─── DNS Records ───────────────────────────────────────────────────────────────

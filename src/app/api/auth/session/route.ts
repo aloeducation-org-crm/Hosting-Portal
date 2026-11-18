@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getToken } from "next-auth/jwt";
 import { apiSuccess, apiError } from "@/lib/response";
+import { explicitSignupHold } from "@/lib/account-status";
 import { env } from "@/lib/env";
 
 export async function GET(request: NextRequest) {
@@ -40,6 +41,10 @@ export async function GET(request: NextRequest) {
         apiError("User not found", "NOT_FOUND", undefined, 401),
         { status: 401 }
       );
+    }
+
+    if (!user.isActive || user.isLocked || explicitSignupHold(user.signupApprovalStatus)) {
+      return NextResponse.json(apiError("Account access unavailable", "FORBIDDEN", undefined, 403), { status: 403 });
     }
 
     const permissions = user.role.permissions.map((rp) => rp.permission.name);

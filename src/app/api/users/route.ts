@@ -1,7 +1,9 @@
+import type { Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { requireSession, isAdminRole } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { canManageUserRole, initialSignupApproval, signupApprovalRequired } from "@/lib/account-status";
 import { hashPassword } from "@/lib/password";
 
 function handleErr(e: unknown): NextResponse {
@@ -29,16 +31,14 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get("search");
     const roleFilter = searchParams.get("role");
 
-    const where: Record<string, unknown> = {};
-    if (search) {
-      where.OR = [
-        { email: { contains: search } },
-        { name: { contains: search } },
-      ];
-    }
-    if (roleFilter && roleFilter !== "ALL") {
-      where.role = { name: roleFilter };
-    }
+    const filters: Prisma.UserWhereInput[] = [];
+    if (search) filters.push({ OR: [{ email: { contains: search } }, { name: { contains: search } }] });
+    if (roleFilter && roleFilter !== "ALL") filters.push({ role: { name: roleFilter as NonNullable<Prisma.EnumUserRoleFilter["equals"]> } });
+    if (searchParams.get("review") === "pending") filters.push({ OR: [
+      { signupApprovalStatus: "PENDING" },
+      { signupApprovalStatus: null, onboardingCompleted: false, role: { name: { notIn: ["SUPER_ADMIN", "ADMIN"] } } },
+    ] });
+    const where: Prisma.UserWhereInput = { AND: filters };
 
     const [users, total] = await Promise.all([
       db.user.findMany({
@@ -56,11 +56,12 @@ export async function GET(request: NextRequest) {
       db.user.count({ where }),
     ]);
 
-    const safeUsers = users.map(({ passwordHash: _, ...user }) => user);
+    const safeUsers = users.map(({ passwordHash: _, ...user }) => ({ ...user, approvalRequired: signupApprovalRequired(user) }));
 
     return NextResponse.json(
       apiSuccess({
         users: safeUsers,
+        canReviewSignup: auth.role === "SUPER_ADMIN",
         pagination: {
           page,
           limit,
@@ -119,6 +120,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!canManageUserRole(auth.role, role.name)) {
+      throw apiError("Only a super administrator can create an administrator account", "FORBIDDEN", undefined, 403);
+    }
     const passwordHash = await hashPassword(body.password);
 
     const user = await db.user.create({
@@ -129,8 +133,8 @@ export async function POST(request: NextRequest) {
         passwordHash,
         roleId: role.id,
         isActive: body.isActive ?? true,
-        emailVerified: new Date(),
-        onboardingCompleted: true,
+        onboardingCompleted: false,
+        signupApprovalStatus: initialSignupApproval(),
       },
       include: { role: true },
     });

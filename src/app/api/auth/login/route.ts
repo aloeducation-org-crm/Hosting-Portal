@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { verifyPassword } from "@/lib/password";
 import { env } from "@/lib/env";
 import { sessionCookieName, sessionCookieOptions } from "@/lib/session-cookie";
+import { signupApprovalRequired, SIGNUP_APPROVAL_MESSAGE } from "@/lib/account-status";
 import { createMfaChallengeToken } from "@/lib/mfa-challenge";
 
 const loginSchema = z.object({
@@ -122,10 +123,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Admin approval gate: unapproved non-admin users cannot log in.
-    // `onboardingCompleted` is false until an administrator approves the account.
-    const isAdminUser = user.role.name === "SUPER_ADMIN" || user.role.name === "ADMIN";
-    if (!user.onboardingCompleted && !isAdminUser) {
+    if (signupApprovalRequired(user)) {
       await db.auditLog.create({
         data: {
           actorUserId: user.id,
@@ -142,7 +140,7 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json(
         apiError(
-          "Account pending admin approval. Please wait for an administrator to activate your account.",
+          SIGNUP_APPROVAL_MESSAGE,
           "PENDING_APPROVAL",
           undefined,
           403

@@ -11,6 +11,7 @@ import {
   openMfaSecret,
   sealMfaSecret,
 } from "@/lib/mfa-challenge";
+import { signupApprovalRequired, SIGNUP_APPROVAL_MESSAGE } from "@/lib/account-status";
 import { needsSealing } from "@/lib/secret-store";
 
 function handleErr(e: unknown): NextResponse {
@@ -126,10 +127,9 @@ export async function POST(request: NextRequest) {
       throw apiError("Account is disabled", "ACCOUNT_DISABLED", undefined, 403);
     }
 
-    const isAdminUser = user.role.name === "SUPER_ADMIN" || user.role.name === "ADMIN";
-    if (!user.onboardingCompleted && !isAdminUser) {
+    if (signupApprovalRequired(user)) {
       throw apiError(
-        "Account pending admin approval. Please wait for an administrator to activate your account.",
+        SIGNUP_APPROVAL_MESSAGE,
         "PENDING_APPROVAL",
         undefined,
         403,

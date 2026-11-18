@@ -14,13 +14,13 @@
  * with its own module registry and its own `globalThis`, so one copy per file is
  * both sufficient and necessary.
  *
- * Nothing here creates or migrates tables: the copy already contains the real
- * schema and the real seed rows (users, roles, permissions, websites), so tests
- * keep seeing exactly what they saw before — they just cannot damage it.
+ * Only the additive, universal auth column is applied here. Feature suites can
+ * still exercise migrations on their own copies of the pre-release fixture.
  */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const installed = globalThis as unknown as { __aloIsolatedDbRoot?: string };
 
@@ -36,6 +36,15 @@ function install(): string {
     for (const suffix of ["-wal", "-shm"]) {
       if (fs.existsSync(source + suffix)) fs.copyFileSync(source + suffix, target + suffix);
     }
+    // Prisma reads scalar user fields on nearly every session request. Apply
+    // the same additive auth migration to the copy, not the tracked fixture.
+    const scratch = new DatabaseSync(target);
+    try {
+      const cols = scratch.prepare('PRAGMA table_info("users")').all();
+      if (!cols.some((c) => c.name === "signupApprovalStatus")) {
+        scratch.exec(fs.readFileSync(path.resolve("prisma/migrations/20261118183000_signup_approval/migration.sql"), "utf8"));
+      }
+    } finally { scratch.close(); }
   }
 
   process.env.DATABASE_URL = `file:${target}`;

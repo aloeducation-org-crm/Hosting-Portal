@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { UserRole } from "@prisma/client";
 import { v4 as uuidv4 } from "uuid";
-import { getToken } from "next-auth/jwt";
 import { apiSuccess, apiError } from "@/lib/response";
 import { db } from "@/lib/db";
 import { applyEntitlementChange, freeTierAuthorization, type PlanRecord } from "@/lib/billing/entitlements";
 import { logger } from "@/lib/logger";
-import { resolveSignupRole } from "@/lib/account-status";
+import { initialSignupApproval, resolveSignupRole, SIGNUP_APPROVAL_MESSAGE } from "@/lib/account-status";
 import { hashPassword } from "@/lib/password";
 import { sendEmail } from "@/lib/smtp";
 import { env } from "@/lib/env";
@@ -37,24 +36,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /**
-     * Role selection (SEC-06).
-     *
-     * The previous check gated SUPER_ADMIN, ADMIN, DEVOPS and SUPPORT but left
-     * RESELLER open, and a reseller is treated as an administrator on several
-     * surfaces. `resolveSignupRole` is the single policy: every role that
-     * carries administrative reach is reduced to CLIENT for a self-service
-     * signup, and a requested reseller capability is recorded so an
-     * administrator can review and grant it.
-     */
-    const callerToken = await getToken({ req: request, secret: env.NEXTAUTH_SECRET }).catch(
-      () => null
-    );
-    const callerRole = callerToken?.role as string | undefined;
-    const roleDecision = resolveSignupRole({
-      requested: input.role,
-      callerIsAdministrator: callerRole === "SUPER_ADMIN" || callerRole === "ADMIN",
-    });
+    // This is self-service even if a signed-in administrator opens the form.
+    const roleDecision = resolveSignupRole({ requested: input.role, callerIsAdministrator: false });
+    const signupApprovalStatus = initialSignupApproval();
     const targetRoleName = roleDecision.role;
     if (roleDecision.downgraded) {
       logger.warn(
@@ -95,6 +79,7 @@ export async function POST(request: NextRequest) {
         roleId: role.id,
         companyName: input.companyName?.trim() || null,
         onboardingCompleted: false,
+        signupApprovalStatus,
         onboardingStep: 0,
       },
       include: {
@@ -103,7 +88,8 @@ export async function POST(request: NextRequest) {
     });
 
     /**
-     * Provision the default free plan, if the platform has one.
+     * Provision a default free plan only in explicitly open signup mode.
+     * Pending pilot accounts select a plan during post-approval onboarding.
      *
      * SEC-03: this used to write the Subscription row directly, which made it a
      * fourth place the entitlement rule was not applied. The plan is selected by
@@ -112,10 +98,10 @@ export async function POST(request: NextRequest) {
      * the grant goes through the single entitlement service, which refuses any
      * non-zero plan.
      */
-    const starterPlan = await db.plan.findFirst({
+    const starterPlan = signupApprovalStatus === "APPROVED" ? await db.plan.findFirst({
       where: { isActive: true, priceCents: 0 },
       orderBy: { priceCents: "asc" },
-    });
+    }) : null;
     if (starterPlan) {
       await applyEntitlementChange({
         userId: newUser.id,
@@ -152,7 +138,7 @@ export async function POST(request: NextRequest) {
       html: `
         <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
           <h2 style="color: #1e293b; margin-top: 0;">Welcome to ALO Labs Hosting Portal</h2>
-          <p style="color: #475569; line-height: 1.6;">Hi ${newUser.name}, thank you for creating your account. Please confirm your email address to activate all hosting features.</p>
+          <p style="color: #475569; line-height: 1.6;">Confirm your email address. ${signupApprovalStatus === "PENDING" ? "A super administrator must then approve your account before you can sign in." : "You can sign in after verifying your email."}</p>
           <p style="margin: 24px 0;">
             <a href="${verifyUrl}" style="background: #E8501A; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">Verify Email Address</a>
           </p>
@@ -178,9 +164,8 @@ export async function POST(request: NextRequest) {
 
     const permissions = newUser.role.permissions.map((rp) => rp.permission.name);
 
-    // No auto-login: new accounts are pending admin approval. The session
-    // cookie is not set and no token is returned, so the client cannot
-    // authenticate until an administrator approves the account.
+    // Never issue a session from signup. Verify the email and, in pilot mode,
+    // wait for the explicit super-admin review before signing in.
     const response = NextResponse.json(
       apiSuccess(
         {
@@ -189,16 +174,19 @@ export async function POST(request: NextRequest) {
           email: newUser.email,
           role: newUser.role.name,
           permissions,
-          plan: "starter",
+          plan: starterPlan?.name.toLowerCase() ?? null,
           emailVerified: false,
           emailSent: emailResult.sent,
+          approvalRequired: signupApprovalStatus === "PENDING",
           onboardingCompleted: false,
           onboardingStep: 0,
           verificationToken:
             process.env.NODE_ENV !== "production" ? verificationToken : undefined,
           createdAt: newUser.createdAt,
         },
-        emailResult.sent ? "User registered successfully. Pending admin approval." : "User registered, but the verification email was not sent. Use resend verification after SMTP is configured.",
+        !emailResult.sent
+          ? "User registered, but verification email was not sent. Use resend after SMTP is configured."
+          : signupApprovalStatus === "PENDING" ? SIGNUP_APPROVAL_MESSAGE : "Registration saved. Verify your email address.",
         201
       ),
       { status: 201 }

@@ -33,6 +33,7 @@ function VerifyEmailContent() {
   const [email, setEmail] = useState(initialEmail);
   const [token, setToken] = useState(initialToken);
   const [verified, setVerified] = useState(false);
+  const [approvalRequired, setApprovalRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [message, setMessage] = useState("");
@@ -73,6 +74,7 @@ function VerifyEmailContent() {
         return;
       }
       setVerified(true);
+      setApprovalRequired(body.data?.approvalRequired === true);
       setMessage(body.message || "Your email has been verified!");
     } catch {
       setError("Failed to verify email. Please try again.");
@@ -105,6 +107,7 @@ function VerifyEmailContent() {
       }
       if (body.data?.alreadyVerified) {
         setVerified(true);
+        setApprovalRequired(body.data?.approvalRequired === true);
         setMessage("Your email address is already verified.");
       } else {
         if (body.data?.verificationToken) {
@@ -138,8 +141,8 @@ function VerifyEmailContent() {
         </CardTitle>
         <CardDescription className="text-slate-500">
           {verified
-            ? "Your ALO Labs Hosting account is verified and ready."
-            : "We sent a verification token via SMTP. Paste your token or click Verify below."}
+            ? (approvalRequired ? "Your email is verified. Wait for a super administrator to approve sign-in." : "Your email is verified. You can continue to sign in.")
+            : "Enter the code from your verification email, or request a new email below."}
         </CardDescription>
       </CardHeader>
 
@@ -159,18 +162,11 @@ function VerifyEmailContent() {
         {verified ? (
           <div className="space-y-3 pt-2">
             <Button
-              onClick={() => router.push("/onboarding")}
+              onClick={() => router.push("/login")}
               className="w-full bg-[#E8501A] hover:bg-[#C73D12] text-white font-semibold"
             >
-              Continue to Onboarding Wizard
+              Continue to sign in
               <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => router.push("/dashboard")}
-              className="w-full"
-            >
-              Go directly to Dashboard
             </Button>
           </div>
         ) : (
@@ -233,10 +229,10 @@ function VerifyEmailContent() {
               </Button>
 
               <Link
-                href="/onboarding"
+                href="/login"
                 className="text-xs font-medium text-slate-500 hover:text-slate-800"
               >
-                Skip for now &rarr;
+                Sign in &rarr;
               </Link>
             </div>
           </form>

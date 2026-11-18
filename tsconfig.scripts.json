@@ -8,6 +8,7 @@
   "include": [
     "scripts/orchestrator-worker.ts",
     "scripts/static-edge.ts",
+    "scripts/messaging-worker.ts",
     "scripts/build-automation-worker.mjs",
     "src/**/*.ts"
   ],

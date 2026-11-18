@@ -69,6 +69,15 @@ the dashboard distinguishes observed origin health from public HTTPS. See the
 [staging pilot runbook](docs/MANAGED-STATIC-HOSTING.md) for setup, evidence and
 limitations. This path is disabled by default and is not a live hosting claim.
 
+## Sister-company pilot (opt-in messaging)
+
+New pilot registrations need a verified mailbox and super-admin approval.
+The approved pilot can queue plain-text marketing email and one-recipient SMS
+with durable, capped routing and no paid fallback. See the
+[operator runbook](docs/FREE-MESSAGING-PILOT.md) for prerequisites, locally
+reproduced evidence and the live-acceptance hold. The Free for Dev page also
+includes the requested historical directory, separate from active integrations.
+
 ## AI
 
 Providers (`src/lib/ai/providers.ts`) form an ordered OpenAI-compatible chain
@@ -85,13 +94,18 @@ answers or fake quotas. See [AI-PROVIDER-INTEGRATION.md](AI-PROVIDER-INTEGRATION
 ```bash
 npm ci                       # Node >= 22
 npm run db:generate          # Prisma client (engine downloads stubbed)
-cp .env.example .env         # then fill in secrets; see docs/UNIFIED_PROJECT_ENVIRONMENT_VARIABLES.md
-npm run dev                  # http://localhost:3101
+mkdir -p .local
+cp -n db/custom.db .local/development.db
+export DATABASE_URL="file:$PWD/.local/development.db"
+npm run db:sync              # apply additive schema updates to the copy
+cp -n .env.example .env     # use local APP_URL / NEXTAUTH_URL and local secrets
+npm run dev                  # check the local address printed by Next.js
 ```
 
 `db/custom.db` is a **development fixture**, not a production database. It has
-all 127 tables and three seeded users whose passwords are randomly generated at
-seed time and never printed. To create a development login you control:
+the historical baseline schema and three seeded users whose passwords are randomly generated at
+seed time and never printed. To create a development login in the migrated copy,
+keep the absolute local `DATABASE_URL` exported and run:
 
 ```bash
 SEED_ADMIN_PASSWORD='choose-a-local-password' npm run db:seed

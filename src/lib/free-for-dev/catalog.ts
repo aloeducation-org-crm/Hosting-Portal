@@ -11,6 +11,7 @@
  * so both the dashboard UI and API routes can share the same query helpers.
  */
 import dataJson from "./data.json";
+import jixserverJson from "./jixserver.json";
 
 export interface FreeForDevService {
   id: string;
@@ -40,6 +41,7 @@ export interface FreeForDevSource {
   /** ISO date (YYYY-MM-DD) of the last sync. */
   syncedAt: string;
   attribution: string;
+  historical?: boolean;
 }
 
 interface FreeForDevData {
@@ -47,7 +49,19 @@ interface FreeForDevData {
   categories: FreeForDevCategory[];
 }
 
-const data = dataJson as unknown as FreeForDevData;
+const data: FreeForDevData = dataJson;
+const jixserver: FreeForDevData = {
+  source: jixserverJson.source,
+  categories: jixserverJson.categories.map((category) => ({
+    ...category,
+    services: category.services.map((service) => ({ ...service, summary: "", details: [] })),
+  })),
+};
+export type CatalogId = "community" | "jixserver";
+export function catalogSource(id: CatalogId = "community") { return (id === "jixserver" ? jixserver : data).source; }
+function categoriesFor(id: CatalogId = "community"): readonly FreeForDevCategory[] {
+  return id === "jixserver" ? jixserver.categories : data.categories;
+}
 
 export const FREE_FOR_DEV_SOURCE: FreeForDevSource = data.source;
 export const FREE_FOR_DEV_CATEGORIES: readonly FreeForDevCategory[] = Object.freeze(data.categories);
@@ -67,6 +81,7 @@ export interface CategorizedService extends FreeForDevService {
 export interface FreeServiceQuery {
   /** Restrict to one category id (see `listCategories`). */
   categoryId?: string;
+  source?: CatalogId;
   /** Case-insensitive match against name, summary and detail text. */
   q?: string;
   /** Maximum number of services to return (matched total is still reported). */
@@ -80,8 +95,8 @@ export interface FreeServiceQueryResult {
   services: CategorizedService[];
 }
 
-export function listCategories(): CategorySummary[] {
-  return FREE_FOR_DEV_CATEGORIES.map((c) => ({
+export function listCategories(source?: CatalogId): CategorySummary[] {
+  return categoriesFor(source).map((c) => ({
     id: c.id,
     label: c.label,
     anchor: c.anchor,
@@ -89,8 +104,8 @@ export function listCategories(): CategorySummary[] {
   }));
 }
 
-export function getCategory(id: string): FreeForDevCategory | null {
-  return FREE_FOR_DEV_CATEGORIES.find((c) => c.id === id) ?? null;
+export function getCategory(id: string, source?: CatalogId): FreeForDevCategory | null {
+  return categoriesFor(source).find((c) => c.id === id) ?? null;
 }
 
 export function getService(id: string): CategorizedService | null {
@@ -117,11 +132,11 @@ function matchesQuery(service: FreeForDevService, needle: string): boolean {
  * Services keep their upstream order within each category.
  */
 export function queryFreeServices(query: FreeServiceQuery = {}): FreeServiceQueryResult {
-  const categories = listCategories();
+  const categories = listCategories(query.source);
   const needle = (query.q ?? "").trim().toLowerCase();
 
   const matched: CategorizedService[] = [];
-  for (const category of FREE_FOR_DEV_CATEGORIES) {
+  for (const category of categoriesFor(query.source)) {
     if (query.categoryId && category.id !== query.categoryId) continue;
     for (const service of category.services) {
       if (needle && !matchesQuery(service, needle)) continue;

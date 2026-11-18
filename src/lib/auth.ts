@@ -5,6 +5,7 @@ import { apiError } from "@/lib/response";
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { env, isUnsafeDefaultSecret } from "@/lib/env";
+import { explicitSignupHold, SIGNUP_APPROVAL_MESSAGE } from "@/lib/account-status";
 import { authOptions, handlers, auth } from "@/lib/nextauth";
 
 export { authOptions, handlers, auth };
@@ -173,6 +174,11 @@ export async function requireSession(request: NextRequest): Promise<AuthUser> {
 
   if (!user.isActive || user.isLocked) {
     throw apiError("Account is disabled or locked", "FORBIDDEN", undefined, 403);
+  }
+
+  // Re-read approval on every authenticated API call, including stale JWTs.
+  if (explicitSignupHold(user.signupApprovalStatus)) {
+    throw apiError(SIGNUP_APPROVAL_MESSAGE, "PENDING_APPROVAL", undefined, 403);
   }
 
   return {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { requireSession, isAdminRole } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { canManageUserRole, signupApprovalRequired } from "@/lib/account-status";
 import { hashPassword } from "@/lib/password";
 
 function handleErr(e: unknown): NextResponse {
@@ -67,60 +68,43 @@ export async function PUT(
     }
 
     const body = await request.json();
-
-    const existing = await db.user.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json(
-        apiError("User not found", "NOT_FOUND", undefined, 404),
-        { status: 404 }
-      );
-    }
-
-    const updateData: Record<string, unknown> = {};
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.companyName !== undefined) updateData.companyName = body.companyName;
-    if (body.isActive !== undefined) updateData.isActive = body.isActive;
-    if (body.isLocked !== undefined) {
-      updateData.isLocked = body.isLocked;
-      updateData.lockedUntil = body.isLocked
-        ? new Date(Date.now() + 24 * 60 * 60 * 1000)
-        : null;
-      if (!body.isLocked) {
-        updateData.failedLoginAttempts = 0;
+    const passwordHash = body.password ? await hashPassword(body.password) : undefined;
+    const user = await db.$transaction(async (tx) => {
+      const existing = await tx.user.findUnique({ where: { id }, include: { role: true } });
+      if (!existing) throw apiError("User not found", "NOT_FOUND", undefined, 404);
+      if (!canManageUserRole(auth.role, existing.role.name) || (auth.role !== "SUPER_ADMIN" && signupApprovalRequired(existing))) {
+        throw apiError("Account requires a super administrator", "FORBIDDEN", undefined, 403);
       }
-    }
-    if (body.roleId || body.role) {
-      const role = body.roleId
-        ? await db.role.findUnique({ where: { id: body.roleId } })
-        : await db.role.findUnique({ where: { name: body.role } });
-      if (!role) {
-        return NextResponse.json(
-          apiError("Role not found", "NOT_FOUND", undefined, 404),
-          { status: 404 }
-        );
+      if (body.isActive === true && signupApprovalRequired(existing)) {
+        throw apiError("Use the signup review to approve this account", "PENDING_APPROVAL", undefined, 409);
       }
-      updateData.roleId = role.id;
-    }
-    if (body.password) {
-      updateData.passwordHash = await hashPassword(body.password);
-    }
+      const role = body.roleId || body.role
+        ? await tx.role.findUnique({ where: body.roleId ? { id: body.roleId } : { name: body.role } })
+        : existing.role;
+      if (!role) throw apiError("Role not found", "NOT_FOUND", undefined, 404);
+      if (!canManageUserRole(auth.role, role.name)) throw apiError("Role change not permitted", "FORBIDDEN", undefined, 403);
 
-    const user = await db.user.update({
-      where: { id },
-      data: updateData,
-      include: { role: true },
-    });
-
-    await db.auditLog.create({
-      data: {
-        actorUserId: auth.id,
-        actorEmail: auth.email,
-        actorRole: auth.role,
-        action: "USER_UPDATE",
-        resourceType: "User",
-        resourceId: user.id,
-        result: "SUCCESS",
-      },
+      const updated = await tx.user.update({
+        where: { id },
+        data: {
+          name: body.name,
+          companyName: body.companyName,
+          isActive: body.isActive,
+          passwordHash,
+          roleId: role.id,
+          ...(typeof body.isLocked === "boolean" ? {
+            isLocked: body.isLocked,
+            lockedUntil: body.isLocked ? new Date(Date.now() + 24 * 60 * 60 * 1000) : null,
+            ...(body.isLocked ? {} : { failedLoginAttempts: 0 }),
+          } : {}),
+        },
+        include: { role: true },
+      });
+      await tx.auditLog.create({ data: {
+        actorUserId: auth.id, actorEmail: auth.email, actorRole: auth.role,
+        action: "USER_UPDATE", resourceType: "User", resourceId: id, result: "SUCCESS",
+      } });
+      return updated;
     });
 
     const { passwordHash: _, ...safeUser } = user;
@@ -153,26 +137,17 @@ export async function DELETE(
       );
     }
 
-    const existing = await db.user.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json(
-        apiError("User not found", "NOT_FOUND", undefined, 404),
-        { status: 404 }
-      );
-    }
-
-    await db.user.delete({ where: { id } });
-
-    await db.auditLog.create({
-      data: {
-        actorUserId: auth.id,
-        actorEmail: auth.email,
-        actorRole: auth.role,
-        action: "USER_DELETE",
-        resourceType: "User",
-        resourceId: id,
-        result: "SUCCESS",
-      },
+    await db.$transaction(async (tx) => {
+      const existing = await tx.user.findUnique({ where: { id }, include: { role: true } });
+      if (!existing) throw apiError("User not found", "NOT_FOUND", undefined, 404);
+      if (!canManageUserRole(auth.role, existing.role.name) || (auth.role !== "SUPER_ADMIN" && signupApprovalRequired(existing))) {
+        throw apiError("Account requires a super administrator", "FORBIDDEN", undefined, 403);
+      }
+      await tx.user.delete({ where: { id } });
+      await tx.auditLog.create({ data: {
+        actorUserId: auth.id, actorEmail: auth.email, actorRole: auth.role,
+        action: "USER_DELETE", resourceType: "User", resourceId: id, result: "SUCCESS",
+      } });
     });
 
     return NextResponse.json(apiSuccess({ deleted: true }));

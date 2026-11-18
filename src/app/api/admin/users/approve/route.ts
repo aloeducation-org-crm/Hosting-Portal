@@ -1,112 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
-import { requireSession, isAdminRole } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { signupApprovalRequired } from "@/lib/account-status";
 
-function handleErr(e: unknown): NextResponse {
-  if (e && typeof e === "object" && "status" in e) {
-    const a = e as ApiResponse;
-    return NextResponse.json(a, { status: a.status });
-  }
-  return NextResponse.json(apiError("Internal server error"), { status: 500 });
-}
+const decision = z.object({
+  userId: z.string().min(1).max(100),
+  action: z.enum(["approve", "reject", "suspend"]),
+});
 
-/**
- * PATCH /api/admin/users/approve
- * Body: { userId: string, action: "approve" | "reject" | "suspend" }
- *
- * Approve:   sets onboardingCompleted = true, isActive = true
- * Reject:    sets onboardingCompleted = false, isActive = false
- * Suspend:   sets isActive = false (keeps onboardingCompleted as-is)
- */
+/** A verified mailbox and a named human review enable sign-in, not onboarding completion. */
 export async function PATCH(request: NextRequest) {
   try {
-    const auth = await requireSession(request);
+    const operator = await requireSuperAdmin(request);
+    const parsed = decision.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) throw apiError("Invalid account review action", "VALIDATION_ERROR", undefined, 400);
+    const { userId, action } = parsed.data;
+    if (userId === operator.id) throw apiError("Cannot review your own account", "FORBIDDEN", undefined, 403);
 
-    if (!isAdminRole(auth.role)) {
-      return NextResponse.json(
-        apiError("Only administrators can approve users", "FORBIDDEN", undefined, 403),
-        { status: 403 }
-      );
-    }
-
-    const body = await request.json();
-    const { userId, action } = body;
-
-    if (!userId || typeof userId !== "string") {
-      return NextResponse.json(
-        apiError("userId is required", "VALIDATION_ERROR", undefined, 400),
-        { status: 400 }
-      );
-    }
-
-    if (!["approve", "reject", "suspend"].includes(action)) {
-      return NextResponse.json(
-        apiError("Invalid action. Must be 'approve', 'reject', or 'suspend'", "VALIDATION_ERROR", undefined, 400),
-        { status: 400 }
-      );
-    }
-
-    const user = await db.user.findUnique({ where: { id: userId }, include: { role: true } });
-    if (!user) {
-      return NextResponse.json(
-        apiError("User not found", "NOT_FOUND", undefined, 404),
-        { status: 404 }
-      );
-    }
-
-    // Cannot modify your own account through this endpoint
-    if (user.id === auth.id) {
-      return NextResponse.json(
-        apiError("Cannot modify your own account through this endpoint", "FORBIDDEN", undefined, 403),
-        { status: 403 }
-      );
-    }
-
-    let updateData: any = {};
-
-    switch (action) {
-      case "approve":
-        updateData = {
-          onboardingCompleted: true,
-          isActive: true,
-        };
-        break;
-      case "reject":
-        updateData = {
-          onboardingCompleted: false,
-          isActive: false,
-        };
-        break;
-      case "suspend":
-        updateData = {
-          isActive: false,
-        };
-        break;
-    }
-
-    const updated = await db.user.update({
-      where: { id: userId },
-      data: updateData,
-      include: { role: true },
+    const updated = await db.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({ where: { id: userId }, include: { role: true } });
+      if (!user) throw apiError("User not found", "NOT_FOUND", undefined, 404);
+      if (action !== "suspend" && (!signupApprovalRequired(user) || user.signupApprovalStatus === "REJECTED")) {
+        throw apiError("Account is not pending review", "CONFLICT", undefined, 409);
+      }
+      if (action === "approve" && !user.emailVerified) {
+        throw apiError("Verify the account's email before approval", "EMAIL_NOT_VERIFIED", undefined, 409);
+      }
+      const account = await tx.user.update({
+        where: { id: userId },
+        data: action === "approve"
+          ? { signupApprovalStatus: "APPROVED", isActive: true }
+          : action === "reject" ? { signupApprovalStatus: "REJECTED", isActive: false } : { isActive: false },
+        select: { id: true, signupApprovalStatus: true, isActive: true, onboardingCompleted: true },
+      });
+      await tx.auditLog.create({ data: {
+        actorUserId: operator.id, actorEmail: operator.email, actorRole: operator.role,
+        action: `USER_${action.toUpperCase()}`, resourceType: "User", resourceId: userId, result: "SUCCESS",
+      } });
+      return account;
     });
-
-    await db.auditLog.create({
-      data: {
-        actorUserId: auth.id,
-        actorEmail: auth.email,
-        actorRole: auth.role,
-        action: `USER_${action.toUpperCase()}`,
-        resourceType: "User",
-        resourceId: userId,
-        result: "SUCCESS",
-      },
-    });
-
-    const { passwordHash: _, ...safeUser } = updated;
-
-    return NextResponse.json(apiSuccess(safeUser, `User ${action}d`, 200));
-  } catch (e) {
-    return handleErr(e);
+    return NextResponse.json(apiSuccess(updated, "Account review recorded"));
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error) {
+      const response = error as ApiResponse;
+      return NextResponse.json(response, { status: response.status });
+    }
+    return NextResponse.json(apiError("Internal server error"), { status: 500 });
   }
 }

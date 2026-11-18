@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { secureSessionCookiesEnabled } from "@/lib/session-cookie";
 import { verifyUserMfaCode, openMfaSecret, sealMfaSecret } from "@/lib/mfa-challenge";
+import { initialSignupApproval, signupApprovalRequired } from "@/lib/account-status";
 import { needsSealing } from "@/lib/secret-store";
 
 declare module "next-auth" {
@@ -51,6 +52,21 @@ function isConfiguredOAuthSecret(value: string | undefined): boolean {
   if (trimmed.length < 8) return false;
   const lower = trimmed.toLowerCase();
   return !lower.includes("replace_with") && !lower.includes("placeholder") && !lower.startsWith("not-configured");
+}
+
+async function githubMailboxVerified(accessToken: string, expected: string): Promise<boolean> {
+  try {
+    const response = await fetch("https://api.github.com/user/emails?per_page=100", {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" },
+      redirect: "error", cache: "no-store", signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) return false;
+    const addresses: unknown = await response.json();
+    return Array.isArray(addresses) && addresses.some((item) =>
+      item?.verified === true && typeof item.email === "string" && item.email.trim().toLowerCase() === expected);
+  } catch {
+    return false;
+  }
 }
 
 function buildAuthProviders(): NextAuthOptions["providers"] {
@@ -108,12 +124,7 @@ function buildAuthProviders(): NextAuthOptions["providers"] {
           return null;
         }
 
-        // Admin approval gate parity with /api/auth/login: unapproved non-admin
-        // accounts must not bypass approval through NextAuth CredentialsProvider.
-        const isAdminUser = PRIVILEGED_ROLES.has(user.role.name);
-        if (!user.onboardingCompleted && !isAdminUser) {
-          return null;
-        }
+        if (signupApprovalRequired(user)) return null;
 
         // MFA enforcement gate: when TOTP MFA is enabled, credentials sign-in
         // requires a valid TOTP or backup code (never silently bypasses MFA).
@@ -241,6 +252,13 @@ export const authOptions: NextAuthOptions = {
         let dbUser = existingAccount?.user ?? null;
 
         if (!dbUser) {
+          // NextAuth's GitHub profile alone is not proof of ownership of the
+          // selected email. Confirm it before creating or linking any new row.
+          if (account.provider === "github") {
+            if (!account.access_token || !await githubMailboxVerified(account.access_token, normalizedEmail)) return false;
+          } else if ((profile as { email_verified?: boolean } | undefined)?.email_verified !== true) {
+            return false;
+          }
           const emailMatch = await db.user.findUnique({
             where: { email: normalizedEmail },
             include: { role: true, mfa: true },
@@ -276,7 +294,7 @@ export const authOptions: NextAuthOptions = {
                 roleId: clientRole.id,
                 emailVerified: new Date(),
                 onboardingCompleted: false,
-                lastLoginAt: new Date(),
+                signupApprovalStatus: initialSignupApproval(),
               },
               include: { role: true, mfa: true },
             });
@@ -302,12 +320,7 @@ export const authOptions: NextAuthOptions = {
           return false;
         }
 
-        // Admin approval gate: newly created or unapproved non-admin OAuth accounts
-        // cannot bypass operator approval.
-        const isAdminUser = PRIVILEGED_ROLES.has(dbUser.role.name);
-        if (!dbUser.onboardingCompleted && !isAdminUser) {
-          return false;
-        }
+        if (signupApprovalRequired(dbUser)) return false;
 
         await db.account.upsert({
           where: {
