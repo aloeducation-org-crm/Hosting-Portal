@@ -50,7 +50,7 @@ async function tick() {
   inTick = true;
   await heartbeat();
   try {
-    const result = await runAutomationTick({ workerId, maxJobs });
+    const result = await runAutomationTick({ workerId, maxJobs, workerProcess: true });
     lastSuccessAt = new Date().toISOString();
     lastError = null;
     consecutiveFailures = 0;
@@ -60,6 +60,7 @@ async function tick() {
   } catch (error) {
     lastError = error instanceof Error ? error.message.slice(0, 300) : "unknown";
     consecutiveFailures += 1;
+    if (once) process.exitCode = 1;
     logger.error({ workerId, error, consecutiveFailures }, "automation tick failed");
     if (!once && consecutiveFailures >= MAX_CONSECUTIVE_TICK_FAILURES) {
       // Crash-only design: the supervisor (systemd, PM2, the run loop that

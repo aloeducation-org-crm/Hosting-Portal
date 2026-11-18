@@ -61,6 +61,14 @@ footer links and the sitemap. The retired storefront (`/pricing`, `/hosting/*`,
 `next.config.ts`; its catalogue and `GET /api/marketing/domain-check` (real RDAP)
 remain available.
 
+## Managed static hosting (opt-in)
+
+Verified customers on an active plan can queue a build-free public GitHub site
+from `/deployments/static`. An independent static edge serves the pinned release;
+the dashboard distinguishes observed origin health from public HTTPS. See the
+[staging pilot runbook](docs/MANAGED-STATIC-HOSTING.md) for setup, evidence and
+limitations. This path is disabled by default and is not a live hosting claim.
+
 ## AI
 
 Providers (`src/lib/ai/providers.ts`) form an ordered OpenAI-compatible chain

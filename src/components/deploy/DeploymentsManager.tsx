@@ -173,6 +173,9 @@ export function DeploymentsManager() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" asChild>
+            <Link href="/deployments/static"><Rocket className="mr-2 h-4 w-4 text-[#E8501A]" /> Managed static hosting</Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
             <Link href="/ai/auto-deploy"><Rocket className="mr-2 h-4 w-4 text-[#E8501A]" /> AI Auto-Deploy Studio</Link>
           </Button>
           <Button variant="outline" size="sm" asChild>

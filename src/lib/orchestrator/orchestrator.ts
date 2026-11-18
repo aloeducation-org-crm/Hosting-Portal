@@ -24,6 +24,7 @@
  *      deployment redactor before it reaches the database or a log.
  */
 import { randomUUID, createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { redact, collectSecrets } from "@/lib/deploy/redact";
@@ -101,11 +102,8 @@ export interface OrchestratorOptions {
   /**
    * How many jobs may run concurrently for one lock key.
    *
-   * 1 (the default) is enforced *inside* the atomic claim and is safe on a
-   * single SQLite/libSQL writer. Values above 1 are best-effort only: the
-   * pre-check is not atomic with the claim, so a multi-node deployment needs a
-   * real distributed queue (Redis/BullMQ) before raising it. That trade-off is
-   * documented rather than hidden.
+   * The peer count and claim share a SQLite/libSQL write transaction. This
+   * does not provide admission control across independent database replicas.
    */
   maxConcurrentPerKey?: number;
   /** Risk level from which a human approval is mandatory. */
@@ -203,6 +201,9 @@ export class Orchestrator {
       if (!privileged && row.createdById !== actor?.id && website?.ownerId !== actor?.id) {
         throw new WorkerError("TENANT_MISMATCH", "Project belongs to another customer", false);
       }
+    } else if (request.resourceType === "StaticHostingSite") {
+      const site = await db.staticHostingSite.findUnique({ where: { id: request.resourceId }, select: { ownerId: true } });
+      if (!site || site.ownerId !== actor?.id) throw new WorkerError("NOT_FOUND", "Static hosting site not found", false);
     } else if (!privileged) {
       throw new WorkerError("FORBIDDEN", "This infrastructure resource requires an administrator grant", false);
     }
@@ -432,7 +433,7 @@ export class Orchestrator {
    */
   async runNext(
     workerId: string,
-    opts: { lockKey?: string; kinds?: WorkerKind[]; jobId?: string } = {},
+    opts: { lockKey?: string; kinds?: WorkerKind[]; excludeKinds?: WorkerKind[]; jobId?: string } = {},
   ): Promise<string | null> {
     // With an explicit jobId this is a *targeted* run: it must never fall back to
     // claiming some other job, or one worker silently executes another's queue.
@@ -453,44 +454,31 @@ export class Orchestrator {
     if (job.attempts >= job.maxAttempts) return null;
     if (job.requiresApproval && (!job.approvedAt || this.now().getTime() - job.approvedAt.getTime() > APPROVAL_TTL_MS)) return null;
 
-    if (job.lockKey) {
-      const running = await db.operationJob.count({
-        where: { lockKey: job.lockKey, status: { in: ["RUNNING", "VERIFYING", "ROLLING_BACK"] } },
+    // The contender is QUEUED, so filtering *that row* with NOT RUNNING never
+    // excludes a different holder of the same key. Read the holders and
+    // claim the next row inside one SQLite write transaction (BEGIN IMMEDIATE).
+    const claim = async (client: Pick<Prisma.TransactionClient, "operationJob">) => {
+      if (job.lockKey) {
+        const running = await client.operationJob.count({
+          where: { lockKey: job.lockKey, status: { in: ["RUNNING", "VERIFYING", "ROLLING_BACK"] } },
+        });
+        if (running >= this.options.maxConcurrentPerKey) return { count: 0 };
+      }
+      const now = this.now();
+      const timeoutMs = parseOutput(job.output).meta?.timeoutMs ?? this.timeoutFor(job.workerKind as WorkerKind | null);
+      return client.operationJob.updateMany({
+        where: {
+          id: jobId, lockKey: job.lockKey, status: { in: ["QUEUED", "RETRYING"] },
+          attempts: job.attempts, availableAt: { lte: now },
+          ...(job.requiresApproval ? { approvedAt: { gte: new Date(now.getTime() - APPROVAL_TTL_MS) } } : {}),
+        },
+        data: {
+          status: "RUNNING", attempts: { increment: 1 }, startedAt: job.startedAt ?? now,
+          leaseExpiresAt: new Date(now.getTime() + timeoutMs + this.options.leaseBufferMs), leasedBy: workerId, availableAt: now,
+        },
       });
-      if (running >= this.options.maxConcurrentPerKey) return null;
-    }
-
-    const now = this.now();
-    const timeoutMs = parseOutput(job.output).meta?.timeoutMs ?? this.timeoutFor(job.workerKind as WorkerKind | null);
-    const lease = new Date(now.getTime() + timeoutMs + this.options.leaseBufferMs);
-    const strictSerial = job.lockKey !== null && this.options.maxConcurrentPerKey <= 1;
-
-    const claimed = await db.operationJob.updateMany({
-      where: {
-        id: jobId,
-        status: { in: ["QUEUED", "RETRYING"] },
-        attempts: { lt: job.maxAttempts },
-        availableAt: { lte: now },
-        ...(job.requiresApproval ? { approvedAt: { gte: new Date(now.getTime() - APPROVAL_TTL_MS) } } : {}),
-        ...(strictSerial
-          ? {
-              NOT: {
-                lockKey: job.lockKey,
-                status: { in: ["RUNNING", "VERIFYING", "ROLLING_BACK"] },
-                leaseExpiresAt: { gt: now },
-              },
-            }
-          : {}),
-      },
-      data: {
-        status: "RUNNING",
-        attempts: job.attempts + 1,
-        startedAt: job.startedAt ?? now,
-        leaseExpiresAt: lease,
-        leasedBy: workerId,
-        availableAt: now,
-      },
-    });
+    };
+    const claimed = job.lockKey ? await db.$transaction(claim, { timeout: 10_000 }) : await claim(db);
     if (claimed.count !== 1) return null;
     await this.appendEvent(jobId, 5, `claimed by ${workerId} (attempt ${job.attempts + 1})`);
     return jobId;
@@ -504,7 +492,7 @@ export class Orchestrator {
    */
   async claim(
     workerId: string,
-    opts: { lockKey?: string; kinds?: WorkerKind[]; jobId?: string } = {},
+    opts: { lockKey?: string; kinds?: WorkerKind[]; excludeKinds?: WorkerKind[]; jobId?: string } = {},
   ): Promise<string | null> {
     if (opts.jobId) return await this.claimSpecific(workerId, opts.jobId);
     const now = this.now();
@@ -513,8 +501,11 @@ export class Orchestrator {
         status: { in: ["QUEUED", "RETRYING"] },
         availableAt: { lte: now },
         ...(opts.lockKey !== undefined ? { lockKey: opts.lockKey } : {}),
-        ...(opts.kinds?.length ? { workerKind: { in: opts.kinds } } : {}),
-        OR: [{ requiresApproval: false }, { approvedAt: { not: null } }],
+        AND: [
+          ...(opts.kinds?.length ? [{ workerKind: { in: opts.kinds } }] : []),
+          ...(opts.excludeKinds?.length ? [{ OR: [{ workerKind: null }, { workerKind: { notIn: opts.excludeKinds } }] }] : []),
+          { OR: [{ requiresApproval: false }, { approvedAt: { not: null } }] },
+        ],
       },
       orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
       take: 25,

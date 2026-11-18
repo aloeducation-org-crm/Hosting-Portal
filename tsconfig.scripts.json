@@ -7,6 +7,7 @@
   },
   "include": [
     "scripts/orchestrator-worker.ts",
+    "scripts/static-edge.ts",
     "scripts/build-automation-worker.mjs",
     "src/**/*.ts"
   ],

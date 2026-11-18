@@ -54,6 +54,7 @@
  */
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { staticHostingConfig } from "@/lib/hosting/static-config";
 
 export type EntitlementSource = "payment" | "admin_grant" | "free_tier";
 
@@ -191,11 +192,12 @@ export interface PlanUsage {
  * its slot.
  */
 export async function measurePlanUsage(userId: string): Promise<PlanUsage> {
-  const sites = await db.website.count({ where: { ownerId: userId } });
+  const websites = await db.website.count({ where: { ownerId: userId, deletedAt: null } });
+  const managedSites = staticHostingConfig() ? await db.staticHostingSite.count({ where: { ownerId: userId, withdrawnAt: null } }) : 0;
   const databases = await db.databaseInstance.count({
     where: { deletedAt: null, website: { ownerId: userId } },
   });
-  return { sites, databases };
+  return { sites: websites + managedSites, databases };
 }
 
 /**

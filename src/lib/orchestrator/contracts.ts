@@ -25,6 +25,7 @@ export const WORKER_KINDS = [
   "AI_DIAGNOSIS",
   "NATIVE_BUILD_PLAN",
   "CODE_GENERATION",
+  "STATIC_HOSTING",
 ] as const;
 
 export type WorkerKind = (typeof WORKER_KINDS)[number];

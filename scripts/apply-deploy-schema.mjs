@@ -193,6 +193,7 @@ const MIGRATIONS = [
   // column + lookup index so a run can be found from a log line that only
   // carries the traceId. Resumability reuses the existing steps column.
   { name: "20261115120000_ai_workflow_assertions_trace", kind: "ADDITIVE" },
+  { name: "20261118120000_static_hosting", kind: "ADDITIVE" },
 ];
 
 function registry() {

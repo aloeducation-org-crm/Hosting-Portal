@@ -197,8 +197,10 @@ jobs:
           test -s .next/standalone/server.js
           test -s .next/standalone/automation-worker.cjs
           test -s .next/standalone/deploy-worker.cjs
+          test -s .next/standalone/static-edge.cjs
           node --check .next/standalone/automation-worker.cjs
           node --check .next/standalone/deploy-worker.cjs
+          node --check .next/standalone/static-edge.cjs
           # Every shipped unit must point at a bundle this build produced. A unit
           # whose ExecStart target is missing fails at start, after a release has
           # already been activated.
@@ -208,6 +210,7 @@ jobs:
             target="$(sed -n 's|^ExecStart=/usr/bin/node \([^ ]*\).*|\1|p' "$unit")"
             [ -n "$target" ] || continue
             case "$target" in
+              /usr/local/lib/alo-static-edge/static-edge.cjs) test -s .next/standalone/static-edge.cjs ;;
               *.cjs)
                 relative="${target#/opt/alo-hosting/current/}"
                 test -s "$relative" || { echo "::error::$unit points at missing $target (expected $relative from this build)"; exit 1; }

@@ -43,6 +43,8 @@ ProtectControlGroups=true
 LockPersonality=true
 ReadWritePaths=/var/lib/alo-hosting
 ReadWritePaths=-/srv/alo-sites
+# Optional managed static content volume, separate from the panel database.
+ReadWritePaths=-/var/lib/alo-static/releases
 ReadWritePaths=-/var/backups/alo-sites
 ReadWritePaths=-/opt/alo-hosting/logs
 ReadWritePaths=-/opt/alo-hosting/current/.next/cache

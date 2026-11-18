@@ -1,0 +1,33 @@
+# Optional read-only serving plane. Do not enable it until the host and the
+# dedicated customer content zone have been approved. See docs/MANAGED-STATIC-HOSTING.md.
+[Unit]
+Description=ALO managed static website edge
+After=network.target
+
+[Service]
+Type=simple
+User=alo-static-edge
+Group=alo-static-edge
+SupplementaryGroups=alo-static-content
+EnvironmentFile=/etc/alo-hosting/static-edge.env
+ExecStart=/usr/bin/node /usr/local/lib/alo-static-edge/static-edge.cjs
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/etc/alo-hosting -/opt/alo-hosting -/var/lib/alo-hosting -/srv/alo-sites -/var/backups/alo-sites
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+LockPersonality=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

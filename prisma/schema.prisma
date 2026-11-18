@@ -91,6 +91,8 @@ enum WorkerKind {
   PLATFORM_OPS
   AI_DIAGNOSIS
   NATIVE_BUILD_PLAN
+  CODE_GENERATION
+  STATIC_HOSTING
 }
 
 enum RiskLevel {
@@ -870,6 +872,7 @@ model OperationJob {
   @@index([type])
   @@index([requestId])
   @@index([createdAt])
+  @@index([resourceType, resourceId, type, createdAt])
   @@index([status, availableAt])
   @@index([lockKey])
   @@index([correlationId])
@@ -3224,4 +3227,29 @@ model AutomationProfileVersion {
   @@unique([profileId, version])
   @@index([status])
   @@map("automation_profile_versions")
+}
+
+// Initial, managed static hosting. These are not privileged Website/GitProject
+// rows: legacy server helpers may not act on user content in this data plane.
+model StaticHostingSite {
+  id             String   @id @default(uuid())
+  ownerId        String
+  planId         String
+  subscriptionId String
+  requestId      String
+  hostname       String   @unique
+  repository     String
+  requestedRef   String?
+  sourceBranch   String?
+  commitSha      String?
+  treeSha        String?
+  initialJobId   String?  @unique
+  withdrawnAt    DateTime?
+  queueError     String?
+  createdAt      DateTime @default(now())
+
+  @@unique([ownerId, requestId])
+  @@index([ownerId, createdAt])
+  @@index([initialJobId, queueError, createdAt])
+  @@map("static_hosting_sites")
 }

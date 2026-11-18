@@ -67,7 +67,7 @@ export const autonomousTaskSchema = z
       projectId: z.string().min(1).max(128),
       baseCommit: z.string().regex(/^[a-f0-9]{40}$/),
       allowedPaths: z.array(z.string().min(1).max(240)).min(1).max(20),
-      snapshot: z.record(z.union([z.string(), z.null()])),
+      snapshot: z.record(z.string(), z.union([z.string(), z.null()])),
     }),
     /** Which provider to use for generation. */
     providerId: z.string().regex(/^[a-z0-9-]{1,64}$/),
