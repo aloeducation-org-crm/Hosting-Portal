@@ -30,12 +30,12 @@ export function contentSha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
-function safePath(value: string): boolean {
+export function safePath(value: string): boolean {
   return !/[\s\x00-\x1f\x7f]/.test(value) && /^[a-zA-Z0-9_./-]+$/.test(value) && !value.startsWith("/") &&
     value.split("/").every((part) => part !== "" && part !== "." && part !== ".." && !part.startsWith("."));
 }
 
-function protectedPath(value: string): boolean {
+export function protectedPath(value: string): boolean {
   return /(^|\/)(node_modules|vendor|secrets?|credentials?|deploy|agents?|orchestrator|security|rea|cloud)(\/|$)/i.test(value) ||
     /(^|\/)(auth|middleware|proxy|code-change-proposal|code-evolution|capability-requests|capability-http|external-tool-catalog|external-ai-capability-catalog)([.-]|\/|$)/i.test(value) ||
     !/\.(ts|tsx|js|jsx|json|css|md|txt|py)$/.test(value) ||

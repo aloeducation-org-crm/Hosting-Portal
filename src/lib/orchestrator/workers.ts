@@ -1397,6 +1397,114 @@ function safeParse(raw: string | null): unknown {
   }
 }
 
+// ─── CODE_GENERATION: autonomous coding agent ─────────────────────────────────
+//
+// The second agent. Like a chat agent, it takes a task in, generates code,
+// applies it, runs checks, and reports honestly. It is a *bounded* worker: one
+// generate → apply → verify pass per job, scoped to an explicit file snapshot.
+// It never touches protected paths (deploy/, agents/, security/, …) and never
+// claims a check passed that it did not actually run.
+const codeGenerationInput = z.object({
+  instruction: z.string().trim().min(1).max(8000),
+  workspaceRoot: z.string().min(1).max(512),
+  providerId: z.string().regex(/^[a-z0-9-]{1,64}$/),
+  scope: z.object({
+    projectId: z.string().min(1).max(128),
+    baseCommit: z.string().regex(/^[a-f0-9]{40}$/),
+    allowedPaths: z.array(z.string().min(1).max(240)).min(1).max(20),
+    snapshot: z.record(z.union([z.string(), z.null()])),
+  }),
+});
+
+/** Map a check kind to the command [binary, args] run inside the workspace. */
+function checkCommand(kind: "lint" | "typecheck" | "test" | "build"): [string, string[]] {
+  switch (kind) {
+    case "lint":
+      return ["npm", ["run", "lint"]];
+    case "typecheck":
+      return ["npx", ["tsc", "--noEmit"]];
+    case "test":
+      return ["npx", ["vitest", "run", "--no-color"]];
+    case "build":
+      return ["npm", ["run", "build"]];
+  }
+}
+
+registerWorker(
+  defineWorker<z.infer<typeof codeGenerationInput>, unknown>({
+    kind: "CODE_GENERATION",
+    label: "Autonomous coding agent",
+    description:
+      "Takes a task, generates code via the configured AI provider, applies changes to an explicitly scoped snapshot of files, runs lint/typecheck/test/build, and reports the real outcome. Never writes protected paths and never claims a check passed it did not run.",
+    execution: "LOCAL",
+    maxRisk: "REVERSIBLE",
+    requiredScopes: ["ai:read", "automation:run", "build:run"],
+    retrySafe: false,
+    defaultMaxAttempts: 1,
+    defaultTimeoutMs: 10 * 60_000,
+    inputSchema: codeGenerationInput,
+    async handler(input, ctx) {
+      await ctx.progress(5, "preparing autonomous coding task");
+      const { completeJSON } = await import("@/lib/ai/client");
+      const { runAutonomousCodingTask } = await import("@/lib/ai/autonomous-agent");
+
+      const runCheck = async (kind: "lint" | "typecheck" | "test" | "build", workspaceRoot: string) => {
+        const [bin, args] = checkCommand(kind);
+        try {
+          await execFileAsync(bin, args, { cwd: workspaceRoot, timeout: 5 * 60_000, maxBuffer: 8 * 1024 * 1024 });
+          return { kind, passed: true, ran: true, detail: `${kind} passed` };
+        } catch (error) {
+          const e = error as { stdout?: string; stderr?: string; message?: string };
+          const tail = (e.stderr ?? e.stdout ?? e.message ?? "check failed").toString().split("\n").slice(-6).join("\n").trim();
+          return { kind, passed: false, ran: true, detail: tail || `${kind} failed` };
+        }
+      };
+
+      const result = await runAutonomousCodingTask(
+        {
+          instruction: input.instruction,
+          workspaceRoot: input.workspaceRoot,
+          providerId: input.providerId,
+          scope: input.scope,
+        },
+        {
+          generate: async (messages, options) => {
+            const { data, completion } = await completeJSON(messages, options as never);
+            return { data, completion };
+          },
+          runCheck,
+        },
+        ctx.signal,
+      );
+
+      await ctx.progress(95, `autonomous coding task finished: ${result.code}`);
+
+      const findings: JobFinding[] = result.checks
+        .filter((c) => !c.passed)
+        .map((c) => ({ severity: "warning" as const, title: `${c.kind} check`, detail: c.detail }));
+
+      if (result.ok) {
+        return ok(
+          {
+            code: result.code,
+            summary: result.summary,
+            applied: result.applied,
+            checks: result.checks,
+            generation: result.generation,
+          },
+          result.message,
+          { evidence: `applied=${result.applied.length}; ${result.checks.filter((c) => c.ran && c.passed).length}/${result.checks.length} checks passed` },
+        );
+      }
+      return fail(
+        result.code,
+        result.message,
+        { findings, warnings: result.warnings },
+      );
+    },
+  }),
+);
+
 // Central platform handlers reuse this registry and the same job lifecycle.
 import { platformWorker, workflowStepWorker, aiDiagnosisWorker } from "./platform-workers";
 registerWorker(platformWorker);
