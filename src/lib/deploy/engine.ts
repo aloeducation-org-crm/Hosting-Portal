@@ -480,6 +480,20 @@ export async function runDeployment(deploymentId: string): Promise<void> {
     }
     await log("INFO", `activated ${releaseDir}; previous=${previousDir ?? "none"}`);
 
+    // Best-effort reverse-proxy + TLS provisioning: ensure a Nginx server
+    // block exists for the domain (written, enabled, reloaded) and that a
+    // Certbot certificate is issued. This is what makes a deployed site
+    // actually reachable over HTTPS on an Nginx host. Failures are reported
+    // as warnings and never fail the deployment — the release itself is
+    // already live and verified above.
+    try {
+      const { provisionRuntime } = await import("./provision");
+      const runtime = await provisionRuntime({ domain: website.domain, port: config.port });
+      await log("INFO", `proxy/tls: nginx=${runtime.nginx.ok ? "configured" : "skipped"} ssl=${runtime.ssl.ok ? "issued" : "skipped"}`);
+    } catch (error) {
+      await log("WARN", `proxy/tls provisioning skipped: ${redact(error instanceof Error ? error.message : String(error))}`);
+    }
+
     await setStage("verify");
     const baseUrl = project.healthUrl || `http://127.0.0.1:${config.port}`;
     const verification = await verifyDeployment({

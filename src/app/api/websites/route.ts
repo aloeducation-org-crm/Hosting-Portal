@@ -5,6 +5,7 @@ import { requireSession, requirePermission, ROLES } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
 import { assertWithinPlanLimit, EntitlementError } from '@/lib/billing/entitlements';
+import { launchSite } from '@/lib/deploy/provision';
 
 const createSchema = z.object({
   domain: z.string().min(1).max(253),
@@ -69,6 +70,7 @@ export async function POST(request: NextRequest) {
     }
 
     let port: number | undefined;
+    let provisionSteps: unknown = null;
 
     if (input.runtime === 'STATIC') {
       const r = await callHelper('alo-hosting-helper', ['provision-static', input.domain]);
@@ -77,14 +79,18 @@ export async function POST(request: NextRequest) {
       const r = await callHelper('alo-hosting-helper', ['provision-php', input.domain, 'false']);
       if (!r.success) return NextResponse.json(apiError('Provision failed', 'PROVISION_FAILED', { stderr: r.stderr }), { status: 500 });
     } else {
-      const pr = await callHelper('alo-hosting-helper', ['allocate-port']);
-      if (!pr.success) return NextResponse.json(apiError('Port allocation failed', 'PORT_ERROR', { stderr: pr.stderr }), { status: 500 });
-      port = input.applicationPort ?? parseInt(pr.stdout.trim(), 10);
-      const nr = await callHelper('alo-node-app-helper', [
-        'provision', input.domain, String(port),
-        input.startupCommand ?? 'npm start', input.healthPath,
-      ]);
-      if (!nr.success) return NextResponse.json(apiError('Provision failed', 'PROVISION_FAILED', { stderr: nr.stderr }), { status: 500 });
+      // NODE / NEXTJS: programmatic launch — allocate a free port (DB + OS
+      // probe), register + start a PM2 process, write + enable + reload an
+      // Nginx server block, and issue a Certbot certificate. Best-effort per
+      // step; a host missing a helper still gets the site record created.
+      const launch = await launchSite({
+        domain: input.domain,
+        startCommand: input.startupCommand ?? 'npm start',
+        healthPath: input.healthPath,
+        port: input.applicationPort,
+      });
+      port = launch.port;
+      provisionSteps = launch.steps;
     }
 
     const website = await db.website.create({
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return NextResponse.json(apiSuccess(website, 'Website created', 201), { status: 201 });
+    return NextResponse.json(apiSuccess({ ...website, provisioning: provisionSteps }, 'Website created', 201), { status: 201 });
   } catch (e) {
     if (e instanceof z.ZodError) return NextResponse.json(apiError('Validation failed', 'VALIDATION_ERROR', e.flatten(), 400), { status: 400 });
     return handleErr(e);

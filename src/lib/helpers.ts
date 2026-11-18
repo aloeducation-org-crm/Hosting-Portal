@@ -23,6 +23,8 @@ export const ALLOWED_HELPERS = [
   "alo-dns-helper",
   "alo-docker-helper",
   "alo-app-helper",
+  "alo-nginx-helper",
+  "alo-certbot-helper",
 ] as const;
 
 type HelperName = (typeof ALLOWED_HELPERS)[number];

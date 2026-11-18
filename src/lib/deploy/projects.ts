@@ -7,6 +7,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 import { configFromDetection, validateDeployConfig } from "./config";
+import { isReservedServiceName } from "./host-settings";
+import { allocateFreePort } from "./provision";
 import {
   resolveToken,
   validateRepositoryName,
@@ -80,11 +82,19 @@ async function uniqueDomain(repository: string): Promise<string> {
   throw new Error("Could not allocate a unique project domain");
 }
 
+/**
+ * Allocate a free application port.
+ *
+ * Delegates to `allocateFreePort`, which checks the database (GitProject ports
+ * AND Website applicationPorts), the reserved platform port registry, and a
+ * live OS-level TCP bind probe. The previous implementation only checked
+ * GitProject ports, started at 4100, and could hand out a port an OS process
+ * already owned. `DEPLOY_STATIC_PORT_BASE` (if set) is honored as the preferred
+ * starting port, otherwise the host registry base (3062) is used.
+ */
 async function allocatePort(): Promise<number> {
-  const base = Number(process.env.DEPLOY_STATIC_PORT_BASE || 4100);
-  const used = new Set((await db.gitProject.findMany({ select: { port: true } })).map((p) => p.port));
-  for (let port = base; port < base + 200; port++) if (!used.has(port)) return port;
-  throw new Error("No free deployment port available");
+  const preferred = Number(process.env.DEPLOY_STATIC_PORT_BASE || 0);
+  return allocateFreePort(preferred > 0 ? preferred : undefined);
 }
 
 function runtimeFor(detection: DetectionResult): "STATIC" | "NODE" | "NEXTJS" | "PHP82" {
@@ -135,7 +145,28 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
   const config = configFromDetection(detection);
   const port = input.port ?? (await allocatePort());
   config.port = port;
-  if (["nextjs", "nestjs", "express", "fastify", "koa", "django", "fastapi", "flask", "laravel"].includes(detection.framework)) {
+
+  // Long-running Node runtimes are served by PM2 automatically: the panel
+  // registers and restarts the process (see provision.ts / alo-app-helper), so
+  // a GitHub push can deploy a Next.js/Node app end-to-end without an operator
+  // wiring a service manager first. Non-Node runtimes (Python/PHP) still need
+  // an operator-configured service manager, so they stay paused for approval.
+  const NODE_SERVER_FRAMEWORKS = ["nextjs", "nuxt", "nestjs", "express", "fastify", "koa", "hono", "node"];
+  if (NODE_SERVER_FRAMEWORKS.includes(detection.framework)) {
+    config.serviceManager = "pm2";
+    // Derive a safe PM2 app name, ensuring it never collides with a reserved
+    // platform unit (e.g. a repo named "hosting" would otherwise map to the
+    // control-plane "alo-hosting" process).
+    let serviceName = `alo-${slugify(repository.split("/").pop() ?? "app")}`;
+    let guard = 0;
+    while (isReservedServiceName(serviceName) && guard < 5) {
+      serviceName = `${serviceName}-app`;
+      guard++;
+    }
+    config.serviceName = serviceName;
+    config.requiresApproval = detection.ambiguous;
+    warnings.push(`${detection.framework} will be served by a PM2 process managed by the panel`);
+  } else if (["django", "fastapi", "flask", "python", "php-composer", "laravel"].includes(detection.framework)) {
     config.serviceManager = "none"; // operator must wire pm2/systemd before enabling
     config.requiresApproval = true;
     warnings.push(`${detection.framework} needs an operator-configured service manager; automatic deploys stay paused until confirmed`);
