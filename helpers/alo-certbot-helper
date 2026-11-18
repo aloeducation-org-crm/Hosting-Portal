@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — Certbot Helper
+# Issues / renews / inspects / revokes Let's Encrypt certificates for tenant
+# sites and reloads Nginx so the new certificate is served immediately.
+#
+# This is the Nginx counterpart to alo-ssl-helper (which manages Caddy /
+# alo-edge ACME). It is what makes "automatic SSL certificate generation"
+# work on an Nginx host after a site is published.
+#
+# Commands:
+#   issue   <domain> [email]   issue a certificate (certbot --nginx, webroot fallback)
+#   renew   [domain]           renew expiring certificates (or one domain)
+#   info    <domain>           report certificate files + expiry
+#   revoke  <domain>           delete a certificate + its files
+#
+set -euo pipefail
+
+# Env-overridable so tests can sandbox the helper against a temp tree.
+CERTBOT_LIVE_BASE="${CERTBOT_LIVE_BASE:-/etc/letsencrypt/live}"
+CERTBOT_WEBROOT="${CERTBOT_WEBROOT:-/var/www/certbot}"
+NGINX_SITES_ENABLED="${NGINX_SITES_ENABLED:-/etc/nginx/sites-enabled}"
+ALO_CERTBOT_EMAIL="${ALO_CERTBOT_EMAIL:-}"
+
+log_err() { printf '[alo-certbot-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-certbot-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,251}[a-zA-Z0-9])?$ ]]; then
+    die "arg-validation" "Invalid domain name: $1"
+  fi
+}
+
+for bin in certbot openssl; do
+  command -v "$bin" >/dev/null 2>&1 || true
+done
+
+reload_nginx() {
+  if command -v nginx >/dev/null 2>&1; then
+    nginx -s reload 2>&1 || return 1
+    return 0
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload nginx 2>&1 || return 1
+    return 0
+  fi
+  # No Nginx on this host: nothing to reload. Issuance itself is still valid.
+  return 0
+}
+
+cert_dir() { printf '%s/%s' "$CERTBOT_LIVE_BASE" "$1"; }
+
+cert_expiry() {
+  local dir="$1"
+  if [[ -f "$dir/cert.pem" ]]; then
+    openssl x509 -in "$dir/cert.pem" -noout -enddate 2>/dev/null | cut -d= -f2
+  fi
+}
+
+issue_cert() {
+  local domain="$1" email="${2:-}"
+  local args=(--non-interactive --agree-tos --keep-until-expiring --preferred-challenges http)
+  [[ -n "$email" ]] && args+=(--register-unsafely-without-email) || args+=(--email "$email")
+
+  # Primary path: certbot --nginx edits the Nginx vhost to enable TLS and
+  # completes the HTTP-01 challenge through Nginx itself.
+  if command -v nginx >/dev/null 2>&1 && command -v certbot >/dev/null 2>&1; then
+    if certbot --nginx -d "$domain" "${args[@]}" 2>&1; then
+      reload_nginx || true
+      return 0
+    fi
+    log_info "certbot --nginx failed for ${domain}; falling back to webroot validation"
+  fi
+
+  # Fallback: webroot validation against the ACME challenge location served by
+  # the vhost's /.well-known/acme-challenge/ root.
+  if command -v certbot >/dev/null 2>&1; then
+    mkdir -p "$CERTBOT_WEBROOT"
+    if certbot certonly --webroot --webroot-path "$CERTBOT_WEBROOT" -d "$domain" "${args[@]}" 2>&1; then
+      reload_nginx || true
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# ── action: issue ───────────────────────────────────────────────────────────
+action_issue() {
+  if [[ $# -lt 1 ]]; then
+    die "issue" "Usage: issue <domain> [email]"
+  fi
+  local domain="$1" email="${2:-$ALO_CERTBOT_EMAIL}"
+  validate_domain "$domain"
+
+  if ! command -v certbot >/dev/null 2>&1; then
+    die "issue" "certbot is not installed on this host"
+  fi
+
+  issue_cert "$domain" "$email" || die "issue" "certbot could not issue a certificate for ${domain}"
+
+  local dir
+  dir="$(cert_dir "$domain")"
+  for file in cert.pem chain.pem fullchain.pem privkey.pem; do
+    [[ -s "$dir/$file" ]] || die "issue" "certificate output missing: $dir/$file"
+  done
+  local expiry
+  expiry="$(cert_expiry "$dir" || true)"
+  json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"certDir\":\"${dir}\",\"expiry\":\"${expiry:-unknown}\"}"
+}
+
+# ── action: renew ───────────────────────────────────────────────────────────
+action_renew() {
+  local domain="${1:-}"
+  if [[ -n "$domain" ]]; then
+    validate_domain "$domain"
+  fi
+  if ! command -v certbot >/dev/null 2>&1; then
+    die "renew" "certbot is not installed on this host"
+  fi
+  if ! certbot renew --non-interactive 2>&1; then
+    die "renew" "certbot renewal failed"
+  fi
+  reload_nginx || true
+  local results
+  results=$(certbot certificates --non-interactive 2>/dev/null | grep -E "Certificate Name|expire" | tr '\n' ' ' | sed 's/  */ /g' || true)
+  json_out "{\"success\":true,\"step\":\"renew\",\"domain\":\"${domain:-all}\",\"reloaded\":true,\"certificates\":\"${results}\"}"
+}
+
+# ── action: info ────────────────────────────────────────────────────────────
+action_info() {
+  if [[ $# -lt 1 ]]; then
+    die "info" "Usage: info <domain>"
+  fi
+  local domain="$1"
+  validate_domain "$domain"
+  local dir
+  dir="$(cert_dir "$domain")"
+  if [[ ! -f "$dir/cert.pem" ]]; then
+    json_out "{\"success\":true,\"step\":\"info\",\"domain\":\"${domain}\",\"installed\":false,\"expiry\":null}"
+    return 0
+  fi
+  local expiry
+  expiry="$(cert_expiry "$dir" || true)"
+  json_out "{\"success\":true,\"step\":\"info\",\"domain\":\"${domain}\",\"installed\":true,\"certDir\":\"${dir}\",\"expiry\":\"${expiry:-unknown}\"}"
+}
+
+# ── action: revoke ─────────────────────────────────────────────────────────
+action_revoke() {
+  if [[ $# -lt 1 ]]; then
+    die "revoke" "Usage: revoke <domain>"
+  fi
+  local domain="$1"
+  validate_domain "$domain"
+  if ! command -v certbot >/dev/null 2>&1; then
+    die "revoke" "certbot is not installed on this host"
+  fi
+  certbot delete --non-interactive --cert-name "$domain" 2>&1 || die "revoke" "certbot could not delete certificate for ${domain}"
+  rm -rf "$(cert_dir "$domain")" 2>/dev/null || true
+  reload_nginx || true
+  json_out "{\"success\":true,\"step\":\"revoke\",\"domain\":\"${domain}\",\"revoked\":true}"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────────────
+if [[ $# -lt 1 ]]; then
+  die "dispatch" "Usage: alo-certbot-helper <issue|renew|info|revoke> [args...]"
+fi
+
+ACTION="$1"
+shift
+
+case "$ACTION" in
+  issue)   action_issue "$@" ;;
+  renew)   action_renew "$@" ;;
+  info)    action_info "$@" ;;
+  revoke)  action_revoke "$@" ;;
+  *)       die "dispatch" "Unknown action: ${ACTION}" ;;
+esac

@@ -28,5 +28,7 @@ alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-deploy-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-dns-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-docker-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-app-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-nginx-helper
+alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/alo-certbot-helper
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/provision-site.sh
 alo-panel ALL=(root) NOPASSWD: /usr/local/sbin/ssl-lifecycle.sh
