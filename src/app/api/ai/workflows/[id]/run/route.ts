@@ -25,12 +25,18 @@ function handleErr(e: unknown): NextResponse {
 /**
  * POST /api/ai/workflows/:id/run
  *
- * Body: { input?: unknown, dryRun?: boolean, continueOnError?: boolean }
+ * Body: { input?: unknown, dryRun?: boolean, continueOnError?: boolean,
+ *         traceId?: string, resumeFromRunId?: string }
  *
  * Runs the stored graph server-side against the real provider chain and the
  * read-only hosting tools, then persists an AiWorkflowRun (status, per-step
- * log, provider, token usage). `dryRun` validates the graph and returns the plan
- * without calling any provider or tool.
+ * log, provider, token usage, traceId). `dryRun` validates the graph and
+ * returns the plan without calling any provider or tool.
+ *
+ * `resumeFromRunId` re-loads the succeeded steps of a prior partial run and
+ * continues downstream — use it to recover from a process restart without
+ * re-paying for AI calls that already completed. The original run's traceId is
+ * reused for causal continuity unless `traceId` is also supplied.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const startedAt = Date.now();
@@ -53,6 +59,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (body.input !== undefined && JSON.stringify(body.input).length > 100_000) {
       return NextResponse.json(apiError('Input is too large (max 100KB)', 'VALIDATION_ERROR', undefined, 413), { status: 413 });
     }
+    if (body.traceId !== undefined && typeof body.traceId !== 'string') {
+      return NextResponse.json(apiError('traceId must be a string', 'VALIDATION_ERROR', undefined, 422), { status: 422 });
+    }
+    if (body.resumeFromRunId !== undefined && typeof body.resumeFromRunId !== 'string') {
+      return NextResponse.json(apiError('resumeFromRunId must be a string', 'VALIDATION_ERROR', undefined, 422), { status: 422 });
+    }
 
     const outcome = await executeStoredWorkflow(workflow, {
       input: body.input ?? null,
@@ -62,6 +74,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       userId: user.id,
       isAdmin: isAdminRole(user.role),
       signal: request.signal,
+      traceId: typeof body.traceId === 'string' && body.traceId ? body.traceId : undefined,
+      resumeFromRunId: typeof body.resumeFromRunId === 'string' && body.resumeFromRunId ? body.resumeFromRunId : undefined,
     });
 
     if (!outcome.result.steps.every((step) => step.dryRun)) {
@@ -84,7 +98,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       durationMs: Date.now() - startedAt,
       metadata: {
         runId: outcome.runId,
+        traceId: outcome.traceId,
         dryRun: body.dryRun === true,
+        resumedFrom: body.resumeFromRunId ?? null,
         aiCalls: outcome.result.aiCalls,
         tokensUsed: outcome.result.tokensUsed,
         providers: outcome.result.providers,
@@ -93,6 +109,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     return NextResponse.json(apiSuccess({
       runId: outcome.runId,
+      traceId: outcome.traceId,
       status: outcome.result.status,
       dryRun: body.dryRun === true,
       output: outcome.result.output,

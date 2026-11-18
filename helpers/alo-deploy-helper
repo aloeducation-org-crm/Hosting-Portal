@@ -89,7 +89,156 @@ validate_branch() {
 COMMAND="${1:?Usage: alo-deploy-helper <command> [args...]}"
 shift
 
+# Shared release-path validation: must live under this domain's releases dir.
+validate_release_path() {
+  local domain="$1"
+  local release_path="$2"
+  if [[ "$release_path" == *".."* ]]; then
+    die "arg-validation" "Release path must not contain '..'"
+  fi
+  local expected_prefix
+  expected_prefix="$(realpath -m "$SITE_BASE/$domain/releases")/"
+  local resolved
+  resolved="$(realpath -m "$release_path")"
+  if [[ "$resolved" != "${expected_prefix}"* ]]; then
+    die "arg-validation" "Release path must reside under ${expected_prefix}"
+  fi
+  printf '%s' "$resolved"
+}
+
 case "$COMMAND" in
+  build-release)
+    # Build inside a *specific* release directory (not `current`), so a build
+    # never touches the live release before it has been verified.
+    DOMAIN="${1:?Usage: build-release <domain> <releasePath> <buildCmd>}"
+    RELEASE_PATH="${2:?Usage: build-release <domain> <releasePath> <buildCmd>}"
+    BUILD_CMD="${3:?Usage: build-release <domain> <releasePath> <buildCmd>}"
+    validate_domain "$DOMAIN"
+    RESOLVED="$(validate_release_path "$DOMAIN" "$RELEASE_PATH")"
+    if [[ ! -d "$RESOLVED" ]]; then
+      die "arg-validation" "Release directory does not exist: $RESOLVED"
+    fi
+    validate_build_cmd "$BUILD_CMD"
+
+    cd "$RESOLVED"
+    START_TIME=$(date +%s%N)
+    BUILD_EXIT=0
+    BUILD_OUTPUT=$(bash -c "$BUILD_CMD" 2>&1) || BUILD_EXIT=$?
+    END_TIME=$(date +%s%N)
+    DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+    cd - >/dev/null
+
+    OUTPUT_SAFE=$(echo "$BUILD_OUTPUT" | tr '\n' ' ' | sed 's/"/\\\\"/g' | head -c 8000)
+    RESOLVED_SAFE=$(echo "$RESOLVED" | sed 's/"/\\\\"/g')
+
+    if [[ "$BUILD_EXIT" -ne 0 ]]; then
+      echo "{\"success\":false,\"exitCode\":$BUILD_EXIT,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RESOLVED_SAFE\",\"buildCommand\":\"$BUILD_CMD\",\"durationMs\":$DURATION_MS,\"output\":\"$OUTPUT_SAFE\",\"error\":\"Build exited with code $BUILD_EXIT\"}"
+      exit "$BUILD_EXIT"
+    fi
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RESOLVED_SAFE\",\"buildCommand\":\"$BUILD_CMD\",\"durationMs\":$DURATION_MS,\"output\":\"$OUTPUT_SAFE\",\"builtAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  marker)
+    # Verify the cloned tree IS the pinned commit, then write the release
+    # marker (alo-deploy.json) the platform verifies over HTTP/FS.
+    DOMAIN="${1:?Usage: marker <domain> <releasePath> <deploymentId> <commitSha>}"
+    RELEASE_PATH="${2:?Usage: marker <domain> <releasePath> <deploymentId> <commitSha>}"
+    DEPLOYMENT_ID="${3:?Usage: marker <domain> <releasePath> <deploymentId> <commitSha>}"
+    COMMIT_SHA="${4:?Usage: marker <domain> <releasePath> <deploymentId> <commitSha>}"
+    validate_domain "$DOMAIN"
+    RESOLVED="$(validate_release_path "$DOMAIN" "$RELEASE_PATH")"
+    if [[ ! -d "$RESOLVED" ]]; then
+      die "arg-validation" "Release directory does not exist: $RESOLVED"
+    fi
+    if [[ ! "$DEPLOYMENT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9-]{7,63}$ ]]; then
+      die "arg-validation" "Invalid deployment id"
+    fi
+    if [[ ! "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+      die "arg-validation" "Invalid commit SHA"
+    fi
+    if [[ ! -d "$RESOLVED/.git" ]]; then
+      die "marker" "Release is not a git checkout; commit identity cannot be verified"
+    fi
+    ACTUAL_SHA=$(git -C "$RESOLVED" rev-parse HEAD 2>/dev/null || echo "")
+    if [[ "$ACTUAL_SHA" != "$COMMIT_SHA" ]]; then
+      die "marker" "COMMIT_MISMATCH: release tree is ${ACTUAL_SHA:-unknown}, expected ${COMMIT_SHA}; refusing to mark"
+    fi
+    MARKER_FILE="$RESOLVED/alo-deploy.json"
+    cat > "$MARKER_FILE" <<MARKER
+{
+  "deploymentId": "$DEPLOYMENT_ID",
+  "domain": "$DOMAIN",
+  "commitSha": "$COMMIT_SHA",
+  "createdAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+MARKER
+    # The runtime user must be able to read/serve the release.
+    chown -R alo-panel:alo-panel "$RESOLVED" 2>/dev/null || log_info "chown to alo-panel failed (continuing)"
+    echo "{\"success\":true,\"domain\":\"$DOMAIN\",\"releasePath\":\"$RESOLVED\",\"deploymentId\":\"$DEPLOYMENT_ID\",\"commitSha\":\"$COMMIT_SHA\",\"markerPath\":\"$MARKER_FILE\",\"markedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  manifest)
+    # Bounded, read-only manifest of the ACTIVE release: {relative path:
+    # contents} for text files. The control plane's security scan runs where
+    # the release is not locally present (remote-node deployments), so the
+    # node ships a capped manifest instead. Skips dependency/build dirs,
+    # binaries and oversized files; hard limits keep the payload small.
+    DOMAIN="${1:?Usage: manifest <domain>}"
+    validate_domain "$DOMAIN"
+    CURRENT="$SITE_BASE/$DOMAIN/current"
+    if [[ ! -e "$CURRENT" ]]; then
+      die "manifest" "No current release for $DOMAIN"
+    fi
+    ROOT_DIR=$(readlink -f "$CURRENT")
+    if [[ ! -d "$ROOT_DIR" ]]; then
+      die "manifest" "Current release for $DOMAIN is not a directory"
+    fi
+
+    MAX_FILES=400
+    MAX_FILE_BYTES=262144
+    MAX_TOTAL_BYTES=8388608
+    SKIP_PATTERN='node_modules|/\.git|\.next|/dist|/build|/coverage|/\.turbo|__pycache__'
+
+    FILES_JSON="{}"
+    SCANNED=0
+    TOTAL=0
+    TRUNCATED=false
+    while IFS= read -r -d '' file; do
+      [[ "$SCANNED" -ge "$MAX_FILES" || "$TOTAL" -ge "$MAX_TOTAL_BYTES" ]] && { TRUNCATED=true; break; }
+      REL_PATH="${file#"$ROOT_DIR"/}"
+      SIZE=$(stat -c %s "$file" 2>/dev/null || echo 0)
+      if [[ "$SIZE" -gt "$MAX_FILE_BYTES" ]]; then
+        continue
+      fi
+      # Skip binaries: a NUL byte in the first kilobyte means it is not text.
+      # (The pattern is passed as\\x00 because a literal NUL cannot appear in
+      # an argv string.)
+      if head -c 1024 "$file" | grep -qP '\\x00' 2>/dev/null; then
+        continue
+      fi
+      ENTRY=$(jq -cn --arg k "$REL_PATH" --rawfile v "$file" '{($k): $v}')
+      FILES_JSON=$(jq -cn --argjson obj "$FILES_JSON" --argjson add "$ENTRY" '$obj + $add')
+      SCANNED=$((SCANNED + 1))
+      TOTAL=$((TOTAL + SIZE))
+    done < <(find "$ROOT_DIR" -type f -regextype posix-extended -not -regex ".*($SKIP_PATTERN).*" -print0 2>/dev/null | sort -z)
+
+    json_out "{\"success\":true,\"step\":\"manifest\",\"domain\":\"$DOMAIN\",\"root\":\"$ROOT_DIR\",\"scanned\":$SCANNED,\"totalBytes\":$TOTAL,\"truncated\":$TRUNCATED,\"files\":$FILES_JSON}"
+    ;;
+
+  read-marker)
+    DOMAIN="${1:?Usage: read-marker <domain>}"
+    validate_domain "$DOMAIN"
+    CURRENT="$SITE_BASE/$DOMAIN/current"
+    if [[ ! -e "$CURRENT" ]]; then
+      die "read-marker" "No current release for $DOMAIN"
+    fi
+    MARKER_FILE="$(readlink -f "$CURRENT")/alo-deploy.json"
+    if [[ ! -f "$MARKER_FILE" ]]; then
+      die "read-marker" "Current release has no alo-deploy.json marker"
+    fi
+    cat "$MARKER_FILE"
+    ;;
+
   clone)
     DOMAIN="${1:?Usage: clone <domain> <repo> <branch>}"
     REPO="${2:?Usage: clone <domain> <repo> <branch>}"
@@ -290,9 +439,13 @@ case "$COMMAND" in
       REL_SIZE=$(du -sb "$dir" 2>/dev/null | awk '{print $1}' || echo 0)
       REL_TIME=$(stat -c %Y "$dir" 2>/dev/null || echo 0)
       REL_TIME_FMT=$(date -u -d "@$REL_TIME" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
+      # Release marker (deployment + commit identity) when present, so the
+      # platform can resume an interrupted remote deployment without re-cloning.
+      REL_DEPLOYMENT=$(jq -r '.deploymentId // empty' "$dir/alo-deploy.json" 2>/dev/null || echo "")
+      REL_COMMIT=$(jq -r '.commitSha // empty' "$dir/alo-deploy.json" 2>/dev/null || echo "")
 
       [[ -n "$ITEMS" ]] && ITEMS=",${ITEMS}"
-      ITEMS="{\"path\":\"$dir\",\"name\":\"$REL_NAME\",\"sizeBytes\":$REL_SIZE,\"createdAt\":\"$REL_TIME_FMT\",\"isCurrent\":$IS_CURRENT}${ITEMS}"
+      ITEMS="{\"path\":\"$dir\",\"name\":\"$REL_NAME\",\"sizeBytes\":$REL_SIZE,\"createdAt\":\"$REL_TIME_FMT\",\"isCurrent\":$IS_CURRENT,\"deploymentId\":\"$REL_DEPLOYMENT\",\"commitSha\":\"$REL_COMMIT\"}${ITEMS}"
       COUNT=$((COUNT + 1))
     done < <(ls -1d "$RELEASES_DIR"/*/ 2>/dev/null | sort -r)
 
@@ -300,7 +453,7 @@ case "$COMMAND" in
     ;;
 
   *)
-    echo "Available commands: clone, pull, build, switch, rollback, list-releases" >&2
+    echo "Available commands: clone, pull, build, build-release, marker, read-marker, switch, rollback, list-releases" >&2
     exit 1
     ;;
 esac

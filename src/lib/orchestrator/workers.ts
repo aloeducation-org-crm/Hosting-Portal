@@ -21,14 +21,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { Resolver } from "node:dns/promises";
+import tls from "node:tls";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { redact } from "@/lib/deploy/redact";
 import { validateRepositoryName, getCommit, resolveToken, fetchRepoManifests } from "@/lib/deploy/github";
 import { detectFramework, memoryReader } from "@/lib/deploy/detect";
+import { detectNativeBuildPlan } from "@/lib/deploy/native-build";
 import { runDeployment, rollbackProject } from "@/lib/deploy/engine";
+import { validateDeployConfig } from "@/lib/deploy/config";
 import { readMarker, currentReleaseDir } from "@/lib/deploy/service";
-import { defineWorker, fail, ok, unverified, WorkerError, type JobFinding, type WorkerDefinition } from "./contracts";
+import { defineWorker, fail, ok, unverified, WorkerError, type JobFinding, type WorkerDefinition, type Scope } from "./contracts";
+import { findAllowlistEntry } from "@/lib/agents/allowlist";
+import { agentOnline } from "@/lib/agents/agent";
+
+const execFileAsync = promisify(execFile);
 
 const workers = new Map<string, WorkerDefinition<any, any>>();
 
@@ -36,11 +46,15 @@ const workers = new Map<string, WorkerDefinition<any, any>>();
  * Resolve the least-privileged GitHub token for a connection id.
  * Returns `token: null` (never throws) so callers can report an honest
  * "credential not configured" result instead of crashing the job.
+ * A deleted or revoked connection never falls back to the platform token
+ * (SEC-02: revoking a connection must immediately stop builds/discovery on it).
  */
 async function tokenForConnection(connectionId: string | null | undefined) {
   if (!connectionId) return resolveToken(null);
   const connection = await db.gitConnection.findUnique({ where: { id: connectionId } });
-  if (!connection) return resolveToken(null);
+  if (!connection || connection.status !== "active") {
+    return { mode: "none" as const, token: null, label: connection ? "revoked connection" : "missing connection" };
+  }
   return resolveToken({
     mode: connection.mode,
     installationId: connection.installationId,
@@ -94,6 +108,7 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "READ_ONLY",
     requiredScopes: ["repo:read"],
+    retrySafe: true,
     defaultMaxAttempts: 3,
     defaultTimeoutMs: 60_000,
     inputSchema: repoDiscoveryInput,
@@ -114,6 +129,18 @@ registerWorker(
       await ctx.progress(35, `repository ${normalised} accepted by the name guard`);
 
       const ref = input.ref ?? "HEAD";
+      // The staging harness may pin a local checkout. This path is opt-in on
+      // the server, never accepted from a webhook, and verifies the exact SHA
+      // with git before any build is allowed.
+      if (input.projectId && process.env.DEPLOY_ALLOW_LOCAL_SOURCE === "true") {
+        const project = await db.gitProject.findUnique({ where: { id: input.projectId } });
+        if (project?.cloneUrl.startsWith("/")) {
+          const resolved = await execFileAsync("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd: project.cloneUrl, timeout: 15_000 }).catch(() => null);
+          const sha = resolved?.stdout.trim();
+          if (!sha || !/^[0-9a-f]{40}$/.test(sha)) return unverified({ repository: normalised, ref }, "Local staging ref could not be resolved; nothing was verified");
+          return ok({ repository: normalised, ref, sha, verifiedAgainst: "local git checkout" }, `Verified local staging ref ${ref} resolves to ${sha.slice(0, 12)}`, { evidence: `localCommit=${sha}` });
+        }
+      }
       const token = await tokenForConnection(connectionId).catch(() => resolveToken(null));
 
       if (!token.token) {
@@ -187,6 +214,7 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "READ_ONLY",
     requiredScopes: ["repo:read"],
+    retrySafe: true,
     defaultMaxAttempts: 2,
     defaultTimeoutMs: 60_000,
     inputSchema: frameworkDetectionInput,
@@ -205,7 +233,11 @@ registerWorker(
       if (project.detection) {
         try {
           const stored = JSON.parse(project.detection);
-          const detection = await detectFramework(memoryReader(projectManifestsFromDetection(stored)));
+          const manifests = projectManifestsFromDetection(stored);
+          if (Object.keys(manifests).length === 0 && typeof stored.framework === "string" && typeof stored.confidence === "string" && ["detected", "confirmed"].includes(project.detectionStatus)) {
+            return detectionResult(stored, `stored import detection for ${project.repository}`, { repository: project.repository, detectionStatus: project.detectionStatus });
+          }
+          const detection = await detectFramework(memoryReader(manifests));
           return detectionResult(detection, `stored detection for ${project.repository}`, {
             repository: project.repository,
             detectionStatus: project.detectionStatus,
@@ -268,6 +300,75 @@ function projectManifestsFromDetection(stored: Record<string, unknown>): Record<
   return files;
 }
 
+// ─── Native CMake build planning ───────────────────────────────────────────
+// Read-only planning only. Native execution requires a separately enrolled,
+// isolated runner and is deliberately not routed through the web deploy engine.
+
+const nativeBuildPlanInput = z.object({
+  projectId: z.string().min(1).optional(),
+  files: z.record(z.string(), z.string()).optional(),
+  platform: z.enum(["linux", "windows", "macos"]).default("linux"),
+}).refine((value) => Boolean(value.projectId || value.files), {
+  message: "projectId or files is required",
+});
+
+registerWorker(
+  defineWorker<z.infer<typeof nativeBuildPlanInput>, unknown>({
+    kind: "NATIVE_BUILD_PLAN",
+    label: "Native application build planning",
+    description:
+      "Reads CMake manifests, selects safe platform presets, detects submodules and emits a build plan. Does not execute source code or claim a native build succeeded.",
+    execution: "LOCAL",
+    maxRisk: "READ_ONLY",
+    requiredScopes: ["repo:read"],
+    retrySafe: true,
+    defaultMaxAttempts: 2,
+    defaultTimeoutMs: 60_000,
+    inputSchema: nativeBuildPlanInput,
+    async handler(input, ctx) {
+      await ctx.progress(15, "reading native build manifests");
+      let files = input.files;
+
+      if (!files) {
+        const project = await db.gitProject.findUnique({ where: { id: input.projectId! } });
+        if (!project) throw new WorkerError("NOT_FOUND", `Project ${input.projectId} not found`);
+        const token = await tokenForConnection(project.connectionId).catch(() => resolveToken(null));
+        if (!token.token) {
+          return unverified(
+            { projectId: project.id, repository: project.repository, platform: input.platform },
+            "A GitHub credential is required to read this repository. No native build was started.",
+          );
+        }
+        const fetched = await fetchRepoManifests(token.token, project.repository, project.productionBranch);
+        files = fetched.files;
+      }
+
+      const plan = await detectNativeBuildPlan(memoryReader(files), input.platform);
+      if (!plan) {
+        return unverified(
+          { platform: input.platform },
+          "No root CMakeLists.txt was found. This planner currently handles CMake projects only.",
+        );
+      }
+
+      await ctx.progress(85, `CMake project detected; plan status ${plan.status}`);
+      if (plan.status !== "READY_FOR_RUNNER") {
+        return unverified(
+          plan,
+          "Native build plan needs configuration. No commands were executed.",
+          { findings: plan.blockers.map((blocker) => ({ severity: "warning" as const, title: blocker })) },
+        );
+      }
+
+      return ok(
+        plan,
+        `Prepared a ${input.platform} CMake build plan. No native runner was invoked and no artifact was produced.`,
+        { evidence: `configurePreset=${plan.configurePreset}; buildPreset=${plan.buildPreset}; submodules=${plan.submodules.length}` },
+      );
+    },
+  }),
+);
+
 // ─── 3. Build & test ────────────────────────────────────────────────────────
 // Delegates to the verified deployment engine: isolated mkdtemp build, exact
 // SHA, lint/typecheck/test/build, atomic symlink activation, HTTP + release
@@ -286,6 +387,7 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "REVERSIBLE",
     requiredScopes: ["build:run", "release:write"],
+    retrySafe: false,
     defaultMaxAttempts: 1, // the engine already restores the previous release; blind retries are unsafe
     defaultTimeoutMs: 30 * 60_000,
     inputSchema: buildTestInput,
@@ -294,6 +396,42 @@ registerWorker(
       if (!deployment) throw new WorkerError("NOT_FOUND", `Deployment ${input.deploymentId} not found`);
 
       await ctx.progress(10, `running deployment ${deployment.id} (commit ${deployment.commitHash?.slice(0, 12) ?? "unknown"})`);
+
+      // Remote (node-assigned) deployments run through the remote release
+      // engine; the requester's own authorization covers the deployment's
+      // activation commands (scopes are still enforced per command).
+      if (deployment.projectId) {
+        const project = await db.gitProject.findUnique({ where: { id: deployment.projectId }, select: { agentId: true } });
+        if (project?.agentId) {
+          const { runRemoteDeployment } = await import("@/lib/deploy/remote");
+          const result = await runRemoteDeployment(deployment.id, ctx, "requester");
+          const fresh = await db.deployment.findUnique({ where: { id: deployment.id }, include: { logs: { orderBy: { timestamp: "asc" }, take: 400 } } });
+          if (!fresh) throw new WorkerError("NOT_FOUND", "Deployment vanished during the run");
+          if (result.status === "SUCCESS") {
+            return ok(
+              {
+                deploymentId: fresh.id,
+                status: fresh.status,
+                stage: fresh.stage,
+                commitHash: fresh.commitHash,
+                verifiedCommitSha: fresh.verifiedCommitSha,
+                releaseId: fresh.releaseId,
+                durationMs: fresh.durationMs,
+                executedOn: "node-agent",
+              },
+              `Remote deployment ${fresh.id} succeeded on its assigned node; live commit ${String(fresh.verifiedCommitSha ?? fresh.commitHash).slice(0, 12)} verified by agent probe and release marker`,
+              { evidence: `stage=${fresh.stage}; verifiedCommitSha=${fresh.verifiedCommitSha ?? "n/a"}; engine=node-agent` },
+            );
+          }
+          const tail = fresh.logs.filter((l) => l.level === "ERROR" || l.level === "WARN").slice(-8).map((l) => `${l.level}: ${l.message}`);
+          return fail(
+            result.status === "ROLLED_BACK" ? "ROLLED_BACK" : "BUILD_FAILED",
+            `Remote deployment ${fresh.id} ${result.status} at stage ${result.stage}. ${result.status === "ROLLED_BACK" ? "The previous release was restored." : "The node's live release was never switched."}`,
+            { findings: tail.map((t) => ({ severity: "critical", title: t.slice(0, 200) })) },
+          );
+        }
+      }
+
       await runDeployment(deployment.id);
 
       const fresh = await db.deployment.findUnique({
@@ -407,6 +545,7 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "READ_ONLY",
     requiredScopes: ["repo:read"],
+    retrySafe: true,
     defaultMaxAttempts: 2,
     defaultTimeoutMs: 3 * 60_000,
     inputSchema: securityAnalysisInput,
@@ -439,14 +578,43 @@ registerWorker(
         await ctx.progress(30, `scanning ${Object.keys(input.files).length} supplied manifest(s)`);
         for (const [name, content] of Object.entries(input.files)) inspect(name, content);
       } else {
-        const root = await resolveScanRoot(input);
-        await ctx.progress(20, `scanning ${root}`);
-        for await (const rel of walk(root, 400)) {
-          const filePath = path.join(/*turbopackIgnore: true*/ root, rel);
-          const content = await fs.readFile(/*turbopackIgnore: true*/ filePath, "utf8").catch(() => null);
-          if (content === null) continue;
-          inspect(rel, content);
-          if (scanned >= 400) break;
+        // Remote-node deployments keep their release on the node, not on the
+        // control plane — there is no local tree to walk. When the project is
+        // assigned to an online agent, the node ships a bounded manifest of
+        // its active release (deploy.manifest) and the same scan runs over
+        // that. A node without a readable release is a real blocker, reported
+        // as such.
+        let remoteFiles: Record<string, string> | null = null;
+        let remoteRoot: string | null = null;
+        const localRoot = input.projectId ? await currentReleaseDir(input.projectId).catch(() => null) : null;
+        if (!localRoot && input.projectId) {
+          const project = await db.gitProject.findUnique({ where: { id: input.projectId }, select: { agentId: true, websiteId: true } });
+          const website = project?.websiteId ? await db.website.findUnique({ where: { id: project.websiteId }, select: { domain: true } }) : null;
+          if (project?.agentId && website?.domain) {
+            const agent = await db.serverAgent.findUnique({ where: { id: project.agentId } });
+            if (agent && agentOnline(agent)) {
+              const { runAgent } = await import("./platform-workers");
+              await ctx.progress(15, `fetching release manifest from node ${agent.name}`);
+              const manifest = await runAgent(ctx, project.agentId, "deploy.manifest", { domain: website.domain }, "job", 90_000);
+              const data = manifest.data as { files?: Record<string, string>; root?: string; truncated?: boolean };
+              remoteFiles = data.files ?? {};
+              remoteRoot = data.root ?? null;
+            }
+          }
+        }
+        if (remoteFiles) {
+          await ctx.progress(30, `scanning ${Object.keys(remoteFiles).length} file(s) from node release ${remoteRoot ?? ""}`);
+          for (const [name, content] of Object.entries(remoteFiles)) inspect(name, content);
+        } else {
+          const root = await resolveScanRoot(input);
+          await ctx.progress(20, `scanning ${root}`);
+          for await (const rel of walk(root, 400)) {
+            const filePath = path.join(/*turbopackIgnore: true*/ root, rel);
+            const content = await fs.readFile(/*turbopackIgnore: true*/ filePath, "utf8").catch(() => null);
+            if (content === null) continue;
+            inspect(rel, content);
+            if (scanned >= 400) break;
+          }
         }
       }
 
@@ -529,6 +697,7 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "READ_ONLY",
     requiredScopes: ["release:write"],
+    retrySafe: true,
     defaultMaxAttempts: 2,
     defaultTimeoutMs: 60_000,
     inputSchema: releaseInput,
@@ -599,8 +768,11 @@ registerWorker(
     description:
       "Dispatches an allowlisted command to an enrolled server agent (service status/restart, metrics, health probe, process list). Requires an online agent; refuses anything outside the allowlist and never invents a result while the task is still pending.",
     execution: "AGENT",
-    maxRisk: "PRIVILEGED",
+    maxRisk: "DESTRUCTIVE",
     requiredScopes: ["server:execute"],
+    retrySafe: true, // dispatch uses a deterministic task id per orchestrator job
+    riskForInput: (input) => findAllowlistEntry(input.command)?.risk ?? "DESTRUCTIVE",
+    scopesForInput: (input) => (findAllowlistEntry(input.command)?.scopes ?? ["server:execute"]) as Scope[],
     // Retries are what let the worker wait for the agent to pick the task up.
     defaultMaxAttempts: 5,
     defaultTimeoutMs: 2 * 60_000,
@@ -617,6 +789,21 @@ registerWorker(
       }
 
       await ctx.progress(20, `dispatching ${input.command} to agent ${input.agentId}`);
+      // Record allowlist refusals even when the agent is offline; never dispatch
+      // an executable command to a stale host.
+      if (!findAllowlistEntry(input.command)) {
+        const refused = await agentLib.dispatchTask({ agentId: input.agentId, command: input.command, args: input.args, jobId: ctx.jobId, correlationId: ctx.correlationId, actorEmail: ctx.actor?.email, actorScopes: ctx.actor?.scopes ?? [] });
+        throw new WorkerError("REFUSED_BY_ALLOWLIST", refused.refuseReason ?? "Command is not in the platform allowlist", false);
+      }
+      const agent = await db.serverAgent.findUnique({ where: { id: input.agentId } });
+      if (!agent || !agentLib.agentOnline(agent)) {
+        throw new WorkerError("AGENT_UNAVAILABLE", `Agent ${input.agentId} is not active and recently reachable; no command was dispatched`, false);
+      }
+      // The bounded self-healing recovery verbs may be auto-authorized by the
+      // documented operator policy (see platform-workers.ts); anything else
+      // still requires a human approval recorded on this job.
+      const { recoveryPolicyApproval } = await import("./platform-workers");
+      const policy = recoveryPolicyApproval(ctx, input.command);
       const dispatched = await agentLib.dispatchTask({
         agentId: input.agentId,
         command: input.command,
@@ -624,6 +811,9 @@ registerWorker(
         jobId: ctx.jobId,
         correlationId: ctx.correlationId,
         actorEmail: ctx.actor?.email,
+        actorScopes: ctx.actor?.scopes ?? [],
+        approvedBy: policy?.by ?? ctx.approval?.by,
+        approvedAt: policy?.at ?? ctx.approval?.at,
       });
 
       if (dispatched.status === "REFUSED") {
@@ -690,6 +880,9 @@ registerWorker(
     // orchestrator then gates every PRIVILEGED/DESTRUCTIVE job behind a human.
     maxRisk: "DESTRUCTIVE",
     requiredScopes: ["database:read", "database:admin"],
+    retrySafe: (input) => ["audit", "status", "plan-migration"].includes(input.action),
+    riskForInput: (input) => ["audit", "status", "plan-migration"].includes(input.action) ? "READ_ONLY" : input.action === "restore" ? "DESTRUCTIVE" : "PRIVILEGED",
+    scopesForInput: (input) => ["audit", "status", "plan-migration"].includes(input.action) ? ["database:read"] : ["database:read", "database:admin"],
     defaultMaxAttempts: 2,
     defaultTimeoutMs: 5 * 60_000,
     inputSchema: databaseOpsInput,
@@ -766,73 +959,139 @@ registerWorker(
 // ─── 8. Domain & TLS ────────────────────────────────────────────────────────
 
 const domainTlsInput = z.object({
-  action: z.enum(["audit", "verify-ownership", "plan-dns", "issue-certificate", "renew"]),
-  domain: z.string().min(3).max(253),
+  action: z.enum(["audit", "verify-ownership", "observe-tls", "plan-dns", "apply-dns", "issue-certificate", "renew"]),
+  domain: z.string().min(3).max(253).regex(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/),
+  projectId: z.string().min(1).optional(),
   serverId: z.string().optional(),
+  agentId: z.string().min(1).optional(),
+  expectedIp: z.ipv4().optional(),
 });
+
+async function domainRecord(input: z.infer<typeof domainTlsInput>) {
+  let row = await db.domain.findFirst({ where: { domain: input.domain } });
+  if (!row && input.projectId) {
+    const project = await db.gitProject.findUnique({ where: { id: input.projectId } });
+    const website = project ? await db.website.findUnique({ where: { id: project.websiteId } }) : null;
+    if (website?.domain === input.domain) row = await db.domain.create({ data: { domain: input.domain, websiteId: website.id, primary: true, nameservers: "[]", sslStatus: "NONE" } });
+  }
+  return row;
+}
+
+function observeCertificate(domain: string): Promise<{ issuer: string; notBefore: Date; notAfter: Date }> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({ host: domain, port: 443, servername: domain, rejectUnauthorized: true, timeout: 10_000 }, () => {
+      const cert = socket.getPeerCertificate();
+      socket.end();
+      if (!cert?.valid_from || !cert?.valid_to) return reject(new WorkerError("VERIFICATION_REQUIRED", "TLS peer did not return a readable certificate", false));
+      const notBefore = new Date(cert.valid_from); const notAfter = new Date(cert.valid_to);
+      if (Number.isNaN(notAfter.getTime()) || notAfter.getTime() <= Date.now()) return reject(new WorkerError("VERIFICATION_REQUIRED", "Observed certificate is expired or invalid", false));
+      resolve({ issuer: String(cert.issuer?.O ?? cert.issuer?.CN ?? "unknown"), notBefore, notAfter });
+    });
+    socket.once("error", (error) => reject(new WorkerError("TLS_OBSERVATION_FAILED", error.message, true)));
+    socket.once("timeout", () => { socket.destroy(); reject(new WorkerError("TLS_OBSERVATION_FAILED", "TLS observation timed out", true)); });
+  });
+}
 
 registerWorker(
   defineWorker<z.infer<typeof domainTlsInput>, unknown>({
     kind: "DOMAIN_TLS",
     label: "Domain & TLS",
-    description:
-      "Audits recorded domain/SSL state, previews DNS record changes and plans certificate issuance or renewal. Never applies a DNS change without an approval.",
+    description: "Verifies DNS ownership, observes live TLS, applies Cloudflare DNS through the provider API, and issues/renews ACME certificates through an enrolled agent. Never fabricates DNS or certificate state.",
     execution: "EXTERNAL",
     maxRisk: "PRIVILEGED",
     requiredScopes: ["domain:read", "domain:write"],
+    // issue/renew are idempotent in the ssl helper (unexpired existing certs
+    // are returned as success), so a retried workflow cannot double-issue.
+    retrySafe: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls", "issue-certificate", "renew"].includes(input.action),
+    riskForInput: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls"].includes(input.action) ? "READ_ONLY" : "PRIVILEGED",
+    scopesForInput: (input) => ["audit", "plan-dns", "verify-ownership", "observe-tls"].includes(input.action) ? ["domain:read"] : ["domain:read", "domain:write"],
     defaultMaxAttempts: 2,
-    defaultTimeoutMs: 3 * 60_000,
+    defaultTimeoutMs: 5 * 60_000,
     inputSchema: domainTlsInput,
     async handler(input, ctx) {
-      await ctx.progress(25, `looking up ${input.domain}`);
-      const domain = await db.domain.findFirst({ where: { domain: input.domain } });
-      const certs = domain
-        ? await db.sslCertificate.findMany({ where: { domainId: domain.id }, orderBy: { createdAt: "desc" }, take: 5 })
-        : [];
-
+      await ctx.progress(15, input.action);
+      const domain = await domainRecord(input);
       if (input.action === "audit") {
-        return domain || certs.length
-          ? ok(
-              {
-                domain: domain
-                  ? { id: domain.id, domain: domain.domain, sslEnabled: domain.sslEnabled, sslStatus: domain.sslStatus, dnsVerified: domain.dnsVerified, certificateExpiry: domain.certificateExpiry }
-                  : null,
-                certificates: certs.map((c) => ({ id: c.id, issuer: c.issuer, notBefore: c.notBefore, notAfter: c.notAfter, autoRenew: c.autoRenew })),
-              },
-              `Recorded state for ${input.domain}: sslStatus=${domain?.sslStatus ?? "no domain record"}, dnsVerified=${domain?.dnsVerified ?? false}, ${certs.length} certificate row(s)`,
-              { evidence: `domains rows=${domain ? 1 : 0}; ssl_certificates rows=${certs.length}` },
-            )
-          : unverified({ domain: null, certificates: [] }, `No recorded domain or certificate state for ${input.domain}. Nothing was queried live because no DNS/CA credential is configured.`);
+        const cert = domain ? await db.sslCertificate.findUnique({ where: { domainId: domain.id } }) : null;
+        return domain ? ok({ domain: { id: domain.id, domain: domain.domain, dnsVerified: domain.dnsVerified, sslStatus: domain.sslStatus, certificateExpiry: domain.certificateExpiry }, certificate: cert }, `Recorded state for ${input.domain}`, { evidence: `domainId=${domain.id}` }) : unverified({ domain: null }, `No recorded domain state for ${input.domain}`);
       }
-
       if (input.action === "plan-dns") {
-        return ok(
-          {
-            domain: input.domain,
-            preview: [
-              { type: "A", name: "@", value: "<production server IPv4>", ttl: 300, note: "set only after the server IP is confirmed" },
-              { type: "AAAA", name: "@", value: "<production server IPv6>", ttl: 300, note: "optional" },
-              { type: "CNAME", name: "www", value: `${input.domain}.`, ttl: 300, note: "optional" },
-            ],
-            approvalRequired: true,
-          },
-          `DNS change preview produced for ${input.domain}; no record was modified`,
-        );
+        return ok({ domain: input.domain, preview: [{ type: "A", name: input.domain, value: input.expectedIp ?? "<verified node public IPv4>", ttl: 300 }], approvalRequired: true }, "DNS preview produced; nothing was modified", { evidence: "preview-only" });
       }
-
-      const hasProvider = Boolean(process.env.CLOUDFLARE_API_TOKEN || process.env.CLOUDFLARE_ZONE_ID);
-      if (!hasProvider) {
-        throw new WorkerError(
-          "NOT_CONFIGURED",
-          `'${input.action}' for ${input.domain} needs a configured DNS/certificate provider (CLOUDFLARE_API_TOKEN + CLOUDFLARE_ZONE_ID or an ACME account). Nothing was changed and no certificate was issued.`,
-          false,
-        );
+      if (input.action === "verify-ownership") {
+        if (!input.expectedIp) throw new WorkerError("WAITING_EXTERNAL", "expectedIp is required; no verified node public IP is available", false);
+        if (!domain) throw new WorkerError("NOT_FOUND", "Domain is not attached to a project", false);
+        // Public resolution first — this is the authority for real domains.
+        const resolver = new Resolver();
+        const addresses = await resolver.resolve4(input.domain).catch(() => [] as string[]);
+        let verified = addresses.includes(input.expectedIp);
+        let via = "public-dns";
+        let evidence = `dns=${addresses.join(",") || "no-answer"}`;
+        // Platform-managed domains (the automatically allocated
+        // <slug>.<DEPLOY_DOMAIN_SUFFIX> names) are authoritative in the node's
+        // local zone, managed through the same agent that serves the app. When
+        // public resolution does not cover them, the record is ensured and
+        // verified there — reported as local-zone evidence, never as public DNS.
+        if (!verified && input.agentId) {
+          const suffix = (process.env.DEPLOY_DOMAIN_SUFFIX || "apps.alolabs.net").toLowerCase().replace(/^\.+/, "");
+          const zone = input.domain.toLowerCase().endsWith(`.${suffix}`) ? suffix : input.domain;
+          const name = input.domain.toLowerCase().endsWith(`.${suffix}`) ? input.domain.toLowerCase().slice(0, -1 * (suffix.length + 1)) : "@";
+          const { runAgent } = await import("./platform-workers");
+          await runAgent(ctx, input.agentId, "dns.add", { domain: zone, type: "A", name, value: input.expectedIp, ttl: 300 }, "job", 30_000);
+          const check = await runAgent(ctx, input.agentId, "dns.verify", { domain: zone, type: "A", name, expected: input.expectedIp }, "job", 30_000);
+          const data = check.data as { matches?: boolean; publicMatches?: boolean; zoneValue?: string; resolved?: string };
+          verified = Boolean(data.matches);
+          via = "node-local-zone";
+          evidence = `zone=${zone}:${name}=${data.zoneValue ?? "none"}; public=${data.resolved || "no-answer"}${data.publicMatches ? " (matches)" : ""}`;
+        }
+        await db.domain.update({ where: { id: domain.id }, data: { dnsVerified: verified } });
+        if (!verified) return fail("DNS_NOT_VERIFIED", `${input.domain} does not resolve to ${input.expectedIp} (public answer: [${addresses.join(", ") || "none"}])`, { data: { addresses, expectedIp: input.expectedIp } });
+        return ok({ domain: input.domain, addresses, expectedIp: input.expectedIp, verifiedVia: via }, `DNS A record matches the verified node IP (verified via ${via})`, { evidence });
       }
-      throw new WorkerError(
-        "NOT_IMPLEMENTED",
-        `'${input.action}' is not wired to a live ACME/DNS provider in this build. Refusing to report success without issuing a real certificate.`,
-        false,
-      );
+      if (input.action === "apply-dns") {
+        if (!input.expectedIp) throw new WorkerError("VALIDATION_FAILED", "expectedIp is required", false);
+        const { upsertCloudflareDnsRecord } = await import("@/lib/cloudflare");
+        const result = await upsertCloudflareDnsRecord({ type: "A", name: input.domain, content: input.expectedIp, ttl: 300, proxied: false });
+        if (!result.success) throw new WorkerError("NOT_CONFIGURED", result.error ?? "DNS provider failed", false);
+        if (domain) await db.domain.update({ where: { id: domain.id }, data: { dnsVerified: false } });
+        return ok({ domain: input.domain, record: result.data }, "Cloudflare DNS record applied; propagation must still be verified", { evidence: `providerRecordId=${result.data?.id}` });
+      }
+      if (input.action === "observe-tls") {
+        const cert = await observeCertificate(input.domain);
+        if (domain) {
+          await db.sslCertificate.upsert({ where: { domainId: domain.id }, create: { domainId: domain.id, issuer: cert.issuer, notBefore: cert.notBefore, notAfter: cert.notAfter }, update: { issuer: cert.issuer, notBefore: cert.notBefore, notAfter: cert.notAfter } });
+          await db.domain.update({ where: { id: domain.id }, data: { sslEnabled: true, sslStatus: "ISSUED", certificateExpiry: cert.notAfter } });
+        }
+        return ok({ domain: input.domain, ...cert }, "Live TLS certificate observed and validated", { evidence: `notAfter=${cert.notAfter.toISOString()}` });
+      }
+      // issue-certificate | renew through an enrolled ACME agent.
+      const agentId = input.agentId || process.env.AUTOMATION_DEFAULT_AGENT_ID;
+      if (!agentId) throw new WorkerError("NOT_CONFIGURED", "Certificate issuance/renewal requires an enrolled server agent (agentId or AUTOMATION_DEFAULT_AGENT_ID). No certificate was issued.", false);
+      if (!domain) throw new WorkerError("NOT_FOUND", "Domain is not attached to a project", false);
+      if (!domain.dnsVerified) throw new WorkerError("WAITING_EXTERNAL", "DNS ownership must be verified before certificate issuance", false);
+      const { runAgent } = await import("./platform-workers");
+      const command = input.action === "renew" ? "ssl.renew" : "ssl.issue";
+      const issued = await runAgent(ctx, agentId, command, { domain: input.domain }, "job", 5 * 60_000);
+      const info = await runAgent(ctx, agentId, "ssl.info", { domain: input.domain }, "job", 30_000);
+      const data = info.data as { notAfter?: string; notBefore?: string; issuer?: string; mode?: string };
+      const notAfter = data.notAfter ? new Date(data.notAfter) : null;
+      if (!notAfter || Number.isNaN(notAfter.getTime()) || notAfter.getTime() <= Date.now()) throw new WorkerError("VERIFICATION_REQUIRED", "Agent could not verify a valid installed certificate after issuance", false);
+      const notBefore = data.notBefore ? new Date(data.notBefore) : new Date();
+      // End-to-end proof: a real TLS handshake against the node's listener
+      // with SNI for this domain. The certificate must not only exist on disk
+      // — it must be the one actually served.
+      let handshake: { issuer?: string; notAfter?: string; verifyReturnCode?: string } | null = null;
+      try {
+        // No port passed on purpose: the node's ssl helper targets its own
+        // edge listener (it knows the real port from the edge state file).
+        const tlsProbe = await runAgent(ctx, agentId, "ssl.verify-tls", { domain: input.domain }, "job", 30_000);
+        handshake = tlsProbe.data as { issuer?: string; notAfter?: string };
+      } catch (error) {
+        throw new WorkerError("VERIFICATION_REQUIRED", `Certificate is installed but live TLS termination could not be verified: ${error instanceof Error ? error.message : String(error)}`, false);
+      }
+      await db.sslCertificate.upsert({ where: { domainId: domain.id }, create: { domainId: domain.id, issuer: data.issuer ?? handshake?.issuer ?? "unknown", notBefore, notAfter }, update: { issuer: data.issuer ?? handshake?.issuer ?? "unknown", notBefore, notAfter } });
+      await db.domain.update({ where: { id: domain.id }, data: { sslEnabled: true, sslStatus: "ISSUED", certificateExpiry: notAfter } });
+      return ok({ domain: input.domain, taskId: issued.taskId, issuer: data.issuer, mode: data.mode ?? "acme", notAfter, tlsHandshakeVerified: true }, `Certificate ${input.action === "renew" ? "renewed" : "issued"} (${data.mode ?? "acme"}), parsed by ssl.info and proven served by a live TLS handshake`, { evidence: `agentTaskId=${issued.taskId}; notAfter=${notAfter.toISOString()}; handshake=ok` });
     },
   }),
 );
@@ -856,12 +1115,79 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "PRIVILEGED",
     requiredScopes: ["monitoring:read", "recovery:execute"],
+    retrySafe: (input) => input.action === "check",
+    riskForInput: (input) => input.action === "check" ? "READ_ONLY" : "PRIVILEGED",
+    scopesForInput: (input) => input.action === "check" ? ["monitoring:read"] : ["monitoring:read", "recovery:execute"],
     defaultMaxAttempts: 3,
     defaultTimeoutMs: 2 * 60_000,
     inputSchema: monitoringInput,
     async handler(input, ctx) {
       if (input.action === "recover") {
         if (!input.projectId) throw new WorkerError("VALIDATION_FAILED", "projectId is required for recovery");
+        // Remote (node-assigned) projects roll back through their agent:
+        // deploy.rollback (a preapproved recovery verb), then restart the
+        // supervised process and verify the live release identity again.
+        const remoteProject = await db.gitProject.findUnique({ where: { id: input.projectId }, select: { agentId: true, config: true, websiteId: true } });
+        if (remoteProject?.agentId) {
+          const config = validateDeployConfig(JSON.parse(remoteProject.config || "{}"));
+          const website = await db.website.findUnique({ where: { id: remoteProject.websiteId } });
+          if (!website) throw new WorkerError("NOT_FOUND", "Website not found", false);
+          const { runAgent } = await import("./platform-workers");
+          const before = await runAgent(ctx, remoteProject.agentId, "deploy.list", { domain: website.domain }, "job", 30_000);
+          const beforeRelease = String((before.data as { currentRelease?: string | null }).currentRelease ?? "");
+          await ctx.progress(30, `node current release ${beforeRelease || "none"}; rolling back to the previous verified release`);
+          const rollback = await runAgent(ctx, remoteProject.agentId, "deploy.rollback", { domain: website.domain }, "policy:self-heal", 60_000);
+          const after = await runAgent(ctx, remoteProject.agentId, "deploy.list", { domain: website.domain }, "job", 30_000);
+          const afterRelease = String((after.data as { currentRelease?: string | null }).currentRelease ?? "");
+          if (!afterRelease || afterRelease === beforeRelease) {
+            return fail("ROLLBACK_FAILED", `deploy.rollback reported success but the active release is unchanged (${afterRelease || "none"})`, { data: { projectId: input.projectId, beforeRelease, afterRelease, taskId: rollback.taskId } });
+          }
+          // Restart the supervised process so it serves the restored release
+          // (a node process keeps its old modules until restarted), then
+          // verify health + release identity through the agent. app.restart is
+          // one of the preapproved recovery verbs.
+          await runAgent(ctx, remoteProject.agentId, "app.restart", { domain: website.domain }, "policy:self-heal", 60_000);
+          // A restored release directory keeps the marker written by the
+          // deployment that BUILT it — by definition not the newest deployment
+          // row — so verify against the commit identities this platform has
+          // actually verified for the project, without pinning the deployment.
+          const verifiedRows = await db.deployment.findMany({
+            where: { projectId: input.projectId, status: "SUCCESS", verifiedCommitSha: { not: null } },
+            select: { verifiedCommitSha: true },
+            orderBy: { createdAt: "desc" },
+            take: 20,
+          });
+          const acceptedShas = [...new Set(verifiedRows.map((row) => row.verifiedCommitSha).filter((sha): sha is string => Boolean(sha)))];
+          if (acceptedShas.length > 0) {
+            const { verifyRemoteRelease } = await import("@/lib/deploy/remote");
+            const verified = await verifyRemoteRelease(ctx, remoteProject.agentId, website.domain, { port: config.port, healthPath: config.healthPath }, acceptedShas, null, "job");
+            if (!verified.ok) {
+              return fail("ROLLBACK_UNVERIFIED", `Rollback to ${afterRelease} did not pass verification (${verified.reason})`, { data: { projectId: input.projectId, beforeRelease, afterRelease } });
+            }
+            // Record the rollback as the project's newest verified state —
+            // the local engine does the same — so future health checks
+            // compare against the restored release instead of the deployment
+            // that was rolled away from.
+            const rollbackDeployment = await db.deployment.create({
+              data: {
+                websiteId: website.id,
+                projectId: input.projectId,
+                executedByAgentId: remoteProject.agentId,
+                trigger: "rollback",
+                source: "rollback",
+                status: "SUCCESS",
+                stage: "done",
+                startedAt: new Date(),
+                finishedAt: new Date(),
+                commitHash: verified.marker?.commitSha ?? null,
+                verifiedCommitSha: verified.marker?.commitSha ?? null,
+              },
+            });
+            await db.website.update({ where: { id: website.id }, data: { currentReleasePath: afterRelease, healthStatus: "HEALTHY" } });
+            return ok({ projectId: input.projectId, before: beforeRelease, after: afterRelease, commitSha: verified.marker?.commitSha, rollbackDeploymentId: rollbackDeployment.id, checkedVia: "node-agent" }, `Rolled back to ${afterRelease} on the node and re-verified the live release`, { evidence: `rollbackTaskId=${rollback.taskId}; commit=${verified.marker?.commitSha ?? "n/a"}` });
+          }
+          return ok({ projectId: input.projectId, before: beforeRelease, after: afterRelease, verifiedIdentity: false }, `Rolled back to ${afterRelease}; no stored verified release identity to compare against`, { evidence: `rollbackTaskId=${rollback.taskId}` });
+        }
         const before = await currentReleaseDir(input.projectId);
         await ctx.progress(30, `current release ${before ?? "none"}; rolling back to the last verified release`);
         // Reuse the engine's tested rollback: it picks the last SUCCESS release
@@ -970,6 +1296,9 @@ registerWorker(
     execution: "LOCAL",
     maxRisk: "DESTRUCTIVE", // restore-drill writes to an isolated target
     requiredScopes: ["backup:read", "backup:write", "backup:restore"],
+    retrySafe: (input) => input.action === "verify",
+    riskForInput: (input) => input.action === "verify" ? "READ_ONLY" : input.action === "snapshot-record" ? "REVERSIBLE" : "DESTRUCTIVE",
+    scopesForInput: (input) => input.action === "verify" ? ["backup:read"] : input.action === "snapshot-record" ? ["backup:write"] : ["backup:read", "backup:restore"],
     defaultMaxAttempts: 2,
     defaultTimeoutMs: 15 * 60_000,
     inputSchema: backupInput,
@@ -1036,9 +1365,9 @@ registerWorker(
       if (input.action === "snapshot-record") {
         const id = randomUUID();
         await ctx.progress(50, "recording backup metadata");
-        return ok(
+        return unverified(
           { snapshotId: id, note: "metadata record only" },
-          `Snapshot record ${id} created. No artifact was produced by this worker; use scripts/backup.sh for the actual copy.`,
+          `Snapshot record ${id} is metadata only. No artifact was produced; schedule PLATFORM_OPS backup-site to create and verify a real backup.`,
         );
       }
 
@@ -1067,5 +1396,11 @@ function safeParse(raw: string | null): unknown {
     return raw;
   }
 }
+
+// Central platform handlers reuse this registry and the same job lifecycle.
+import { platformWorker, workflowStepWorker, aiDiagnosisWorker } from "./platform-workers";
+registerWorker(platformWorker);
+registerWorker(workflowStepWorker);
+registerWorker(aiDiagnosisWorker);
 
 export type { WorkerDefinition };

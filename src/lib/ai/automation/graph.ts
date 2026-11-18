@@ -21,6 +21,11 @@ export const WORKFLOW_NODE_TYPES = [
   "hosting.cloudProjects",
   "logic.condition",
   "transform.template",
+  // Mechanical structural assertion (two-tier verification): checks a prior
+  // step's output without spending tokens — exists/equals/contains/matches/
+  // minLength/maxLength/minCount/maxCount/gte/lte/range. Fails the step (and
+  // by default the run) when the assertion does not hold.
+  "verify.assert",
   "output",
 ] as const;
 

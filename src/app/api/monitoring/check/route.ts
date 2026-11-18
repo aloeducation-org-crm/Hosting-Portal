@@ -5,7 +5,6 @@ import { requirePermission, assertWebsiteAccess } from '@/lib/auth';
 import { db } from '@/lib/db';
 import tls from 'node:tls';
 import { callHelper } from '@/lib/helpers';
-import { readFileSync } from 'fs';
 import { existsSync } from 'fs';
 
 const checkSchema = z.object({
@@ -20,16 +19,17 @@ function handleErr(e: unknown): NextResponse {
   return NextResponse.json(apiError('Internal server error'), { status: 500 });
 }
 
-async function checkSystemdUnit(domain: string): Promise<{ state: string | null }> {
+async function checkSystemdUnit(domain: string): Promise<{ state: string | null; ok?: boolean | null; note?: string }> {
   try {
-    const unitPath = `/etc/systemd/system/alo-${domain}.service`;
+    // The provisioning/lifecycle helpers own `alo-site-<domain>.service`.
+    // A file's existence is not evidence that the process is running.
+    const unitPath = `/etc/systemd/system/alo-site-${domain}.service`;
     if (!existsSync(unitPath)) {
-      return { state: 'not_found' };
+      return { state: 'not_found', ok: false };
     }
-    const content = readFileSync(unitPath, 'utf-8');
-    return { state: 'exists' };
+    return { state: 'exists', ok: null, note: 'unit file exists but runtime state was not verified' };
   } catch {
-    return { state: 'error' };
+    return { state: 'error', ok: false };
   }
 }
 
@@ -61,7 +61,7 @@ async function checkPublicUrl(domain: string): Promise<{ ok: boolean; status: nu
 
 async function checkSsl(domain: string): Promise<{ ok: boolean; daysUntilExpiry: number | null; error: string | null }> {
   // Treat stored domains as untrusted too: TLS APIs avoid shell interpretation entirely.
-  if (!/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/.test(domain)) {
+  if (!/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))*$/.test(domain)) {
     return { ok: false, daysUntilExpiry: null, error: 'Invalid domain stored for website' };
   }
   return new Promise((resolve) => {
@@ -105,12 +105,15 @@ export async function POST(request: NextRequest) {
     // Try helper first
     let helperUsed = false;
     try {
-      const helperResult = await callHelper('alo-health-helper', [website.id]);
+      const helperResult = await callHelper('alo-health-helper', ['check', website.domain, ...(website.applicationPort ? [String(website.applicationPort), website.healthPath || '/'] : [])]);
       if (helperResult.success && helperResult.stdout) {
         try {
           const parsed = JSON.parse(helperResult.stdout);
           results.helperResult = parsed;
-          helperUsed = true;
+          if (typeof parsed.overall === 'string' && ['HEALTHY', 'DEGRADED', 'DOWN', 'UNKNOWN'].includes(parsed.overall)) {
+            results.overallStatus = parsed.overall;
+            helperUsed = true;
+          }
         } catch {
           results.helperRaw = helperResult.stdout;
         }
@@ -140,7 +143,7 @@ export async function POST(request: NextRequest) {
 
     // Determine overall status
     const checks = results.checks as Record<string, { ok?: boolean }> | undefined;
-    let overallStatus = 'HEALTHY';
+    let overallStatus = (results.overallStatus as string | undefined) ?? 'UNKNOWN';
     if (checks) {
       const allChecks = Object.values(checks);
       const hasDown = allChecks.some((c) => c.ok === false);
@@ -149,6 +152,8 @@ export async function POST(request: NextRequest) {
         overallStatus = 'DOWN';
       } else if (hasIssues) {
         overallStatus = 'DEGRADED';
+      } else if (allChecks.length > 0 && allChecks.every((c) => c.ok === true)) {
+        overallStatus = 'HEALTHY';
       }
     }
     results.overallStatus = overallStatus;

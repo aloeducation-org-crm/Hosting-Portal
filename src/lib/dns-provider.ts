@@ -18,7 +18,7 @@
  * value falls back to `local` — the safe, non-executing mode.
  */
 import { env } from "@/lib/env";
-import { upsertCloudflareDnsRecord } from "@/lib/cloudflare";
+import { upsertCloudflareDnsRecord, deleteCloudflareDnsRecord } from "@/lib/cloudflare";
 
 export const DNS_MODES = ["local", "cloudflare", "powerdns", "registrar"] as const;
 export type DnsMode = (typeof DNS_MODES)[number];
@@ -109,6 +109,8 @@ export interface PublishInput {
   value: string;
   ttl?: number;
   priority?: number;
+  /** Optional Cloudflare zone override for multi-domain zones. */
+  zoneId?: string;
 }
 
 export interface PublishResult {
@@ -138,13 +140,14 @@ export async function publishDnsRecord(input: PublishInput, mode: DnsMode = curr
     return { ok: false, executed: false, code: "DNS_PROVIDER_BLOCKED", note: state.blocker ?? "DNS provider blocked" };
   }
 
-  // cloudflare with credentials — a real API call.
+  // cloudflare with credentials — a real API call (with multi-zone resolution).
   const res = await upsertCloudflareDnsRecord({
     type: input.type as "A" | "AAAA" | "CNAME" | "TXT" | "MX",
     name: input.name,
     content: input.value,
     ttl: input.ttl,
     priority: input.priority,
+    zoneId: input.zoneId,
     proxied: false,
   });
   if (res.simulated || !res.success) {
@@ -169,8 +172,8 @@ export async function publishDnsRecord(input: PublishInput, mode: DnsMode = curr
 
 /**
  * Deletion gate. Local mode deletes from the panel store only. Executing
- * modes refuse: the panel does not store provider record IDs, so claiming an
- * external delete would be a lie.
+ * modes refuse unless a real provider record ID is supplied via
+ * `deleteDnsRecordFromProvider`.
  */
 export function deleteDnsGate(mode: DnsMode = currentDnsMode()): PublishResult {
   if (mode === "local") {
@@ -184,5 +187,46 @@ export function deleteDnsGate(mode: DnsMode = currentDnsMode()): PublishResult {
     note:
       state.blocker ??
       `Deletion while mode="${mode}" is refused: provider record IDs are not stored, so an external delete cannot be performed or verified.`,
+  };
+}
+
+/**
+ * Executes a verified external DNS record deletion when a Cloudflare provider
+ * record ID is available; otherwise delegates to `deleteDnsGate` so nothing is
+ * ever fabricated.
+ */
+export async function deleteDnsRecordFromProvider(
+  params: { hostname: string; providerRecordId?: string | null; zoneId?: string },
+  mode: DnsMode = currentDnsMode(),
+): Promise<PublishResult> {
+  if (mode === "local") {
+    return { ok: true, executed: false, note: LOCAL_BLOCKER };
+  }
+  if (mode !== "cloudflare" || !params.providerRecordId) {
+    return deleteDnsGate(mode);
+  }
+  const state = dnsPublicationState(mode);
+  if (state.state === "blocked") {
+    return { ok: false, executed: false, code: "DNS_PROVIDER_BLOCKED", note: state.blocker ?? "DNS provider blocked" };
+  }
+  const res = await deleteCloudflareDnsRecord({
+    hostname: params.hostname,
+    providerRecordId: params.providerRecordId,
+    zoneId: params.zoneId,
+  });
+  if (!res.success) {
+    return {
+      ok: false,
+      executed: false,
+      code: "DNS_DELETE_FAILED",
+      note: res.error ?? "Cloudflare record deletion failed",
+    };
+  }
+  lastLivePublishAt = new Date().toISOString();
+  return {
+    ok: true,
+    executed: true,
+    note: `Deleted from Cloudflare at ${lastLivePublishAt}.`,
+    providerRecordId: params.providerRecordId,
   };
 }

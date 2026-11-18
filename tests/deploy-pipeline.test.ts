@@ -128,10 +128,19 @@ describe("deployment shape decision", () => {
   });
 
   it("runs the read-only preflight script against this sandbox and reports the truth about it", () => {
-    // This sandbox has no systemd unit, no pm2 and no /etc/alo-hosting, so the
-    // honest answer is "blocked". What matters is that it answers, exits
-    // non-zero, and changes nothing.
+    // This sandbox has no systemd unit and no /etc/alo-hosting, so the honest
+    // answer is "blocked". What matters is that it answers, exits non-zero,
+    // reports each absent prerequisite exactly when it is absent (PM2 may be
+    // installed on hosts that run the node runtime kit), and changes nothing.
     const before = fs.readdirSync(REPO).sort();
+    const pm2Installed = (() => {
+      try {
+        execFileSync("bash", ["-lc", "command -v pm2"], { stdio: "ignore" });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
     let status = 0;
     let output = "";
     try {
@@ -150,7 +159,11 @@ describe("deployment shape decision", () => {
     const parsed = JSON.parse(output.slice(output.indexOf("{"), output.lastIndexOf("}") + 1));
     expect(parsed.decision.mode).toBe("blocked");
     expect(parsed.facts.commitSha).toBe(FULL_SHA);
-    expect(parsed.decision.missing.join(" ")).toContain("pm2");
+    if (!pm2Installed) {
+      expect(parsed.decision.missing.join(" ")).toContain("pm2");
+    } else {
+      expect(parsed.decision.missing.join(" ")).not.toContain("pm2");
+    }
     expect(fs.readdirSync(REPO).sort()).toEqual(before);
   });
 });

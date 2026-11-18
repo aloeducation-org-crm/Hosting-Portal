@@ -1,5 +1,5 @@
 import { completeWithAI } from "@/lib/ai/client";
-import { validateDeployConfig } from "@/lib/deploy/config";
+import { validateDeployConfig, isSafeServiceName, UnsafeCommandError } from "@/lib/deploy/config";
 import { detectFramework, memoryReader } from "@/lib/deploy/detect";
 import {
   ALO_SERVER_SPEC,
@@ -345,12 +345,21 @@ export async function architectAutoDeployPlan(
       input.repository?.split("/")[1] ||
       fallbackBlueprint.id,
   );
-  const safeServiceName = `alo-${derivedSlug}`;
   const rawDomain = input.domain?.trim().toLowerCase();
   const normalizedDomain =
     rawDomain && rawDomain !== ALO_SERVER_SPEC.controlPlane.domain
       ? rawDomain
       : `${derivedSlug}.${ALO_SERVER_SPEC.baseDomain}`;
+  // The provisioning helper (helpers/alo-node-app-helper) creates every site
+  // unit as `alo-site-<domain>` and restartExternalService can only act on a
+  // unit that already exists under exactly that name — so the blueprint must
+  // derive the same name instead of inventing a slug-based one.
+  const safeServiceName = `alo-site-${normalizedDomain}`;
+  if (!isSafeServiceName(safeServiceName)) {
+    throw new UnsafeCommandError(
+      `Domain "${normalizedDomain}" yields a service unit name that cannot be managed safely`,
+    );
+  }
   const normalizedBranch = input.branch?.trim() || "main";
   const normalizedRepo =
     input.repository && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(input.repository.trim())

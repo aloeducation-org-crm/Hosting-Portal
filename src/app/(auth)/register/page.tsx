@@ -71,14 +71,35 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [role, setRole] = useState<"CLIENT" | "RESELLER">("CLIENT");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [agreed, setAgreed] = useState(true);
+  const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [enabledOAuth, setEnabledOAuth] = useState<{ google: boolean; github: boolean }>({
+    google: false,
+    github: false,
+  });
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/providers")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled || !body?.data || !Array.isArray(body.data)) return;
+        const list = body.data as Array<{ id: string; enabled: boolean }>;
+        setEnabledOAuth({
+          google: Boolean(list.find((p) => p.id === "google")?.enabled),
+          github: Boolean(list.find((p) => p.id === "github")?.enabled),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const pwdStrength = getPasswordStrength(password);
 
@@ -91,7 +112,7 @@ export default function RegisterPage() {
       name: name.trim(),
       email: email.trim(),
       companyName: companyName.trim() || undefined,
-      role,
+      role: "CLIENT",
       password,
       confirmPassword,
       agreed,
@@ -140,10 +161,10 @@ export default function RegisterPage() {
           </div>
         </div>
         <CardTitle className="text-2xl font-bold text-slate-900">
-          Create your ALO Labs account
+          Request ALO Labs Portal Access
         </CardTitle>
         <CardDescription className="text-slate-500">
-          Start with our $0 free tier — no credit card required
+          New accounts require email verification and administrator approval
         </CardDescription>
       </CardHeader>
 
@@ -154,87 +175,59 @@ export default function RegisterPage() {
           </Alert>
         )}
 
-        {/* OAuth Signup */}
-        <div className="grid grid-cols-2 gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => signIn("google", { callbackUrl: "/onboarding" })}
-            disabled={loading}
-            className="w-full border-slate-200"
-          >
-            <Chrome className="mr-2 h-4 w-4 text-[#E8501A]" />
-            Google
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => signIn("github", { callbackUrl: "/onboarding" })}
-            disabled={loading}
-            className="w-full border-slate-200"
-          >
-            <Github className="mr-2 h-4 w-4" />
-            GitHub
-          </Button>
-        </div>
+        {(enabledOAuth.google || enabledOAuth.github) && (
+          <>
+            <div className={`grid gap-3 ${enabledOAuth.google && enabledOAuth.github ? "grid-cols-2" : "grid-cols-1"}`}>
+              {enabledOAuth.google && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => signIn("google", { callbackUrl: "/onboarding" })}
+                  disabled={loading}
+                  className="w-full border-slate-200"
+                >
+                  <Chrome className="mr-2 h-4 w-4 text-[#E8501A]" />
+                  Google
+                </Button>
+              )}
+              {enabledOAuth.github && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => signIn("github", { callbackUrl: "/onboarding" })}
+                  disabled={loading}
+                  className="w-full border-slate-200"
+                >
+                  <Github className="mr-2 h-4 w-4" />
+                  GitHub
+                </Button>
+              )}
+            </div>
 
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t border-slate-200" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-white px-2 text-slate-400">
-              Or register with email
-            </span>
-          </div>
-        </div>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-slate-200" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-slate-400">
+                  Or register with email
+                </span>
+              </div>
+            </div>
+          </>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
-          {/* Role selector */}
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => setRole("CLIENT")}
-              className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all ${
-                role === "CLIENT"
-                  ? "border-[#E8501A] bg-[#FFF7ED]/70 ring-1 ring-[#E8501A]"
-                  : "border-slate-200 hover:border-slate-300"
-              }`}
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="text-xs font-bold text-slate-900">
-                  Client Account
-                </span>
-                {role === "CLIENT" && (
-                  <CheckCircle2 className="h-4 w-4 text-[#E8501A]" />
-                )}
-              </div>
-              <span className="text-[11px] text-slate-500 mt-0.5">
-                Deploy sites, databases &amp; AI apps
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-left">
+            <div className="flex items-center justify-between w-full">
+              <span className="text-xs font-bold text-slate-900">
+                Workspace Member Account
               </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setRole("RESELLER")}
-              className={`flex flex-col items-start rounded-xl border p-3 text-left transition-all ${
-                role === "RESELLER"
-                  ? "border-[#E8501A] bg-[#FFF7ED]/70 ring-1 ring-[#E8501A]"
-                  : "border-slate-200 hover:border-slate-300"
-              }`}
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="text-xs font-bold text-slate-900">
-                  Reseller Partner
-                </span>
-                {role === "RESELLER" && (
-                  <CheckCircle2 className="h-4 w-4 text-[#E8501A]" />
-                )}
-              </div>
-              <span className="text-[11px] text-slate-500 mt-0.5">
-                Manage clients &amp; earn commissions
-              </span>
-            </button>
+              <CheckCircle2 className="h-4 w-4 text-[#E8501A]" />
+            </div>
+            <span className="text-[11px] text-slate-500 mt-0.5 block">
+              Standard member role. Organization and operator permissions are assigned by an administrator upon approval.
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

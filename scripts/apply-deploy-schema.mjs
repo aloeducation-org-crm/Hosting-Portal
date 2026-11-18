@@ -183,6 +183,16 @@ const MIGRATIONS = [
       },
     },
   },
+  // Keep after the optional rebuild: a fresh apply must not add tables that a
+  // later rebuild could obscure. This migration only creates automation tables.
+  { name: "20261111190000_central_automation", kind: "ADDITIVE" },
+  // Remote node deployment: pin the enrolled compute node (ServerAgent) a
+  // GitProject deploys to. Additive nullable column + index on git_projects.
+  { name: "20261112120000_remote_node_deployment", kind: "ADDITIVE" },
+  // AI workflow engine: causal trace ids on ai_workflow_runs. Additive nullable
+  // column + lookup index so a run can be found from a log line that only
+  // carries the traceId. Resumability reuses the existing steps column.
+  { name: "20261115120000_ai_workflow_assertions_trace", kind: "ADDITIVE" },
 ];
 
 function registry() {
@@ -408,9 +418,9 @@ function releaseLock() {
  */
 const REQUIRED_SCHEMA = {
   git_connections: ["id", "accountLogin", "tokenEncrypted"],
-  git_projects: ["id", "websiteId", "repository", "config", "port"],
+  git_projects: ["id", "websiteId", "repository", "config", "port", "agentId"],
   webhook_deliveries: ["id", "deliveryId", "signatureValid", "result"],
-  deployments: ["id", "stage", "verifiedCommitSha", "configSnapshot"],
+  deployments: ["id", "stage", "verifiedCommitSha", "configSnapshot", "executedByAgentId"],
   hosting_sites: ["id", "domainName", "sslStatus", "vhostPath", "serverId"],
   servers: ["id", "hostname", "ipAddress", "cpuUsage", "memoryUsage", "diskUsage"],
   audit_logs: ["id", "action", "actorEmail", "resourceType", "resourceId", "timestamp", "operationJobId"],

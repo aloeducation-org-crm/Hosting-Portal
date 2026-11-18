@@ -1,0 +1,23 @@
+[Unit]
+Description=ALO Hosting encrypted, verified backup (encrypted-backup.mjs)
+After=network-online.target alo-hosting-panel.service
+
+# TEMPLATE — install deliberately, do not enable blindly:
+#   1. Ensure /etc/alo-hosting/panel.env sets ALO_BACKUP_DIR to the backup
+#      directory (default in this unit: /var/backups/alo) and either
+#      ALO_BACKUP_ENCRYPTION_KEY or ALO_BACKUP_KEY_FILE points at the KEK.
+#   2. Point ALO_BACKUP_OFFSITE_DIR at a MOUNTED REMOTE (sshfs/rclone mount of a
+#      bucket in another region/provider). A second directory on the same disk
+#      is not offsite.
+#   3. systemctl enable --now alo-encrypted-backup.timer
+[Service]
+Type=oneshot
+User=alo-panel
+Group=alo-panel
+EnvironmentFile=-/etc/alo-hosting/panel.env
+ExecStart=/bin/sh -c '/usr/bin/node /opt/alo-hosting/current/scripts/encrypted-backup.mjs --out "${ALO_BACKUP_DIR:-/var/backups/alo}" --label scheduled --offsite-dir "${ALO_BACKUP_OFFSITE_DIR:-/var/backups/alo/offsite}" --key-file "${ALO_BACKUP_KEY_FILE:-/etc/alo-hosting/backup-kek}" --json'
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/alo /etc/alo-hosting

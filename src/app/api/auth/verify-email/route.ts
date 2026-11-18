@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
             verificationToken:
               process.env.NODE_ENV !== "production" ? newToken : undefined,
           },
-          "Verification email sent"
+          emailResult.sent ? "Verification email sent" : "Verification email was not sent. Check SMTP configuration or use the development token below."
         )
       );
     }

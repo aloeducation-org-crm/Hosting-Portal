@@ -99,6 +99,13 @@ action_add_account() {
   local password="$3"
   local quota_mb="${4:-500}"
 
+  if [[ "$password" == "--stdin" ]]; then
+    IFS= read -r password || die "add-account" "Missing password on stdin"
+  fi
+  if [[ -z "$password" ]]; then
+    die "add-account" "Password must not be empty"
+  fi
+
   validate_domain "$domain"
   validate_email_local "$local_part"
   validate_quota "$quota_mb"
@@ -122,9 +129,10 @@ action_add_account() {
   postmap "$vmap_file" 2>/dev/null || true
   log_info "Added mailbox mapping for ${full_address}"
 
-  # Set password via Dovecot's doveadm
+  # Set password via Dovecot's doveadm (over stdin so it never appears in ps/argv)
   if command -v doveadm &>/dev/null; then
-    doveadm pw -s SHA512-CRYPT -p "$password" > "${mail_dir}/.password_hash" 2>/dev/null || true
+    printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT > "${mail_dir}/.password_hash" 2>/dev/null || true
+    chmod 600 "${mail_dir}/.password_hash" 2>/dev/null || true
   fi
 
   # Set quota
@@ -257,6 +265,76 @@ action_domain_status() {
   json_out "{\"success\":true,\"step\":\"domain-status\",\"domain\":\"${domain}\",\"configured\":${has_domain},\"postfixEnabled\":${postfix_enabled},\"accountCount\":${account_count}}"
 }
 
+# ── action: set-password ────────────────────────────────────────────────────
+action_set_password() {
+  if [[ $# -lt 3 ]]; then
+    die "set-password" "Usage: set-password <domain> <local-part> <--stdin|password>"
+  fi
+
+  local domain="$1"
+  local local_part="$2"
+  local password="$3"
+
+  if [[ "$password" == "--stdin" ]]; then
+    IFS= read -r password || die "set-password" "Missing password on stdin"
+  fi
+  if [[ -z "$password" ]]; then
+    die "set-password" "Password must not be empty"
+  fi
+
+  validate_domain "$domain"
+  validate_email_local "$local_part"
+
+  local full_address="${local_part}@${domain}"
+  local mail_dir="${VMAIL_DIR}/${domain}/${local_part}"
+  if [[ ! -d "$mail_dir" ]]; then
+    die "set-password" "Email account does not exist: ${full_address}"
+  fi
+
+  if command -v doveadm &>/dev/null; then
+    printf '%s\n%s\n' "$password" "$password" | doveadm pw -s SHA512-CRYPT > "${mail_dir}/.password_hash" 2>/dev/null || \
+      die "set-password" "Failed to hash password for ${full_address}"
+    chmod 600 "${mail_dir}/.password_hash" 2>/dev/null || true
+  fi
+
+  systemctl reload dovecot 2>/dev/null || true
+  json_out "{\"success\":true,\"step\":\"set-password\",\"address\":\"${full_address}\",\"message\":\"Password updated\"}"
+}
+
+# ── action: set-status ──────────────────────────────────────────────────────
+action_set_status() {
+  if [[ $# -lt 3 ]]; then
+    die "set-status" "Usage: set-status <domain> <local-part> <active|disabled>"
+  fi
+
+  local domain="$1"
+  local local_part="$2"
+  local state="$3"
+
+  validate_domain "$domain"
+  validate_email_local "$local_part"
+  if [[ "$state" != "active" && "$state" != "disabled" ]]; then
+    die "set-status" "State must be 'active' or 'disabled'"
+  fi
+
+  local full_address="${local_part}@${domain}"
+  local mail_dir="${VMAIL_DIR}/${domain}/${local_part}"
+  if [[ ! -d "$mail_dir" ]]; then
+    die "set-status" "Email account does not exist: ${full_address}"
+  fi
+
+  if [[ "$state" == "disabled" ]]; then
+    touch "${mail_dir}/.disabled"
+    chmod 600 "${mail_dir}/.disabled" 2>/dev/null || true
+  else
+    rm -f "${mail_dir}/.disabled"
+  fi
+
+  systemctl reload postfix 2>/dev/null || true
+  systemctl reload dovecot 2>/dev/null || true
+  json_out "{\"success\":true,\"step\":\"set-status\",\"address\":\"${full_address}\",\"state\":\"${state}\",\"message\":\"Mailbox status updated\"}"
+}
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 case "$ACTION" in
   add-domain)      action_add_domain "$@" ;;
@@ -264,6 +342,8 @@ case "$ACTION" in
   delete-account)  action_delete_account "$@" ;;
   set-quota)       action_set_quota "$@" ;;
   get-quota)       action_get_quota "$@" ;;
+  set-password)    action_set_password "$@" ;;
+  set-status)      action_set_status "$@" ;;
   domain-status)   action_domain_status "$@" ;;
   *)               die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

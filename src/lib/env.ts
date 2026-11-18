@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+function envBoolean(defaultValue: boolean) {
+  return z.preprocess((val) => {
+    if (typeof val === "boolean") return val;
+    if (typeof val === "number") return val !== 0;
+    if (typeof val === "string") {
+      const normalized = val.trim().toLowerCase();
+      if (!normalized) return undefined;
+      if (["1", "true", "yes", "on"].includes(normalized)) return true;
+      if (["0", "false", "no", "off"].includes(normalized)) return false;
+    }
+    return val;
+  }, z.boolean().default(defaultValue));
+}
+
 const envSchema = z.object({
   // Application
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
@@ -32,11 +46,11 @@ const envSchema = z.object({
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(10000).default(100),
 
   // Feature flags
-  ALLOW_STATIC: z.coerce.boolean().default(true),
-  ALLOW_PHP: z.coerce.boolean().default(true),
-  ALLOW_NODE: z.coerce.boolean().default(true),
-  ALLOW_NEXTJS: z.coerce.boolean().default(true),
-  COMMERCIAL_HOSTING: z.coerce.boolean().default(false),
+  ALLOW_STATIC: envBoolean(true),
+  ALLOW_PHP: envBoolean(true),
+  ALLOW_NODE: envBoolean(true),
+  ALLOW_NEXTJS: envBoolean(true),
+  COMMERCIAL_HOSTING: envBoolean(false),
 
   // OAuth Providers
   GOOGLE_CLIENT_ID: z.string().optional().default(""),
@@ -58,6 +72,21 @@ const envSchema = z.object({
   // Cloudflare DNS & SSL
   CLOUDFLARE_API_TOKEN: z.string().optional().default(""),
   CLOUDFLARE_ZONE_ID: z.string().optional().default(""),
+  // Cloudflare Registrar (domain purchases) — distinct from DNS records above.
+  // The Registrar API needs the account ID and the token must carry
+  // Account:Registrar:Edit in addition to Zone:DNS:Edit.
+  CLOUDFLARE_ACCOUNT_ID: z.string().optional().default(""),
+  // Which DNS publication mode the panel uses: "local" (panel-only store),
+  // "cloudflare" (Zone DNS API), "powerdns" (blocked), "registrar" (now wired).
+  DNS_PROVIDER_MODE: z.preprocess(
+    (val) => {
+      if (typeof val !== "string") return val;
+      const normalized = val.trim().toLowerCase();
+      if (!normalized || normalized === "none") return "local";
+      return normalized;
+    },
+    z.enum(["local", "cloudflare", "powerdns", "registrar"]).default("local"),
+  ),
 
   // Hostinger public API (Server C)
   HOSTINGER_API_TOKEN: z.string().optional().default(""),
@@ -123,8 +152,12 @@ export function findUnsafeProductionSecrets(data: {
   return unsafe;
 }
 
-function loadEnv(input?: EnvInput) {
-  const raw: EnvInput = input ?? process.env;
+export function loadEnv(input?: EnvInput) {
+  const source: EnvInput = input ?? process.env;
+  const raw: EnvInput = {};
+  for (const [key, value] of Object.entries(source)) {
+    raw[key] = typeof value === "string" && value.trim() === "" ? undefined : value;
+  }
   const result = envSchema.safeParse(raw);
 
   if (!result.success) {
@@ -138,10 +171,10 @@ function loadEnv(input?: EnvInput) {
 
   // Runtime security: block server startup (not build) if production uses default or template placeholder secrets
   const isBuildWorker =
-    !!process.env.NEXT_WORKER_ID ||
-    !!process.env.BUILD_ID ||
-    process.env.NEXT_PHASE === "phase-production-build" ||
-    process.env.npm_lifecycle_event === "build";
+    !!raw.NEXT_WORKER_ID ||
+    !!raw.BUILD_ID ||
+    raw.NEXT_PHASE === "phase-production-build" ||
+    raw.npm_lifecycle_event === "build";
   const data = result.data;
   if (data.NODE_ENV === "production" && !isBuildWorker) {
     const unsafeKeys = findUnsafeProductionSecrets(data);

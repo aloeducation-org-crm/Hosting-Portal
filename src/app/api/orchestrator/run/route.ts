@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { verifyInternalSecretValue } from "@/lib/auth";
-import { orchestrator } from "@/lib/orchestrator/orchestrator";
+import { runAutomationTick } from "@/lib/orchestrator/engine";
 import { WORKER_KINDS, type WorkerKind } from "@/lib/orchestrator/contracts";
 import { logger } from "@/lib/logger";
 
@@ -41,18 +41,9 @@ export async function POST(request: NextRequest) {
     const kinds = kindsParam.filter((k): k is WorkerKind => (WORKER_KINDS as readonly string[]).includes(k));
     const lockKey = url.searchParams.get("lockKey") ?? undefined;
 
-    const recovered = await orchestrator.recoverAbandoned();
-    const ran: string[] = [];
-    for (let i = 0; i < maxJobs; i++) {
-      const jobId = await orchestrator.runNext(workerId, { lockKey, kinds: kinds.length ? kinds : undefined });
-      if (!jobId) break;
-      ran.push(jobId);
-    }
-
-    if (recovered.jobIds.length || ran.length) {
-      logger.info({ workerId, ran, recovered }, "orchestrator tick");
-    }
-    return NextResponse.json(apiSuccess({ workerId, ran, recovered, queue: await orchestrator.queueDepth() }));
+    const result = await runAutomationTick({ workerId, maxJobs, kinds: kinds.length ? kinds : undefined, lockKey });
+    if (result.recovered.jobIds.length || result.ran.length) logger.info({ workerId, ran: result.ran, recovered: result.recovered }, "orchestrator tick");
+    return NextResponse.json(apiSuccess(result));
   } catch (e) {
     return handleErr(e);
   }

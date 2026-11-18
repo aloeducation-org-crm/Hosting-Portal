@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { apiSuccess } from "@/lib/response";
+import { apiSuccess, apiError } from "@/lib/response";
 import { requireSession, requirePermission } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { validateDeployConfig, deployConfigSchema } from "@/lib/deploy/config";
 import { badRequest, canAccessProject, errorResponse, forbidden, notFound } from "@/lib/deploy/http";
+import { assertDeploySettingsChangeAllowed, HostLevelSettingError } from "@/lib/deploy/host-settings";
 import { createAuditLog } from "@/lib/audit";
 import { assertNotCloudMetadataUrl } from '@/lib/security/url-guard';
 
@@ -79,6 +80,29 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!parsed.success) return badRequest(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
 
     const current = validateDeployConfig(JSON.parse(loaded.project.config || "{}"));
+    // SEC-11: a tenant may not introduce or change host-level settings (port,
+    // serviceName, serviceManager). Baseline reserved values are refused for
+    // everyone; changes require an operator role.
+    const requested = parsed.data.config ?? {};
+    try {
+      assertDeploySettingsChangeAllowed(
+        {
+          port: parsed.data.port ?? requested.port ?? current.port,
+          serviceName: requested.serviceName ?? current.serviceName ?? null,
+          serviceManager: requested.serviceManager ?? current.serviceManager ?? null,
+        },
+        current,
+        user.role,
+      );
+    } catch (e) {
+      if (e instanceof HostLevelSettingError) {
+        return NextResponse.json(
+          apiError(e.message, "OPERATOR_ONLY_SETTING", { field: e.field }, 403),
+          { status: 403 },
+        );
+      }
+      throw e;
+    }
     const merged = validateDeployConfig({
       ...current,
       ...(parsed.data.config ?? {}),

@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily ALO Hosting encrypted backup with post-encryption verification
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=900
+AccuracySec=5min
+Unit=alo-encrypted-backup.service
+
+[Install]
+WantedBy=timers.target

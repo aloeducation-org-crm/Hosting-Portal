@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+#
+# ALO Labs Hosting Portal — App Helper (node runtime kit)
+# Manages site application processes through PM2 as the unprivileged alo-panel
+# user. Called by the node agent via sudo with validated arguments.
+#
+# Commands:
+#   up      <domain> <port> <type> <commandOrRoot> [healthPath]
+#           type=node   -> commandOrRoot is the start command (npm start / node server.js)
+#           type=static -> commandOrRoot is the static output dir relative to current
+#   restart <domain>
+#   stop    <domain>
+#   status  <domain>
+#   list
+#
+set -euo pipefail
+
+SITE_BASE="/srv/alo-sites"
+APPS_DIR="/etc/alo-hosting/apps"
+APP_USER="alo-panel"
+APP_GROUP="alo-panel"
+PM2_HOME_DIR="/opt/alo-hosting/pm2"
+STATIC_SERVER="/usr/local/bin/alo-static-server.mjs"
+NODE_BIN="$(command -v node || echo /usr/bin/node)"
+PM2_BIN="$(command -v pm2 || echo /usr/local/bin/pm2)"
+
+log_err() { printf '[alo-app-helper] ERROR: %s\n' "$*" >&2; }
+log_info() { printf '[alo-app-helper] INFO: %s\n' "$*" >&2; }
+json_out() { printf '%s\n' "$*"; }
+
+die() {
+  local step="$1"
+  local msg="$2"
+  json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
+  exit 1
+}
+
+json_escape() {
+  local s="$1"
+  local bs=$'\\' q=$'"' nl=$'\n' cr=$'\r' tab=$'\t'
+  s="${s//$bs/$bs$bs}"
+  s="${s//$q/\\$q}"
+  s="${s//$nl/\\n}"
+  s="${s//$cr/\\r}"
+  s="${s//$tab/\\t}"
+  printf '%s' "$s"
+}
+
+validate_domain() {
+  if [[ ! "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+    die "arg-validation" "Invalid domain format: $1"
+  fi
+}
+
+validate_port() {
+  if [[ ! "$1" =~ ^[0-9]+$ || "$1" -lt 1024 || "$1" -gt 65535 ]]; then
+    die "arg-validation" "Invalid port: $1 (must be 1024-65535)"
+  fi
+}
+
+validate_start_command() {
+  local cmd="$1"
+  if [[ -z "$cmd" ]]; then
+    die "arg-validation" "Start command cannot be empty"
+  fi
+  if [[ ${#cmd} -gt 300 ]]; then
+    die "arg-validation" "Start command too long"
+  fi
+  if [[ "$cmd" =~ [\$\`\;\&\|\<\>\(\)\{\}] ]]; then
+    die "arg-validation" "Start command contains forbidden characters"
+  fi
+  if [[ ! "$cmd" =~ ^(npm|npx|yarn|pnpm|bun|node)([[:space:]]|$) ]]; then
+    die "arg-validation" "Start command must start with npm, npx, yarn, pnpm, bun or node"
+  fi
+}
+
+validate_output_root() {
+  local root="$1"
+  if [[ ${#root} -gt 200 || "$root" == *..* || "$root" == /* ]]; then
+    die "arg-validation" "Static output root must be a relative path without '..'"
+  fi
+}
+
+pm2_as_app_user() {
+  runuser -u "$APP_USER" -- env \
+    PM2_HOME="$PM2_HOME_DIR" \
+    PATH="/usr/local/bin:/usr/bin:/bin" \
+    HOME="/opt/alo-hosting-portal" \
+    "$PM2_BIN" "$@"
+  return $?
+}
+
+# Ensure the PM2 daemon is alive before issuing a command. Normally the pm2 CLI
+# spawns it on demand; some minimal/container hosts reject that spawn (EACCES
+# from a hardened runtime) even though the daemon itself runs fine when started
+# directly. Starting God Daemon ourselves and waiting for the socket makes every
+# host work, and is a no-op when the daemon is already alive.
+ensure_pm2_daemon() {
+  pm2_as_app_user jlist >/dev/null 2>&1 && return 0
+  local pm2_real daemon_js i
+  pm2_real="$(readlink -f "$PM2_BIN" 2>/dev/null || echo "")"
+  [[ -n "$pm2_real" ]] || return 1
+  daemon_js="$(dirname "$(dirname "$pm2_real")")/lib/Daemon.js"
+  [[ -f "$daemon_js" ]] || return 1
+  # Neutral cwd: the daemon inherits ours; a 0700 caller home would break
+  # every app spawn with EACCES on chdir.
+  ( cd / && runuser -u "$APP_USER" -- env \
+    PM2_HOME="$PM2_HOME_DIR" \
+    PATH="/usr/local/bin:/usr/bin:/bin" \
+    HOME="/opt/alo-hosting-portal" \
+    setsid "$NODE_BIN" "$daemon_js" </dev/null >>"$PM2_HOME_DIR/pm2.log" 2>&1 & )
+  for i in $(seq 1 20); do
+    pm2_as_app_user jlist >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  log_err "PM2 daemon did not become reachable at $PM2_HOME_DIR"
+  return 1
+}
+
+pm2_json() {
+  # pm2 jlist, filtered to ALO site processes; always valid JSON.
+  local out
+  out=$(pm2_as_app_user jlist 2>/dev/null || echo "[]")
+  printf '%s' "$out" | jq -c '[.[] | select((.name // "") | startswith("alo-"))]' 2>/dev/null || echo "[]"
+}
+
+COMMAND="${1:?Usage: alo-app-helper <command> [args...]}"
+shift
+
+case "$COMMAND" in
+  up)
+    DOMAIN="${1:?Usage: up <domain> <port> <type> <commandOrRoot> [healthPath]}"
+    PORT="${2:?Usage: up <domain> <port> <type> <commandOrRoot> [healthPath]}"
+    TYPE="${3:?Usage: up <domain> <port> <type> <commandOrRoot> [healthPath]}"
+    CMD_OR_ROOT="${4:?Usage: up <domain> <port> <type> <commandOrRoot> [healthPath]}"
+    HEALTH_PATH="${5:-/}"
+
+    validate_domain "$DOMAIN"
+    validate_port "$PORT"
+    if [[ "$TYPE" != "node" && "$TYPE" != "static" ]]; then
+      die "arg-validation" "type must be 'node' or 'static'"
+    fi
+    if [[ "$TYPE" == "node" ]]; then
+      validate_start_command "$CMD_OR_ROOT"
+    else
+      validate_output_root "$CMD_OR_ROOT"
+    fi
+
+    SITE_DIR="$SITE_BASE/$DOMAIN"
+    CURRENT_DIR="$SITE_DIR/current"
+    SERVICE_NAME="alo-$DOMAIN"
+
+    if [[ ! -d "$SITE_DIR" ]]; then
+      die "up" "Site directory does not exist: $SITE_DIR"
+    fi
+    if [[ ! -L "$CURRENT_DIR" && ! -d "$CURRENT_DIR" ]]; then
+      die "up" "No current release for $DOMAIN; deploy before starting the app"
+    fi
+
+    mkdir -p "$APPS_DIR"
+    chown root:"$APP_GROUP" "$APPS_DIR"
+    chmod 0750 "$APPS_DIR"
+
+    # Persist the declared runtime so restarts after reboot/reclaim rebuild it.
+    CONFIG_FILE="$APPS_DIR/$DOMAIN.json"
+    ESCAPED_CMD=$(json_escape "$CMD_OR_ROOT")
+    ESCAPED_HEALTH=$(json_escape "$HEALTH_PATH")
+    cat > "$CONFIG_FILE" <<CONFIG
+{
+  "domain": "$DOMAIN",
+  "port": $PORT,
+  "type": "$TYPE",
+  "commandOrRoot": "$ESCAPED_CMD",
+  "healthPath": "$ESCAPED_HEALTH",
+  "updatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+CONFIG
+    chmod 0640 "$CONFIG_FILE"
+    chown root:"$APP_GROUP" "$CONFIG_FILE"
+
+    ensure_pm2_daemon || die "up" "PM2 daemon is not reachable at $PM2_HOME_DIR"
+    if [[ "$TYPE" == "static" ]]; then
+      pm2_as_app_user start "$NODE_BIN" --name "$SERVICE_NAME" \
+        -- "$STATIC_SERVER" --site "$SITE_DIR" --root "$CMD_OR_ROOT" --port "$PORT" >/dev/null \
+        || die "up" "pm2 failed to start static server for $DOMAIN"
+    else
+      # pm2 tracks a bash wrapper that execs the validated start command, so
+      # any npm/npx/node/bun start command works and restarts stay reliable.
+      # The command and domain are already validated against metacharacters.
+      runuser -u "$APP_USER" -- env \
+        PM2_HOME="$PM2_HOME_DIR" \
+        PATH="/usr/local/bin:/usr/bin:/bin" \
+        HOME="/opt/alo-hosting-portal" \
+        bash -c "pm2 start bash --name '$SERVICE_NAME' --cwd '$CURRENT_DIR' -- -c 'export PORT=$PORT HOST=127.0.0.1 NODE_ENV=production; exec $CMD_OR_ROOT'" >/dev/null \
+        || die "up" "pm2 failed to start app for $DOMAIN"
+    fi
+
+    pm2_as_app_user save >/dev/null 2>&1 || true
+
+    log_info "started $SERVICE_NAME ($TYPE) on 127.0.0.1:$PORT"
+    json_out "{\"success\":true,\"domain\":\"$DOMAIN\",\"service\":\"$SERVICE_NAME\",\"type\":\"$TYPE\",\"port\":$PORT,\"startedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  restart)
+    DOMAIN="${1:?Usage: restart <domain>}"
+    validate_domain "$DOMAIN"
+    SERVICE_NAME="alo-$DOMAIN"
+    ensure_pm2_daemon || die "restart" "PM2 daemon is not reachable at $PM2_HOME_DIR"
+    if ! pm2_as_app_user restart "$SERVICE_NAME" --update-env >/dev/null 2>&1; then
+      die "restart" "pm2 could not restart $SERVICE_NAME (not running?)"
+    fi
+    json_out "{\"success\":true,\"domain\":\"$DOMAIN\",\"service\":\"$SERVICE_NAME\",\"restartedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  stop)
+    DOMAIN="${1:?Usage: stop <domain>}"
+    validate_domain "$DOMAIN"
+    SERVICE_NAME="alo-$DOMAIN"
+    pm2_as_app_user stop "$SERVICE_NAME" >/dev/null 2>&1 || true
+    json_out "{\"success\":true,\"domain\":\"$DOMAIN\",\"service\":\"$SERVICE_NAME\",\"stoppedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  status)
+    DOMAIN="${1:?Usage: status <domain>}"
+    validate_domain "$DOMAIN"
+    SERVICE_NAME="alo-$DOMAIN"
+    STATE=$(pm2_as_app_user jlist 2>/dev/null | jq -r --arg n "$SERVICE_NAME" '.[] | select(.name == $n) | .pm2_env.status' 2>/dev/null | head -1 || true)
+    if [[ -z "$STATE" ]]; then
+      STATE="not-started"
+    fi
+    RESTARTS=$(pm2_as_app_user jlist 2>/dev/null | jq -r --arg n "$SERVICE_NAME" '.[] | select(.name == $n) | .pm2_env.restart_time' 2>/dev/null | head -1 || true)
+    json_out "{\"success\":true,\"domain\":\"$DOMAIN\",\"service\":\"$SERVICE_NAME\",\"state\":\"$STATE\",\"restarts\":${RESTARTS:-0},\"checkedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  list)
+    PROCS=$(pm2_json)
+    COUNT=$(printf '%s' "$PROCS" | jq 'length' 2>/dev/null || echo 0)
+    json_out "{\"success\":true,\"processes\":$PROCS,\"count\":$COUNT,\"listedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+    ;;
+
+  *)
+    echo "Usage: alo-app-helper <up|restart|stop|status|list> [args...]" >&2
+    exit 64
+    ;;
+esac

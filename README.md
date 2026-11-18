@@ -22,15 +22,15 @@ agents, CRM, billing, monitoring, SSL lifecycle and site provisioning.
 Hosting-Portal/                         ← THE APP (name: alo-hosting-panel)
 ├── package.json / package-lock.json    single dependency set (Node >= 22, CI 22)
 ├── next.config.ts                      output: "standalone", security headers, redirects
-├── src/                                590 files: app router, API, components, lib
+├── src/                                636 files: app router, API, components, lib
 │   ├── app/(auth)/                     /login, /register, /verify-email
 │   ├── app/(dashboard)/                admin/dashboard route groups
-│   ├── app/api/                        252 route handlers
+│   ├── app/api/                        270 route handlers
 │   └── proxy.ts                        auth, RBAC, CSRF and rate-limit edge gate
-├── prisma/                             schema.prisma (122 models), seed.ts, 16 migrations
-├── db/custom.db                        development fixture (122 tables, random credentials)
+├── prisma/                             schema.prisma (127 models), seed.ts, 19 migrations
+├── db/custom.db                        development fixture (127 tables, random credentials)
 ├── public/                             3 static assets
-├── tests/                              65 Vitest suites + isolation harness
+├── tests/                              87 Vitest suites + isolation harness
 ├── helpers/                            19 root-owned privileged helpers + installer
 ├── deploy/                             ALL deployment configuration
 │   ├── ubuntu-setup.sh                 single Ubuntu provisioning entrypoint
@@ -82,7 +82,7 @@ npm run dev                  # http://localhost:3101
 ```
 
 `db/custom.db` is a **development fixture**, not a production database. It has
-all 122 tables and three seeded users whose passwords are randomly generated at
+all 127 tables and three seeded users whose passwords are randomly generated at
 seed time and never printed. To create a development login you control:
 
 ```bash
@@ -132,7 +132,7 @@ bash scripts/server-doctor.sh
 node scripts/e2e-smoke.mjs http://127.0.0.1:3051   # needs PANEL_PASSWORD
 ```
 
-`npm test` runs 65 Vitest suites. Tests that touch the database use
+`npm test` runs 87 Vitest suites. Tests that touch the database use
 `tests/helpers/isolated-db.ts`, which copies the fixture to a temp directory, so
 the tracked database is never mutated by a test run.
 
@@ -154,6 +154,7 @@ the tracked database is never mutated by a test run.
 Full runbook: [DEPLOY.md](DEPLOY.md) and
 [docs/DEPLOYMENT-AND-ROLLBACK.md](docs/DEPLOYMENT-AND-ROLLBACK.md).
 Git-connected auto-deploy: [docs/GIT-AUTODEPLOY.md](docs/GIT-AUTODEPLOY.md).
+Free-tier service directory: [docs/FREE-FOR-DEV-CATALOG.md](docs/FREE-FOR-DEV-CATALOG.md).
 Roadmap honesty: [docs/ROADMAP-STATUS.md](docs/ROADMAP-STATUS.md).
 
 ## Security notes

@@ -68,6 +68,9 @@ export async function POST(request: NextRequest) {
     if (!websiteId) {
       throw apiError('websiteId is required', 'VALIDATION_ERROR', undefined, 400);
     }
+    if (commitHash !== undefined && !/^[0-9a-f]{40}$/.test(commitHash)) {
+      throw apiError('commitHash must be a full 40-character Git SHA', 'VALIDATION_ERROR', undefined, 400);
+    }
 
     // Verify website exists
     const website = await db.website.findUnique({
@@ -118,8 +121,9 @@ export async function POST(request: NextRequest) {
       data: {
         websiteId,
         source: 'git-push',
-        commitHash,
+        commitHash: commitHash ?? null,
         status: 'PENDING',
+        stage: commitHash ? 'queued' : 'waiting_for_commit',
       },
     });
 

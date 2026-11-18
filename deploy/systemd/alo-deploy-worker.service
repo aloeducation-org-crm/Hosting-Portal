@@ -1,0 +1,79 @@
+# Standalone deployment worker (REL-03).
+#
+# Runs scripts/deploy-worker.ts (bundled to deploy-worker.cjs at build time) so
+# PENDING deployments are claimed by a supervised process rather than by a
+# request handler. Set DEPLOY_INLINE_WORKER=false in the panel environment too,
+# otherwise both processes compete for rows -- they cannot double-build (the
+# claim is atomic) but the panel's request latency suffers for no benefit.
+#
+# Install:
+#   sudo cp deploy/systemd/alo-deploy-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now alo-deploy-worker
+#
+# The unit drains its in-flight deployment on SIGTERM. TimeoutStopSec is 1900 s
+# because DEPLOY_COMMAND_TIMEOUT_MS defaults to 10 min per command and a build
+# runs several commands; a shorter window would kill a healthy build and leave a
+# release directory in an unknown state.
+[Unit]
+Description=ALO Labs Hosting Portal Deploy Worker
+Documentation=https://github.com/aloeducation-org-crm/Hosting-Portal
+After=network-online.target alo-hosting-panel.service
+Wants=network-online.target
+PartOf=alo-hosting-panel.service
+
+[Service]
+Type=simple
+User=alo-panel
+Group=alo-panel
+WorkingDirectory=/opt/alo-hosting/current/.next/standalone
+EnvironmentFile=/etc/alo-hosting/panel.env
+Environment=NODE_ENV=production
+Environment=DEPLOY_INLINE_WORKER=false
+Environment=DEPLOY_WORKER_INTERVAL_MS=2000
+Environment=DEPLOY_WORKER_BATCH=5
+Environment=DEPLOY_WORKER_HEARTBEAT_FILE=/run/alo-hosting/deploy-worker.json
+ExecStart=/usr/bin/node /opt/alo-hosting/current/.next/standalone/deploy-worker.cjs
+Restart=always
+RestartSec=5s
+TimeoutStartSec=30
+TimeoutStopSec=1900
+LimitNOFILE=65535
+MemoryMax=2G
+MemorySwapMax=0
+OOMPolicy=kill
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alo-deploy-worker
+RuntimeDirectory=alo-hosting
+RuntimeDirectoryMode=0750
+
+# Matches the panel: only root-owned allowlisted helpers may elevate via sudo.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+ReadWritePaths=/var/lib/alo-hosting
+ReadWritePaths=-/srv/alo-sites
+ReadWritePaths=-/var/backups/alo-sites
+ReadWritePaths=-/opt/alo-hosting/logs
+ReadWritePaths=-/opt/alo-hosting/current/.next/cache
+ReadWritePaths=-/opt/alo-hosting/releases
+ReadWritePaths=-/etc/caddy
+ReadWritePaths=-/etc/nginx
+ReadWritePaths=-/etc/systemd/system
+ReadWritePaths=-/etc/letsencrypt
+ReadWritePaths=-/var/lib/letsencrypt
+ReadWritePaths=-/var/log/letsencrypt
+ReadWritePaths=-/etc/alo-dns
+ReadWritePaths=-/etc/bind
+ReadWritePaths=-/var/cache/bind
+ReadWritePaths=-/var/log/caddy
+ReadWritePaths=-/var/log/nginx
+
+[Install]
+WantedBy=multi-user.target

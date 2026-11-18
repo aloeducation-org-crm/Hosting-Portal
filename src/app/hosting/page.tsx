@@ -110,7 +110,7 @@ export default function HostingHubPage() {
                   <ArrowRight className="size-4" />
                 </a>
                 <a
-                  href="/support"
+                  href="/contact"
                   className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-[#1E293B] transition-colors hover:border-[#E8501A] hover:text-[#E8501A]"
                 >
                   Ask which plan fits

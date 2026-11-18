@@ -271,8 +271,11 @@ restore() {
   npm ci --include=dev >/dev/null 2>&1 || log "warning: npm ci failed during restore"
   npx prisma generate >/dev/null 2>&1 || log "warning: prisma generate failed during restore"
   npm run build >/dev/null 2>&1 || { log "RESTORE FAILED at build; manual intervention required"; return 1; }
+  npm run build:worker >/dev/null 2>&1 || { log "RESTORE FAILED at worker build; manual intervention required"; return 1; }
   if [[ -f "$BACKUP_DIR/$IDENTITY_FILE" ]]; then cp -a "$BACKUP_DIR/$IDENTITY_FILE" "$IDENTITY_FILE"; else rm -f "$IDENTITY_FILE"; fi
   restart_panel
+  restart_automation_worker || log "warning: restored panel is running but the automation worker needs operator attention"
+  restart_deploy_worker || log "warning: restored panel is running but the deploy worker needs operator attention"
   if verify_health "$PREV_SHA"; then
     log "restored and verified commit ${PREV_SHA}"
     return 0
@@ -289,6 +292,17 @@ restart_panel() {
     || { log "could not restart the panel through pm2"; return 1; }
   pm2 save >/dev/null 2>&1 || true
   sleep 4
+}
+
+restart_automation_worker() {
+  # The bundle is built beside server.js. Never fall back to tsx/dev sources in
+  # production, and never silently leave the panel as the only queue consumer.
+  [[ -s "$APP_DIR/.next/standalone/automation-worker.cjs" ]] \
+    || { log "automation worker bundle missing; run npm run build:worker"; return 1; }
+  DEPLOY_INLINE_WORKER=false pm2 restart alo-automation-worker --update-env >/dev/null 2>&1 \
+    || DEPLOY_INLINE_WORKER=false pm2 start "$APP_DIR/.next/standalone/automation-worker.cjs" --name alo-automation-worker >/dev/null 2>&1 \
+    || { log "could not restart the durable automation worker through pm2"; return 1; }
+  pm2 save >/dev/null 2>&1 || true
 }
 
 # The health probe must identify the *release*, not merely answer. A response
@@ -394,7 +408,7 @@ changed=1
 log "checked out ${SHA}"
 
 npm ci --include=dev
-npx prisma generate
+npm run db:generate
 
 # ── 3d. Schema: ADDITIVE only, explicit target, verified ─────────────────────
 # No --allow-rebuild: a deployment may never rewrite an existing table. The
@@ -406,6 +420,7 @@ DATABASE_URL="$DB_URL" node "$APP_DIR/scripts/apply-deploy-schema.mjs" --verify 
   || fail "post-migration verification failed"
 
 npm run build
+npm run build:worker
 
 # ── 3e. Record what is now running ──────────────────────────────────────────
 ARTIFACT_SHA="null"
@@ -426,6 +441,8 @@ log "recorded release identity ${DEPLOYMENT_ID}"
 
 
 restart_panel
+restart_automation_worker || fail "panel restarted but the durable automation worker did not; restoring ${PREV_SHA}"
+restart_deploy_worker || fail "panel restarted but the durable deploy worker did not; restoring ${PREV_SHA}"
 
 # ── 3f. Prove it ────────────────────────────────────────────────────────────
 verify_health "$SHA" || fail "health probe did not confirm release ${SHA} (commit SHA, database and schema). Restoring ${PREV_SHA}."

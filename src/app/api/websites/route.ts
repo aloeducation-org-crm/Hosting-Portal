@@ -4,6 +4,7 @@ import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
 import { requireSession, requirePermission, ROLES } from '@/lib/auth';
 import { callHelper } from '@/lib/helpers';
 import { db } from '@/lib/db';
+import { assertWithinPlanLimit, EntitlementError } from '@/lib/billing/entitlements';
 
 const createSchema = z.object({
   domain: z.string().min(1).max(253),
@@ -47,6 +48,24 @@ export async function POST(request: NextRequest) {
     const existing = await db.website.findUnique({ where: { domain: input.domain } });
     if (existing && !existing.deletedAt) {
       return NextResponse.json(apiError('Domain already in use', 'CONFLICT', undefined, 409), { status: 409 });
+    }
+
+    /**
+     * SEC-03: plan limits were stored and displayed but never enforced here, so
+     * every plan behaved like the largest one. The check runs BEFORE the
+     * privileged provisioning helper, so a refused request costs nothing and
+     * cannot leave a half-provisioned site behind.
+     */
+    try {
+      await assertWithinPlanLimit(user.id, 'sites');
+    } catch (error) {
+      if (error instanceof EntitlementError) {
+        return NextResponse.json(
+          apiError(error.message, error.code, error.customerAction ? { customerAction: error.customerAction } : undefined, error.status),
+          { status: error.status },
+        );
+      }
+      throw error;
     }
 
     let port: number | undefined;

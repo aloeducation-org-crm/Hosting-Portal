@@ -2,9 +2,19 @@ import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
+import {
+  applyEntitlementChange,
+  adminGrantAuthorization,
+  type PlanRecord,
+} from "@/lib/billing/entitlements";
 import { requireSession, isAdminRole, type AuthUser } from "@/lib/auth";
 import { apiError, apiSuccess, type ApiResponse } from "@/lib/response";
 import { createAuditLog } from "@/lib/audit";
+import {
+  assertOperatorCommandAllowed,
+  OperatorForbiddenError,
+  type OperatorCommand,
+} from "@/lib/operator/command-policy";
 import { ensureDefaultAgentsSeeded } from "@/lib/seed-agents";
 import { resolveProviders } from "@/lib/ai/providers";
 import { generateMarketingKit } from "@/lib/marketing/suite";
@@ -14,6 +24,7 @@ import {
   allocateNextAvailablePort,
   assertTenantPortAllowed,
 } from "@/lib/deploy/server-spec";
+import { assertBaselineDeploySettings, HostLevelSettingError } from "@/lib/deploy/host-settings";
 
 const OperatorRequestSchema = z.object({
   command: z
@@ -82,6 +93,14 @@ function handleErr(e: unknown): NextResponse {
     return NextResponse.json(
       apiError("Validation failed", "VALIDATION_ERROR", e.flatten(), 400),
       { status: 400 },
+    );
+  }
+  // Checked before the generic `status`-bearing branch below, which would
+  // serialise an Error instance to `{}` and return a 403 with no explanation.
+  if (e instanceof OperatorForbiddenError) {
+    return NextResponse.json(
+      apiError(e.message, "FORBIDDEN", { command: e.command, rationale: e.rationale }, 403),
+      { status: 403 },
     );
   }
   if (e && typeof e === "object" && "status" in e) {
@@ -357,11 +376,42 @@ export async function POST(request: NextRequest) {
       if (inferred.extractedEmail && !params.email) params.email = inferred.extractedEmail;
     }
 
+    // Authorise the *concrete* command, after any natural-language inference has
+    // been resolved. Checking here — rather than trusting the declared command —
+    // is what stops a prompt like "upgrade me to enterprise" from reaching the
+    // entitlement-changing branch through `natural_language`.
+    try {
+      assertOperatorCommandAllowed(user, effectiveCommand as OperatorCommand);
+    } catch (denied) {
+      // Record the attempt before rethrowing. A customer trying to self-grant a
+      // plan is a security event, not a routine 403: it must be reviewable.
+      await createAuditLog({
+        actorId: user.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        action: `BILL_AGENT_AI_${effectiveCommand.toUpperCase()}`,
+        resourceType: "AiAgent",
+        resourceId: billAgent?.id ?? "alo-bill-ops-autopilot",
+        result: "FAILURE",
+        metadata: {
+          authMode,
+          command: effectiveCommand,
+          reason: "operator command requires an administrative role",
+          durationMs: Date.now() - startedAt,
+        },
+      }).catch(() => undefined);
+      throw denied;
+    }
+
     let summaryBn = "";
     let summaryEn = "";
     let actionResult: Record<string, unknown> = {};
 
     if (effectiveCommand === "activate_plan") {
+      // Re-asserted at the branch, not only at dispatch: this branch mints a
+      // paid entitlement, so it must never be reachable by a customer session
+      // even if the dispatch gate above is refactored away.
+      assertOperatorCommandAllowed(user, "activate_plan");
       const rawSlug = String(params.planSlug || params.planId || "business").toLowerCase();
       const targetSlug = rawSlug === "premium" ? "business" : rawSlug;
       const cycle = params.billingCycle === "yearly" ? "yearly" : "monthly";
@@ -377,69 +427,29 @@ export async function POST(request: NextRequest) {
         throw new Error("No active hosting plans configured");
       }
 
-      const amountCents = cycle === "yearly" ? plan.priceCents * 10 : plan.priceCents;
-      const amountUsd = Number((amountCents / 100).toFixed(2));
-      const now = new Date();
-      const periodEnd = new Date(now);
-      if (cycle === "yearly") periodEnd.setFullYear(periodEnd.getFullYear() + 1);
-      else periodEnd.setMonth(periodEnd.getMonth() + 1);
-      const orderNumber = `ORD-${Date.now().toString(36).toUpperCase()}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`;
-
-      const txResult = await db.$transaction(async (tx) => {
-        await tx.subscription.updateMany({
-          where: { userId: user.id, status: "active" },
-          data: { status: "cancelled", cancelledAt: now },
-        });
-        const subscription = await tx.subscription.create({
-          data: {
-            userId: user.id,
-            planId: plan.id,
-            status: "active",
-            currentPeriodStart: now,
-            currentPeriodEnd: periodEnd,
-          },
-          include: { plan: true },
-        });
-        const order = await tx.order.create({
-          data: {
-            orderNumber,
-            userId: user.id,
-            totalCents: amountCents,
-            currency: "USD",
-            status: "completed",
-            paymentMethod: "bill_agent_ai",
-            completedAt: now,
-            items: {
-              create: [
-                {
-                  type: "plan_upgrade",
-                  description: `${plan.name} (${cycle})`,
-                  quantity: 1,
-                  unitPriceCents: amountCents,
-                  totalCents: amountCents,
-                },
-              ],
-            },
-          },
-        });
-        const invoice = await tx.invoice.create({
-          data: {
-            userId: user.id,
-            subscriptionId: subscription.id,
-            amountCents,
-            currency: "USD",
-            status: "paid",
-            dueDate: periodEnd,
-            paidAt: now,
-          },
-        });
-        return { subscription, order, invoice };
+      /**
+       * SEC-03: this branch used to contain its own copy of the billing writes —
+       * a subscription, an order and a `paid` invoice — so the entitlement rule
+       * existed in three places and was fixed in three different pull requests.
+       * It now delegates to the single service. The amount, the invoice status
+       * and the audit metadata all come from that service, so the AI path cannot
+       * drift from the customer and onboarding paths again.
+       */
+      const granted = await applyEntitlementChange({
+        userId: user.id,
+        plan: plan as PlanRecord,
+        billingCycle: cycle,
+        authorization: adminGrantAuthorization(
+          { id: user.id, role: user.role },
+          "AI operator activate_plan command by an administrator",
+        ),
       });
-
-      summaryBn = `বিল এজেন্ট এআই সফলভাবে "${plan.name}" প্ল্যান ($${amountUsd.toFixed(2)}) চালু করেছে এবং পেইড ইনভয়েস জেনারেট করেছে।`;
-      summaryEn = `Bill Agent AI activated the "${plan.name}" plan ($${amountUsd.toFixed(2)}) and issued paid invoice #${txResult.invoice.id.slice(0, 8).toUpperCase()}.`;
-      actionResult = txResult;
+      const amountUsd = Number((granted.amountCents / 100).toFixed(2));
+      summaryBn = `বিল এজেন্ট এআই সফলভাবে "${plan.name}" প্ল্যান ($${amountUsd.toFixed(2)}) চালু করেছে এবং ইনভয়েস তৈরি করেছে।`;
+      summaryEn = `Bill Agent AI activated the "${plan.name}" plan ($${amountUsd.toFixed(2)}) and opened invoice #${(granted.invoiceId ?? "").slice(0, 8).toUpperCase()}.`;
+      actionResult = granted as unknown as Record<string, unknown>;
     } else if (effectiveCommand === "generate_invoice") {
+      assertOperatorCommandAllowed(user, "generate_invoice");
       const amountUsd = Math.max(0.5, Number(params.amount ?? 49));
       const amountCents = Math.round(amountUsd * 100);
       const status = params.markPaid === true ? "paid" : "pending";
@@ -459,6 +469,7 @@ export async function POST(request: NextRequest) {
       summaryEn = `Bill Agent AI generated invoice #${invoice.id.slice(0, 8).toUpperCase()} for $${amountUsd.toFixed(2)} (${status}).`;
       actionResult = { invoice };
     } else if (effectiveCommand === "mark_invoice_paid") {
+      assertOperatorCommandAllowed(user, "mark_invoice_paid");
       const invoiceId = String(params.invoiceId || "");
       const target = invoiceId
         ? await db.invoice.findUnique({ where: { id: invoiceId } })
@@ -496,6 +507,9 @@ export async function POST(request: NextRequest) {
       const usedPorts = await collectUsedPorts();
       if (params.port !== undefined) {
         assertTenantPortAllowed(Number(params.port));
+        // SEC-11: refuse the platform's full reserved port set, not just the
+        // historically documented control-plane port.
+        assertBaselineDeploySettings({ port: Number(params.port), serviceName: null });
       }
 
       const plan = await architectAutoDeployPlan({
@@ -520,14 +534,14 @@ export async function POST(request: NextRequest) {
             name: plan.appName,
             domain: plan.domain,
             runtime: plan.websiteRuntime,
-            status: "ACTIVE",
+            status: "DEPLOYING",
             documentRoot: `/srv/alo-sites/${plan.domain}`,
             applicationPort: plan.allocatedPort,
             startupCommand: plan.deployConfig.startCmd ?? null,
             buildCommand: plan.deployConfig.buildCmd ?? null,
             outputDirectory: plan.deployConfig.outputDir,
             healthPath: plan.deployConfig.healthPath,
-            healthStatus: "HEALTHY",
+            healthStatus: "UNKNOWN",
             ownerId: user.id,
           },
         });
@@ -535,7 +549,7 @@ export async function POST(request: NextRequest) {
           data: {
             domain: plan.domain,
             primary: true,
-            sslEnabled: true,
+            sslEnabled: false,
             sslStatus: "PENDING",
             dnsVerified: false,
             nameservers: JSON.stringify(["ns1.alolabs.net", "ns2.alolabs.net"]),
@@ -548,9 +562,9 @@ export async function POST(request: NextRequest) {
             actorId: user.id,
             branch: "main",
             trigger: "BILL_AGENT_AI_OPERATOR",
-            status: "SUCCESS",
-            stage: "verify",
-            buildOutput: `[Bill Agent AI] Allocated port ${plan.allocatedPort} on ${ALO_SERVER_SPEC.hostName} (${ALO_SERVER_SPEC.publicIp}).`,
+            status: "PENDING",
+            stage: "waiting_for_repository",
+            buildOutput: `[Bill Agent AI] Allocation record created; port ${plan.allocatedPort} reserved on ${ALO_SERVER_SPEC.hostName}. Connect a repository and run the central lifecycle workflow before any deployment can be verified.`,
           },
         });
         if (targetServer) {
@@ -571,9 +585,9 @@ export async function POST(request: NextRequest) {
         return { website, deployment };
       });
 
-      summaryBn = `বিল এজেন্ট এআই "${plan.domain}" সাইটটি ${ALO_SERVER_SPEC.hostName}-এ পোর্ট ${plan.allocatedPort}-এ সফলভাবে প্রভিশন করেছে।`;
-      summaryEn = `Bill Agent AI provisioned "${plan.domain}" on ${ALO_SERVER_SPEC.hostName} (port ${plan.allocatedPort}).`;
-      actionResult = { ...provisioned, shareableYaml: plan.shareableBriefYaml };
+      summaryBn = `বিল এজেন্ট এআই "${plan.domain}"-এর জন্য পোর্ট ${plan.allocatedPort} রিজার্ভ করেছে। ডিপ্লয়মেন্ট এখনও যাচাই হয়নি; রিপোজিটরি সংযোগ প্রয়োজন।`;
+      summaryEn = `Bill Agent AI reserved port ${plan.allocatedPort} for "${plan.domain}". This is an allocation record, not a verified deployment; a repository must be connected before the lifecycle workflow can run.`;
+      actionResult = { ...provisioned, automationStatus: "waiting_for_repository", shareableYaml: plan.shareableBriefYaml };
     } else if (effectiveCommand === "create_crm_lead") {
       const email = String(params.email || "").trim().toLowerCase();
       if (!email || !email.includes("@")) {

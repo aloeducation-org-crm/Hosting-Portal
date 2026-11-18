@@ -111,7 +111,9 @@ function VerifyEmailContent() {
           setToken(body.data.verificationToken);
         }
         setMessage(
-          "A new verification email has been dispatched via SMTP. Check your inbox or use the token below."
+          body.data?.sent
+            ? "A new verification email has been dispatched via SMTP. Check your inbox or use the token below."
+            : "The verification email was not sent. Check SMTP configuration or use the development token below."
         );
       }
     } catch {

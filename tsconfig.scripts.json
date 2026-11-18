@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "types": ["node"],
+    "plugins": []
+  },
+  "include": [
+    "scripts/orchestrator-worker.ts",
+    "scripts/build-automation-worker.mjs",
+    "src/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next", "archive", "download", "examples"]
+}

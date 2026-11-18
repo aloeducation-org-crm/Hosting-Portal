@@ -3,6 +3,14 @@ import { z } from "zod";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { createAuditLog } from "@/lib/audit";
+import {
+  findSelectablePlan,
+  applyEntitlementChange,
+  freeTierAuthorization,
+  adminGrantAuthorization,
+  isPaidPlan,
+} from "@/lib/billing/entitlements";
 
 const onboardingSchema = z.object({
   step: z.number().int().min(0).max(5).optional(),
@@ -12,6 +20,8 @@ const onboardingSchema = z.object({
   useCase: z.string().optional(),
   organizationName: z.string().optional(),
   planId: z.string().optional(),
+  /** Set by the storefront after a provider checkout redirect; verified server-side. */
+  transactionRef: z.string().min(1).max(200).optional(),
   site: z
     .object({
       name: z.string().optional(),
@@ -138,22 +148,58 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    /**
+     * SEC-03: onboarding used to write an `active` Subscription for any plan the
+     * caller named, which is the path every ordinary signup reaches. It now goes
+     * through the single entitlement service, exactly like `/api/subscriptions`.
+     *
+     * Onboarding is not a place to demand payment, so a paid plan named here is
+     * not rejected outright — it is recorded as the *intended* plan on the
+     * organization and the caller is told checkout is required. No subscription
+     * row is created until a payment is verified, which keeps "which plan did
+     * they ask for" and "which plan are they entitled to" as separate facts.
+     */
+    let planActivation: { activated: boolean; planId: string; reason?: string; code?: string } | null = null;
     if (input.planId) {
-      const plan = await db.plan.findUnique({ where: { id: input.planId } });
-      if (plan) {
-        await db.subscription.updateMany({
-          where: { userId: authUser.id, status: "active" },
-          data: { status: "cancelled", cancelledAt: new Date() },
-        });
-        await db.subscription.create({
-          data: {
-            userId: authUser.id,
+      const plan = await findSelectablePlan({ id: input.planId });
+      const isAdmin = authUser.role === "SUPER_ADMIN" || authUser.role === "ADMIN";
+      try {
+        const authorization = isPaidPlan(plan)
+          ? isAdmin
+            ? adminGrantAuthorization({ id: authUser.id, role: authUser.role }, `Plan selected during onboarding: ${plan.name}`)
+            : input.transactionRef
+              ? undefined
+              : undefined
+          : freeTierAuthorization("Free plan selected during onboarding");
+        if (!authorization) {
+          planActivation = {
+            activated: false,
             planId: plan.id,
-            status: "active",
-            currentPeriodStart: new Date(),
-            currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          },
-        });
+            reason: `${plan.name} is a paid plan; complete checkout to activate it.`,
+            code: "PAYMENT_REQUIRED",
+          };
+        } else {
+          const granted = await applyEntitlementChange({ userId: authUser.id, plan, authorization });
+          planActivation = { activated: true, planId: granted.planId };
+          await createAuditLog({
+            actorId: authUser.id,
+            actorEmail: authUser.email,
+            actorRole: authUser.role,
+            action: "SUBSCRIPTION_ACTIVATED",
+            resourceType: "Subscription",
+            resourceId: granted.subscriptionId,
+            result: "SUCCESS",
+            metadata: { planId: granted.planId, amountCents: granted.amountCents, entitlementSource: granted.source, via: "onboarding" },
+          });
+        }
+      } catch (error) {
+        // An entitlement problem must not abort the rest of onboarding.
+        planActivation = {
+          activated: false,
+          planId: plan.id,
+          reason: error instanceof Error ? error.message : "Plan could not be activated",
+          code: "PLAN_NOT_ACTIVATED",
+        };
       }
     }
 
@@ -193,6 +239,7 @@ export async function POST(request: NextRequest) {
           onboardingStep: updatedUser.onboardingStep,
           organization,
           site: createdSite,
+          plan: planActivation,
         },
         "Onboarding progress saved"
       )

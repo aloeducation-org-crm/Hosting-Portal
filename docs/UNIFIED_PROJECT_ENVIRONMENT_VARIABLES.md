@@ -30,6 +30,7 @@ When `NODE_ENV=production` (outside `next build`), `src/lib/env.ts` inspects fou
 | `APP_URL` | Yes (Prod) | `http://localhost:3101` | Canonical public URL (`https://hosting.alolabs.net` in production) |
 | `NEXTAUTH_URL` | Yes (Prod) | `http://localhost:3101` | NextAuth callback base URL (must match `APP_URL` in production) |
 | `DATABASE_URL` | Yes | `file:./db/custom.db` | LibSQL / SQLite connection URL. **Use an absolute path** (e.g., `file:/var/lib/alo-hosting-panel/custom.db` or `file:/opt/alo-hosting/db/custom.db`) when running `.next/standalone/server.js` so working-directory differences cannot split the DB file |
+| `DATABASE_BUSY_TIMEOUT_MS` | No | `5000` | SQLite `PRAGMA busy_timeout` applied to pooled `libsql` connections (`0`–`60000` ms) so concurrent panel/worker writes wait instead of failing with `SQLITE_BUSY` |
 | `CORS_ALLOWED_ORIGINS` | No | `""` (same-origin only) | Comma-separated exact origins allowed on `/api/*` (wildcard `*` is never permitted) |
 | `CROSS_ORIGIN_OPENER_POLICY` | No | `same-origin` | Value for `Cross-Origin-Opener-Policy` response header |
 | `CROSS_ORIGIN_RESOURCE_POLICY` | No | `same-site` | Value for `Cross-Origin-Resource-Policy` response header |
@@ -49,6 +50,9 @@ When `NODE_ENV=production` (outside `next build`), `src/lib/env.ts` inspects fou
 | `HELPER_TIMEOUT_SECONDS` | No | `120` | Max execution timeout (`5`–`3600`s) per privileged helper call |
 | `DEPLOY_TIMEOUT_SECONDS` | No | `1800` | Max timeout (`30`–`7200`s) per Git build/deploy pipeline run |
 | `DEPLOY_WEBHOOK_SECRET` | Recommended | Falls back to `INTERNAL_SECRET` | Dedicated secret (`>=16` chars) verified via `x-webhook-secret` header on `POST /api/deploy/webhook` |
+| `DEPLOY_LOCAL_EXECUTION` | No | `true` | When `"false"`, platform deploy jobs without a selected node agent fail closed with `WAITING_EXTERNAL` instead of executing locally |
+| `DEPLOY_PUBLIC_IP` | No | None | Advertised public IP of the deploy host, attached to deployment job context (`platform-workers` `runAgent`) |
+| `AUTOMATION_DEFAULT_AGENT_ID` | Recommended | None | Agent id used when an automation job (ACME issuance/renewal, DNS, restarts) has no explicit `agentId`; ACME workers fail closed with `NOT_CONFIGURED` when unset |
 | `CRON_SECRET` | Recommended | None (fails closed if unset) | Secret (`>=16` chars) for scheduled cron trigger endpoints |
 | `BACKUP_RETENTION_COUNT` | No | `14` | Number of per-site backups retained before rotation (`1`–`365`) |
 | `MAX_UPLOAD_SIZE_MB` | No | `500` | Maximum File Manager upload size (`1`–`5120` MB) |

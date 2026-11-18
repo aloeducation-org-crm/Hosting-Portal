@@ -45,6 +45,8 @@ interface DashboardStats {
   databases?: number;
   backups?: number;
   aiTokensUsed?: number;
+  storageUsedGb?: number | null;
+  bandwidthUsedGb?: number | null;
   maxSites?: number;
   maxStorageGb?: number;
   maxBandwidthGb?: number;
@@ -317,7 +319,7 @@ export default function DashboardOverview() {
                 <div>
                   <div className="text-xs text-slate-500 font-medium">Users &amp; Roles</div>
                   <div className="text-xl font-bold text-slate-900 mt-0.5">
-                    {adminSummary?.totalUsers ?? 3}
+                    {loading ? "—" : (adminSummary?.totalUsers ?? 0)}
                   </div>
                 </div>
                 <Users className="h-5 w-5 text-purple-600" />
@@ -330,7 +332,7 @@ export default function DashboardOverview() {
                 <div>
                   <div className="text-xs text-slate-500 font-medium">Server Nodes</div>
                   <div className="text-xl font-bold text-slate-900 mt-0.5">
-                    {adminSummary?.totalServers ?? 1}
+                    {loading ? "—" : (adminSummary?.totalServers ?? 0)}
                   </div>
                 </div>
                 <Server className="h-5 w-5 text-purple-600" />
@@ -343,7 +345,7 @@ export default function DashboardOverview() {
                 <div>
                   <div className="text-xs text-slate-500 font-medium">Active Plans</div>
                   <div className="text-xl font-bold text-slate-900 mt-0.5">
-                    {adminSummary?.activePlans ?? 3}
+                    {loading ? "—" : (adminSummary?.activePlans ?? 0)}
                   </div>
                 </div>
                 <Layers className="h-5 w-5 text-purple-600" />
@@ -356,7 +358,7 @@ export default function DashboardOverview() {
                 <div>
                   <div className="text-xs text-slate-500 font-medium">Audit Events</div>
                   <div className="text-xl font-bold text-slate-900 mt-0.5">
-                    {adminSummary?.recentAuditCount ?? 0}
+                    {loading ? "—" : (adminSummary?.recentAuditCount ?? 0)}
                   </div>
                 </div>
                 <FileText className="h-5 w-5 text-purple-600" />
@@ -438,22 +440,52 @@ export default function DashboardOverview() {
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-slate-700">NVMe SSD Storage</span>
-                <span className="text-slate-500">
-                  0.2 GB / {stats?.maxStorageGb ?? 1} GB (20%)
-                </span>
+                <span className="font-medium text-slate-700">NVMe SSD Storage Quota</span>
+                {typeof stats?.storageUsedGb === "number" ? (
+                  <span className="text-slate-500">
+                    {stats.storageUsedGb.toFixed(2)} GB / {stats?.maxStorageGb ?? 1} GB (
+                    {Math.min(100, Math.round((stats.storageUsedGb / Math.max(1, stats?.maxStorageGb ?? 1)) * 100))}%)
+                  </span>
+                ) : (
+                  <Link href="/dashboard/monitoring" className="text-slate-500 hover:text-[#E8501A]">
+                    Quota: {stats?.maxStorageGb ?? 1} GB · View host telemetry →
+                  </Link>
+                )}
               </div>
-              <Progress value={20} className="h-2" />
+              {typeof stats?.storageUsedGb === "number" && (
+                <Progress
+                  value={Math.min(
+                    100,
+                    Math.round((stats.storageUsedGb / Math.max(1, stats?.maxStorageGb ?? 1)) * 100),
+                  )}
+                  className="h-2"
+                />
+              )}
             </div>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-slate-700">Monthly Bandwidth</span>
-                <span className="text-slate-500">
-                  4.5 GB / {stats?.maxBandwidthGb ?? 100} GB (5%)
-                </span>
+                <span className="font-medium text-slate-700">Monthly Bandwidth Quota</span>
+                {typeof stats?.bandwidthUsedGb === "number" ? (
+                  <span className="text-slate-500">
+                    {stats.bandwidthUsedGb.toFixed(2)} GB / {stats?.maxBandwidthGb ?? 100} GB (
+                    {Math.min(100, Math.round((stats.bandwidthUsedGb / Math.max(1, stats?.maxBandwidthGb ?? 100)) * 100))}%)
+                  </span>
+                ) : (
+                  <Link href="/dashboard/monitoring" className="text-slate-500 hover:text-[#E8501A]">
+                    Quota: {stats?.maxBandwidthGb ?? 100} GB · Live metering via Monitoring →
+                  </Link>
+                )}
               </div>
-              <Progress value={5} className="h-2" />
+              {typeof stats?.bandwidthUsedGb === "number" && (
+                <Progress
+                  value={Math.min(
+                    100,
+                    Math.round((stats.bandwidthUsedGb / Math.max(1, stats?.maxBandwidthGb ?? 100)) * 100),
+                  )}
+                  className="h-2"
+                />
+              )}
             </div>
 
             <div className="space-y-1.5">

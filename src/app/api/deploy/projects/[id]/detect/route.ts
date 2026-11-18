@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiSuccess } from "@/lib/response";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { accessToken } from "@/lib/deploy/projects";
+import { tokenForProject } from "@/lib/deploy/connections";
 import { fetchRepoManifests } from "@/lib/deploy/github";
 import { detectFramework, memoryReader } from "@/lib/deploy/detect";
 import { configFromDetection } from "@/lib/deploy/config";
@@ -17,7 +17,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!project) return notFound("Project not found");
     const website = await db.website.findUnique({ where: { id: project.websiteId } });
     if (!canAccessProject(user, project, website)) return forbidden();
-    const source = await accessToken(project.connectionId);
+    // SEC-02: a project's stored connection is resolved through the module that
+    // owns connection policy, which refuses a revoked connection.
+    const source = await tokenForProject(project);
     const { files, truncated } = await fetchRepoManifests(source.token!, project.repository, project.productionBranch);
     const detection = await detectFramework(memoryReader(files));
     const config = configFromDetection(detection);

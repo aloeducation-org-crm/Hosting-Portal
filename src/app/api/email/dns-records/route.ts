@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       throw apiError('domain query parameter is required', 'VALIDATION_ERROR', undefined, 400);
     }
 
-    if (!/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))+$/.test(domain)) {
+    if (!/^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)(?:\.(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?))+$/.test(domain)) {
       return NextResponse.json(apiError('Invalid domain name', 'VALIDATION_ERROR', undefined, 400), { status: 400 });
     }
 

@@ -4,8 +4,9 @@ import { apiSuccess } from "@/lib/response";
 import { requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { resolveToken, deleteWebhook } from "@/lib/deploy/github";
+import { requireConnectionAccess } from "@/lib/deploy/connections";
 import { createAuditLog } from "@/lib/audit";
-import { badRequest, errorResponse, forbidden } from "@/lib/deploy/http";
+import { badRequest, errorResponse } from "@/lib/deploy/http";
 
 const schema = z.object({ connectionId: z.string().min(1) });
 
@@ -14,9 +15,13 @@ export async function POST(request: NextRequest) {
     const user = await requireSession(request);
     const parsed = schema.safeParse(await request.json());
     if (!parsed.success) return badRequest("connectionId is required");
-    const connection = await db.gitConnection.findUnique({ where: { id: parsed.data.connectionId } });
-    if (!connection) return badRequest("Connection not found");
-    if (connection.connectedById !== user.id && !["SUPER_ADMIN", "ADMIN"].includes(user.role)) return forbidden();
+    // SEC-02: the ownership rule lives in exactly one module. This route used to
+    // hand-roll it with a two-role list, which silently excluded DEVOPS
+    // -- a role that can administer the deploy layer everywhere else -- and gave
+    // a revoked connection a different answer here than on every other route.
+    const connection = await requireConnectionAccess(user, parsed.data.connectionId, {
+      route: "github/disconnect",
+    });
 
     const projects = await db.gitProject.findMany({ where: { connectionId: connection.id } });
     let token: string | null = null;

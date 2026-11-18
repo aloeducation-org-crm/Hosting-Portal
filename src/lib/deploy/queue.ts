@@ -1,5 +1,4 @@
 import { db } from "@/lib/db";
-import { runDeployment } from "./engine";
 import { logger } from "@/lib/logger";
 import type { EnqueueInput } from "./types";
 
@@ -31,7 +30,10 @@ export function withProjectLock<T>(projectId: string, fn: () => Promise<T>): Pro
 }
 
 export function inlineWorkerEnabled(): boolean {
-  return process.env.DEPLOY_INLINE_WORKER !== "false";
+  // Operators use false/0/off interchangeably in env files. An unrecognized
+  // value keeps the historical default (enabled), but an explicit disable must
+  // never leave a second worker running beside the durable service.
+  return !["false", "0", "off", "no"].includes((process.env.DEPLOY_INLINE_WORKER ?? "").trim().toLowerCase());
 }
 
 export interface EnqueueResult {
@@ -83,19 +85,17 @@ export async function enqueueDeployment(input: EnqueueInput): Promise<EnqueueRes
     },
   });
 
-  if (inlineWorkerEnabled()) {
+  // The deployment row is the execution record; the central orchestrator owns
+  // the claim, lease, retry policy, approval gate and audit trail.
+  const jobId = await ensureDeploymentJob(deployment.id);
+  if (inlineWorkerEnabled() && jobId) {
+    const { orchestrator } = await import("@/lib/orchestrator/orchestrator");
     void withProjectLock(project.id, async () => {
       active.set(project.id, deployment.id);
       try {
-        await runDeployment(deployment.id);
+        await orchestrator.runNext(`inline-${deployment.id}`, { jobId });
       } catch (error) {
-        logger.error({ deploymentId: deployment.id, error }, "deployment worker crashed");
-        await db.deployment
-          .update({
-            where: { id: deployment.id },
-            data: { status: "FAILED", failureStage: "queued", finishedAt: new Date(), buildOutput: "worker crashed" },
-          })
-          .catch(() => {});
+        logger.error({ deploymentId: deployment.id, jobId, error }, "central deployment worker crashed");
       } finally {
         active.delete(project.id);
       }
@@ -103,6 +103,32 @@ export async function enqueueDeployment(input: EnqueueInput): Promise<EnqueueRes
   }
 
   return { deploymentId: deployment.id, status: "queued", position: queuedAhead + 1 };
+}
+
+/** Idempotently attach a pending deployment record to the central job queue. */
+export async function ensureDeploymentJob(deploymentId: string): Promise<string | null> {
+  const deployment = await db.deployment.findUnique({ where: { id: deploymentId } });
+  if (!deployment?.projectId || deployment.status !== "PENDING") return null;
+  const project = await db.gitProject.findUnique({ where: { id: deployment.projectId } });
+  if (!project) return null;
+  const { orchestrator } = await import("@/lib/orchestrator/orchestrator");
+  const { actorForUser, SYSTEM_ACTOR } = await import("@/lib/orchestrator/workflows");
+  const actor = project.createdById ? await actorForUser(project.createdById) : SYSTEM_ACTOR;
+  const job = await orchestrator.enqueue({
+    kind: "BUILD_TEST",
+    type: "git-deployment",
+    input: { deploymentId },
+    actor,
+    websiteId: project.websiteId,
+    resourceId: project.id,
+    resourceType: "GitProject",
+    lockKey: `project:${project.id}`,
+    idempotencyKey: `deployment:${deploymentId}`,
+    correlationId: deployment.deliveryId ?? deploymentId,
+    requiresApproval: project.requiresApproval || undefined,
+    maxAttempts: 1,
+  });
+  return job.jobId;
 }
 
 /** Used by `scripts/deploy-worker.ts` and by tests with an inline worker off. */
@@ -119,11 +145,14 @@ export async function processPendingDeployments(limit = 5): Promise<string[]> {
     byProject.set(item.projectId!, list);
   }
   const processed: string[] = [];
+  const { orchestrator } = await import("@/lib/orchestrator/orchestrator");
   await Promise.all(
     [...byProject.entries()].map(([projectId, ids]) =>
       withProjectLock(projectId, async () => {
         for (const id of ids) {
-          await runDeployment(id);
+          const jobId = await ensureDeploymentJob(id);
+          if (!jobId) continue;
+          await orchestrator.runNext(`deploy-sweep-${process.pid}`, { jobId });
           processed.push(id);
         }
       }),

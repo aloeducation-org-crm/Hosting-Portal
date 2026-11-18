@@ -124,7 +124,7 @@ export default function WhySection({ compact = false }: { compact?: boolean }) {
             <ArrowRight className="size-4" />
           </a>
           <a
-            href="/support"
+            href="/contact"
             className="inline-flex items-center gap-2 text-sm font-semibold text-white/90 hover:text-white"
           >
             <Users className="size-4" />

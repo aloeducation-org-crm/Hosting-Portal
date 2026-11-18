@@ -12,7 +12,7 @@ cp deploy/env/alo-hosting-panel.env.example deploy/env/alo-hosting-panel.env
 docker compose -f docker-compose.yml up -d --build
 ```
 
-The one-shot `db-init` service applies `prisma/schema.prisma` with `prisma db push --skip-generate`, sets the data volume owner to the runtime UID, and creates an initial SUPER_ADMIN with a cryptographically random 32-character password. It never uses `--accept-data-loss` or publishes a default password. The credential file is stored mode 0600 at `/var/lib/alo-hosting/admin-credentials`; retrieve it as the host operator with `docker compose -f docker-compose.yml run --rm --no-deps --entrypoint cat db-init /var/lib/alo-hosting/admin-credentials`, then move the password to an approved password manager and remove the file after confirming login.
+The `automation-worker` service runs the bundled durable worker (`automation-worker.cjs`) against the same SQLite volume; the panel sets `DEPLOY_INLINE_WORKER=false` so jobs are claimed by the worker, not by request processes. The one-shot `db-init` service applies `prisma/schema.prisma` with `prisma db push --skip-generate`, sets the data volume owner to the runtime UID, and creates an initial SUPER_ADMIN with a cryptographically random 32-character password. It never uses `--accept-data-loss` or publishes a default password. The credential file is stored mode 0600 at `/var/lib/alo-hosting/admin-credentials`; retrieve it as the host operator with `docker compose -f docker-compose.yml run --rm --no-deps --entrypoint cat db-init /var/lib/alo-hosting/admin-credentials`, then move the password to an approved password manager and remove the file after confirming login.
 
 ## Host installation (Nginx + systemd)
 
@@ -20,9 +20,15 @@ The one-shot `db-init` service applies `prisma/schema.prisma` with `prisma db pu
 2. Run the database bootstrap as root with `APP_DIR` pointing at the full checkout/release containing `db/custom.db`, `prisma/schema.prisma`, and full npm dependencies. The script preserves an existing DB, applies Prisma's non-destructive schema update, checks schema drift, and writes any generated 32-character admin password to a root-only file (not stdout).
 3. Install `helpers/provision-site.sh` and `helpers/ssl-lifecycle.sh` using `helpers/install-helpers.sh`. Install and validate the matching sudoers policy with `visudo -c`; helper files and sudoers policy must remain root-owned and non-writable by `alo-panel`.
 4. Create `/etc/alo-hosting/panel.env` from `deploy/env/alo-hosting-panel.env.example`, set owner `root:alo-panel`, mode `0640`, and set the same random hook secret in `/etc/alo-hosting/ssl-hook.token` as root:root mode `0600`.
-5. Install `deploy/systemd/alo-hosting-panel.service`, run `systemctl daemon-reload`, then enable/start it. The unit listens on loopback port 3051, has `Restart=always` / `RestartSec=5s`, `LimitNOFILE=65535`, and a 2 GiB cgroup memory cap.
+5. Install `deploy/systemd/alo-hosting-panel.service` and `deploy/systemd/alo-automation-worker.service`, run `systemctl daemon-reload`, then enable/start both (`systemctl enable --now alo-hosting-panel alo-automation-worker`). Set `DEPLOY_INLINE_WORKER=false` in the panel env. The worker uses the same root-owned env file and drains its current job on restart (up to the 30-minute build budget). The unit listens on loopback port 3051, has `Restart=always` / `RestartSec=5s`, `LimitNOFILE=65535`, and a 2 GiB cgroup memory cap.
 
 For the existing Actions deployment, the database bootstrap keeps its backward-compatible `alamin` account default. When adopting the hardened `alo-panel` unit above, set `ALO_APP_USER=alo-panel` (and `ALO_APP_GROUP=alo-panel` if needed) on the database bootstrap command, and ensure the account exists first.
+
+## Automation worker
+
+`npm run build:worker` bundles `scripts/orchestrator-worker.ts` into `.next/standalone/automation-worker.cjs`; CI checks both standalone entrypoints and the canonical release payload refuses to activate without the worker. The worker drives schedule claims, workflow reconciliation, lease recovery, agent-task expiry and bounded job execution. Its heartbeat file is a liveness signal, not proof that any particular workflow succeeded — inspect Automation Center runs/jobs for verified outcomes.
+
+Container note: static listeners started by a deployment live in the worker container. Publish/proxy the configured application ports through your edge before exposing them; the compose file only publishes the panel API on loopback 8080.
 
 ## Validation and recovery behavior
 

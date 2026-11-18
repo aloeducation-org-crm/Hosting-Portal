@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, hasSessionCookie, validateCsrf } from "@/lib/security/csrf";
+import { resolveClientIdentity, describeIdentityProblem } from "@/lib/security/client-identity";
+import { decideVerificationAccess } from "@/lib/account-status";
 
 const RATE_LIMIT = new Map<string, { count: number; resetAt: number }>();
 const RATE_MAX_CLIENTS = 10_000;
@@ -18,9 +20,12 @@ const AI_RATE_MAX = 30;
 const AI_RATE_WINDOW_MS = 60_000;
 const STRICT_PUBLIC_PATHS = new Set([
   "/api/auth/login",
+  "/api/auth/callback/credentials",
   "/api/auth/signup",
   "/api/auth/register",
   "/api/auth/mfa-challenge",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/contact",
   "/api/newsletter",
   // Public storefront domain availability lookup (registry RDAP, no session needed).
@@ -72,6 +77,8 @@ const PUBLIC_API_PATHS = [
   // grants nothing: the value is an HMAC-bound random token with no identity.
   "/api/csrf",
   "/api/health",
+  // Minimal readiness probe for load balancers; discloses nothing beyond ready:true/false.
+  "/api/ready",
   "/api/pricing",
   "/api/deploy/webhook",
   "/api/internal/sites/ssl-status",
@@ -98,10 +105,18 @@ const HMAC_AUTHENTICATED_API_PATHS = [
   "/api/agents/enroll",
   "/api/agents/heartbeat",
   "/api/agents/tasks/claim",
+  "/api/agents/tasks/start",
   "/api/agents/tasks/result",
   "/api/orchestrator/run",
   // Scoped Cloud Project API key endpoint (`x-alo-project` + `x-alo-key`).
   "/api/cloud/v1",
+  // Cloud worker node registration & heartbeats (verified via INTERNAL_SECRET / per-worker bearer).
+  "/api/cloud/workers/register",
+  "/api/cloud/workers/heartbeat",
+  // ALO Education CRM document vault (verified via ServiceCredential bearer or HMAC-signed download URL).
+  "/api/internal/crm",
+  // Stripe payment webhooks (verified via HMAC-SHA256 Stripe-Signature header).
+  "/api/billing/webhook",
   // Machine-to-machine automation endpoints preserved from the retired nested
   // app. They carry no session cookie: the cron route verifies CRON_SECRET and
   // the tool route verifies INTERNAL_SECRET in constant time before acting.
@@ -109,8 +124,34 @@ const HMAC_AUTHENTICATED_API_PATHS = [
   "/api/automation/tool",
 ];
 
+/**
+ * Endpoints that accept EITHER a NextAuth browser session OR a scoped
+ * `Authorization: Bearer <api-key>` token verified inside the route handler.
+ */
+const BEARER_OR_SESSION_API_PATHS = [
+  "/api/ai/operator",
+];
+
+/**
+ * Segment-bounded matcher for public paths: `/api/health` and `/api/health/x`
+ * are public, `/api/healthz` is NOT. The previous raw `startsWith` let any
+ * future sibling whose name begins with a public path (e.g. `/api/readyx`)
+ * silently inherit both the rate-limit exemption and the session-guard
+ * exemption — the same class of bug `account-status.matchesPrefix` was written
+ * to prevent (SEC-06). Machine-authenticated and bearer paths were already
+ * segment-bounded; this aligns the public list with them.
+ */
+function isPublicApiPath(pathname: string): boolean {
+  return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+export function isMachineAuthenticatedApiPath(pathname: string): boolean {
+  return HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 const ADMIN_UI_PREFIXES = [
   "/ai/research",
+  "/automation",
   "/admin",
   "/users",
   "/servers",
@@ -147,6 +188,7 @@ const ADMIN_API_PREFIXES = [
   "/api/security/lockout",
   "/api/security/audit-export",
   "/api/orchestrator",
+  "/api/automation/admin",
   "/api/agents/enrollment-tokens",
   "/api/infrastructure",
   "/api/industries",
@@ -257,10 +299,35 @@ export async function proxy(request: NextRequest) {
   }
 
   // --- Rate limiting (applies to ALL requests) ---
-  // Nginx/Caddy are configured to overwrite X-Real-IP from the actual peer.
-  // Do not trust the client-controlled leftmost X-Forwarded-For value for limits.
-  const ip = request.headers.get("x-real-ip")?.trim() || "unknown";
+  //
+  // SEC-05: this used to be `x-real-ip || "unknown"`, so whenever the header was
+  // absent — direct connection, container hop, tunnel, or a proxy that does not
+  // set it — every client on the platform shared the literal key "unknown". The
+  // limit then applied to the platform as a whole: one client could exhaust
+  // everyone's budget, and every audit record named the same non-identity.
+  //
+  // Identity now comes from `resolveClientIdentity`, which uses the transport
+  // peer and only trusts forwarding headers for the number of hops the operator
+  // declares (TRUSTED_PROXY_COUNT, default 0 = trust none). An unidentifiable
+  // request gets its own random bucket, so it can never be merged with another
+  // client or with identified traffic.
+  const identity = resolveClientIdentity({
+    peerAddress: (request as unknown as { ip?: string }).ip ?? null,
+    headers: request.headers,
+  });
+  const ip = identity.key;
   const now = Date.now();
+  if (identity.unidentifiable) {
+    // Warn at most once per process per minute: a missing peer address or proxy
+    // declaration is a configuration defect an operator must see, but it must
+    // not flood the log at request rate.
+    const problem = describeIdentityProblem(identity);
+    const last = (globalThis as { __aloIdentityWarnedAt?: number }).__aloIdentityWarnedAt ?? 0;
+    if (problem && now - last > 60_000) {
+      (globalThis as { __aloIdentityWarnedAt?: number }).__aloIdentityWarnedAt = now;
+      console.warn(`[SEC-05] ${problem}`);
+    }
+  }
   cleanupRateLimitState(now);
 
   // Stricter rate limit for auth & public form endpoints
@@ -292,7 +359,7 @@ export async function proxy(request: NextRequest) {
   }
 
   // General rate limiting
-  if (!PUBLIC_API_PATHS.some((p) => pathname.startsWith(p))) {
+  if (!isPublicApiPath(pathname)) {
     const entry = RATE_LIMIT.get(ip);
     if (entry && now < entry.resetAt) {
       if (entry.count >= RATE_MAX) {
@@ -351,10 +418,16 @@ export async function proxy(request: NextRequest) {
   }
 
   // --- API Authentication & Admin Guard ---
+  const hasExplicitBearerAuth =
+    BEARER_OR_SESSION_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`)) &&
+    /^Bearer\s+\S+/i.test(request.headers.get("authorization") ?? "") &&
+    !hasSessionCookie(request.cookies.getAll().map((c) => c.name));
+
   if (
     pathname.startsWith("/api/") &&
-    !PUBLIC_API_PATHS.some((p) => pathname.startsWith(p)) &&
-    !HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname.startsWith(p))
+    !isPublicApiPath(pathname) &&
+    !isMachineAuthenticatedApiPath(pathname) &&
+    !hasExplicitBearerAuth
   ) {
     if (!jwtSecret) {
       return applySecurityHeaders(
@@ -419,6 +492,43 @@ export async function proxy(request: NextRequest) {
       );
     }
 
+    /**
+     * Email verification gate (SEC-06).
+     *
+     * A new account could use the whole customer API — create sites, import
+     * repositories, run builds — before its address was verified. `emailVerified`
+     * was recorded and never consulted.
+     *
+     * `undefined` is treated as unverified: tokens issued before this claim
+     * existed (and any fixture that omits it) must not be trusted as verified.
+     * Administrators are exempt — see `decideVerificationAccess` — because
+     * locking the platform's own operators out during an incident is the worse
+     * failure.
+     */
+    const emailVerified = token.emailVerified === true;
+    const verification = decideVerificationAccess({
+      pathname,
+      emailVerified,
+      isAdministrator: ADMIN_ROLES.has(userRole),
+    });
+    if (!verification.allowed) {
+      return applySecurityHeaders(
+        NextResponse.json(
+          {
+            status: verification.status ?? 403,
+            success: false,
+            message: verification.reason,
+            data: null,
+            error: { code: verification.code ?? "EMAIL_NOT_VERIFIED" },
+            requestId: "",
+          },
+          { status: verification.status ?? 403 }
+        ),
+        corsOrigin,
+        pathname
+      );
+    }
+
     if (request.method === "POST" && pathname.startsWith("/api/ai/")) {
       const aiKey = `${String(token.sub || ip)}:ai`;
       const aiEntry = AI_RATE_LIMIT.get(aiKey);
@@ -464,7 +574,7 @@ export async function proxy(request: NextRequest) {
     // Non-browser credentials: per-agent HMAC, or INTERNAL_SECRET for the worker
     // tick. Neither uses cookies, so neither is CSRF-able, and each route
     // re-verifies its own credential.
-    !HMAC_AUTHENTICATED_API_PATHS.some((p) => pathname.startsWith(p)) &&
+    !isMachineAuthenticatedApiPath(pathname) &&
     // CSRF is an attack on ambient session authority. With no session cookie
     // there is none to abuse, so pre-authentication flows (login, signup, email
     // verification, MFA challenge, NextAuth's own callback) are not required to
@@ -512,11 +622,13 @@ export const config = {
     "/databases/:path*",
     "/storage/:path*",
     "/ai/:path*",
+    "/automation/:path*",
     "/billing/:path*",
     "/settings/:path*",
     "/onboarding/:path*",
     "/deployments/:path*",
     "/apps/:path*",
+    "/sales-channels/:path*",
     "/infrastructure/:path*",
     "/api/:path*",
   ],

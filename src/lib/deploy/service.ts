@@ -5,6 +5,7 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { redact } from "./redact";
+import { assertReservedServiceName } from "./host-settings";
 import { assertNotCloudMetadataUrl } from "@/lib/security/url-guard";
 import type { ReleaseMarker, ServiceManager } from "./types";
 
@@ -167,6 +168,11 @@ export function activeStaticPorts(): number[] {
 export async function restartExternalService(manager: ServiceManager, name: string): Promise<void> {
   if (manager !== "pm2" && manager !== "systemd") return;
   if (!/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,63}$/.test(name)) throw new Error("Unsafe service name");
+  // SEC-11 defence in depth: this is the function that actually runs
+  // `systemctl restart`. Even if a route forgets to check the caller's role, a
+  // stored or injected platform unit name cannot reach the service manager from
+  // a tenant deploy.
+  assertReservedServiceName(name);
   const argv = manager === "pm2" ? ["pm2", "reload", name] : ["systemctl", "restart", name];
   await execFileAsync(argv[0]!, argv.slice(1), { timeout: 30_000 });
 }

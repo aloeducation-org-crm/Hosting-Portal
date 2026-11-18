@@ -1,46 +1,69 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { apiSuccess, apiError, type ApiResponse } from '@/lib/response';
-import { requireSession, requireSuperAdmin } from '@/lib/auth';
-import fs from 'fs/promises';
-import path from 'path';
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
+import { requireSuperAdmin } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { sealSecretValue, maskSecretValue } from "@/lib/secret-store";
+import { createAuditLog } from "@/lib/audit";
 
-const SSO_CONFIG_PATH = path.join(process.cwd(), 'data', 'sso-config.json');
+const SSO_SETTING_KEY = "auth.sso.config";
+const SSO_SETTING_TYPE = "sso_config";
+
+const ssoConfigSchema = z
+  .object({
+    provider: z.string().trim().min(1).max(64),
+    clientId: z.string().trim().min(1).max(256),
+    clientSecret: z.string().min(8).max(512),
+    metadataUrl: z.string().url().optional().nullable(),
+    enabled: z.boolean(),
+  })
+  .strict();
+
+interface StoredSsoConfig {
+  provider: string;
+  clientId: string;
+  clientSecret: string; // sealed with enc:v1: AES-256-GCM
+  metadataUrl: string | null;
+  enabled: boolean;
+  updatedAt: string;
+}
 
 function handleErr(e: unknown): NextResponse {
-  if (e && typeof e === 'object' && 'status' in e) {
+  if (e && typeof e === "object" && "status" in e) {
     const a = e as ApiResponse;
     return NextResponse.json(a, { status: a.status });
   }
-  return NextResponse.json(apiError('Internal server error'), { status: 500 });
-}
-
-function maskSecret(secret: string | undefined): string {
-  if (!secret || secret.length === 0) return '';
-  if (secret.length <= 8) return '****';
-  return secret.slice(0, 4) + '****' + secret.slice(-4);
+  return NextResponse.json(apiError("Internal server error"), { status: 500 });
 }
 
 export async function GET(request: NextRequest) {
   try {
-    await requireSession(request);
+    await requireSuperAdmin(request);
 
-    let config: Record<string, unknown> = {};
-    try {
-      const raw = await fs.readFile(SSO_CONFIG_PATH, 'utf-8');
-      config = JSON.parse(raw);
-    } catch {
-      // No config file exists yet — use defaults from env
+    const row = await db.secret.findFirst({
+      where: { name: SSO_SETTING_KEY, type: SSO_SETTING_TYPE },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    let config: Partial<StoredSsoConfig> = {};
+    if (row?.value) {
+      try {
+        config = JSON.parse(row.value) as Partial<StoredSsoConfig>;
+      } catch {
+        config = {};
+      }
     }
 
+    const rawSecret = config.clientSecret ?? process.env.SSO_CLIENT_SECRET ?? "";
     return NextResponse.json(
       apiSuccess({
-        enabled: (config.enabled as boolean) ?? (process.env.SSO_ENABLED === 'true'),
-        provider: (config.provider as string) ?? process.env.SSO_PROVIDER ?? null,
-        clientId: (config.clientId as string) ?? process.env.SSO_CLIENT_ID ?? null,
-        clientSecret: maskSecret(
-          (config.clientSecret as string) ?? process.env.SSO_CLIENT_SECRET ?? undefined,
-        ),
-        metadataUrl: (config.metadataUrl as string) ?? process.env.SSO_METADATA_URL ?? null,
+        enabled: config.enabled ?? process.env.SSO_ENABLED === "true",
+        provider: config.provider ?? process.env.SSO_PROVIDER ?? null,
+        clientId: config.clientId ?? process.env.SSO_CLIENT_ID ?? null,
+        clientSecret: rawSecret ? maskSecretValue(rawSecret) : "",
+        metadataUrl: config.metadataUrl ?? process.env.SSO_METADATA_URL ?? null,
+        storage: "database-encrypted",
+        runtimeWired: false,
       }),
     );
   } catch (e) {
@@ -50,45 +73,58 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    await requireSuperAdmin(request);
-    const body = await request.json();
-    const { provider, clientId, clientSecret, metadataUrl, enabled } = body as {
-      provider?: string;
-      clientId?: string;
-      clientSecret?: string;
-      metadataUrl?: string;
-      enabled?: boolean;
-    };
-
-    if (!provider || typeof provider !== 'string') {
-      throw apiError('Provider is required', 'INVALID_INPUT', undefined, 400);
+    const admin = await requireSuperAdmin(request);
+    const parsed = ssoConfigSchema.safeParse(await request.json());
+    if (!parsed.success) {
+      return NextResponse.json(
+        apiError("Invalid SSO configuration", "INVALID_INPUT", parsed.error.flatten().fieldErrors, 400),
+        { status: 400 },
+      );
     }
 
-    if (!clientId || typeof clientId !== 'string') {
-      throw apiError('Client ID is required', 'INVALID_INPUT', undefined, 400);
-    }
-
-    if (!clientSecret || typeof clientSecret !== 'string') {
-      throw apiError('Client secret is required', 'INVALID_INPUT', undefined, 400);
-    }
-
-    if (typeof enabled !== 'boolean') {
-      throw apiError('Enabled status is required', 'INVALID_INPUT', undefined, 400);
-    }
-
-    const config = {
+    const { provider, clientId, clientSecret, metadataUrl, enabled } = parsed.data;
+    const stored: StoredSsoConfig = {
       provider,
       clientId,
-      clientSecret,
+      clientSecret: sealSecretValue(clientSecret),
       metadataUrl: metadataUrl ?? null,
       enabled,
       updatedAt: new Date().toISOString(),
     };
 
-    await fs.mkdir(path.dirname(SSO_CONFIG_PATH), { recursive: true });
-    await fs.writeFile(SSO_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    const existing = await db.secret.findFirst({
+      where: { name: SSO_SETTING_KEY, type: SSO_SETTING_TYPE },
+      orderBy: { updatedAt: "desc" },
+    });
 
-    return NextResponse.json(apiSuccess(null, 'SSO configuration updated successfully'));
+    if (existing) {
+      await db.secret.update({
+        where: { id: existing.id },
+        data: { value: JSON.stringify(stored), userId: admin.id },
+      });
+    } else {
+      await db.secret.create({
+        data: {
+          name: SSO_SETTING_KEY,
+          type: SSO_SETTING_TYPE,
+          value: JSON.stringify(stored),
+          userId: admin.id,
+        },
+      });
+    }
+
+    await createAuditLog({
+      actorId: admin.id,
+      actorEmail: admin.email,
+      actorRole: admin.role,
+      action: "SSO_CONFIG_UPDATED",
+      resourceType: "Secret",
+      resourceId: SSO_SETTING_KEY,
+      result: "SUCCESS",
+      metadata: { provider, enabled, hasMetadataUrl: Boolean(metadataUrl) },
+    });
+
+    return NextResponse.json(apiSuccess(null, "SSO configuration updated securely"));
   } catch (e) {
     return handleErr(e);
   }

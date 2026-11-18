@@ -11,6 +11,14 @@ CADDY_CONFIG_DIR="/etc/caddy/sites-enabled"
 CERTBOT_WEBROOT="/var/lib/caddy/.well-known/acme-challenge"
 CERT_BASE="/etc/letsencrypt/live"
 CERT_ARCHIVE="/etc/letsencrypt/archive"
+# Internal certificate store used by the ALO Edge reverse proxy. Distinct from
+# the Let's Encrypt layout so an internal-CA certificate can never be confused
+# with a publicly-trusted one.
+INTERNAL_TLS_BASE="/etc/alo-hosting/tls"
+EDGE_STATE_FILE="/etc/alo-hosting/edge/state.json"
+INTERNAL_CA_DIR="${INTERNAL_TLS_BASE}/ca"
+EDGE_APP_USER="alo-panel"
+EDGE_PM2_HOME="/opt/alo-hosting/pm2"
 APP_USER="alo-panel"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -23,6 +31,22 @@ die() {
   local msg="$2"
   json_out "{\"success\":false,\"step\":\"${step}\",\"error\":\"${msg}\"}"
   exit 1
+}
+
+# Signal the edge proxy to reload its config/TLS cache. pm2's `signal`
+# subcommand is not available in every pm2 release, so the preferred path is the
+# PID the edge itself publishes in state.json (per-node, no process-manager
+# dependency); pm2 remains the fallback.
+signal_edge_reload() {
+  local edge_pid
+  edge_pid=$(jq -r '.pid // empty' "${EDGE_STATE_FILE}" 2>/dev/null || true)
+  if [[ "$edge_pid" =~ ^[0-9]+$ ]] && kill -0 "$edge_pid" 2>/dev/null; then
+    kill -HUP "$edge_pid" 2>/dev/null || true
+    return 0
+  fi
+  runuser -u "${EDGE_APP_USER}" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
+      pm2 signal SIGHUP alo-edge >/dev/null 2>&1 || true
+  return 0
 }
 
 validate_domain() {
@@ -39,6 +63,104 @@ fi
 ACTION="$1"
 shift
 
+# ── internal CA issuance ─────────────────────────────────────────────────────
+# ACME (Let's Encrypt) is the preferred path, but it is only possible when the
+# domain is publicly resolvable AND certbot is installed AND this host is
+# authorized to answer the HTTP-01 challenge. When any of those is missing the
+# platform issues a REAL certificate from the host's internal CA (like Caddy's
+# `tls internal`). It is always reported as internal — never as ACME success.
+
+ensure_internal_ca() {
+  if [[ -f "${INTERNAL_CA_DIR}/ca.key" && -f "${INTERNAL_CA_DIR}/ca.crt" ]]; then
+    return 0
+  fi
+  mkdir -p "$INTERNAL_CA_DIR"
+  chmod 0700 "$INTERNAL_CA_DIR"
+  openssl genrsa -out "${INTERNAL_CA_DIR}/ca.key" 4096 >/dev/null 2>&1 || die "issue" "Could not generate internal CA key"
+  openssl req -x509 -new -nodes -key "${INTERNAL_CA_DIR}/ca.key" -sha256 -days 3650 \
+    -out "${INTERNAL_CA_DIR}/ca.crt" -subj "/C=BD/O=ALO Labs/CN=ALO Labs Internal CA" >/dev/null 2>&1 \
+    || die "issue" "Could not generate internal CA certificate"
+  chmod 0600 "${INTERNAL_CA_DIR}/ca.key"
+  log_info "internal CA created at ${INTERNAL_CA_DIR}"
+}
+
+issue_internal_cert() {
+  local domain="$1"
+  local cert_dir="${INTERNAL_TLS_BASE}/${domain}"
+
+  if [[ -d "$cert_dir" && -f "${cert_dir}/privkey.pem" ]]; then
+    # Idempotent: an existing unexpired internal cert is returned as success so
+    # retried lifecycle workflows do not fail on their own earlier work.
+    local existing_after existing_not_after
+    existing_not_after=$(openssl x509 -in "${cert_dir}/cert.pem" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+    if [[ -n "$existing_not_after" ]] && (( $(date -d "$existing_not_after" +%s 2>/dev/null || echo 0) > $(date +%s) )); then
+      local existing_issuer
+      existing_issuer=$(openssl x509 -in "${cert_dir}/cert.pem" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+      json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"mode\":\"internal-ca\",\"issuer\":\"${existing_issuer}\",\"notAfter\":\"${existing_not_after}\",\"certPath\":\"${cert_dir}\",\"idempotent\":true,\"message\":\"Unexpired internal certificate already installed; returning it\"}"
+      return 0
+    fi
+    die "issue" "Existing internal certificate for ${domain} is expired; use renew"
+  fi
+
+  ensure_internal_ca
+  mkdir -p "$cert_dir"
+
+  local key_file="${cert_dir}/privkey.pem"
+  local csr_file="${cert_dir}/request.csr"
+  local cert_file="${cert_dir}/cert.pem"
+
+  openssl genrsa -out "$key_file" 2048 >/dev/null 2>&1 || die "issue" "Could not generate key for ${domain}"
+  openssl req -new -key "$key_file" -out "$csr_file" -subj "/C=BD/O=ALO Labs/CN=${domain}" >/dev/null 2>&1 \
+    || die "issue" "Could not generate CSR for ${domain}"
+  cat > "${cert_dir}/san.ext" <<EXT
+subjectAltName = DNS:${domain}
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+EXT
+  openssl x509 -req -in "$csr_file" -CA "${INTERNAL_CA_DIR}/ca.crt" -CAkey "${INTERNAL_CA_DIR}/ca.key" \
+    -CAcreateserial -out "$cert_file" -days 397 -sha256 -extfile "${cert_dir}/san.ext" >/dev/null 2>&1 \
+    || die "issue" "Could not sign internal certificate for ${domain}"
+  rm -f "$csr_file"
+
+  cat "$cert_file" "${INTERNAL_CA_DIR}/ca.crt" > "${cert_dir}/fullchain.pem"
+  chown -R root:"${EDGE_APP_USER}" "$cert_dir"
+  # The certificate and its chain are public material (any TLS client receives
+  # them); only the private key is secret. The unprivileged agent verifies
+  # issued certificates with ssl.info, so the public files must stay readable
+  # for every user, and the directories traversable.
+  chmod 0755 "$INTERNAL_TLS_BASE" "$cert_dir"
+  chmod 0644 "$cert_file" "${cert_dir}/fullchain.pem" "${INTERNAL_CA_DIR}/ca.crt" 2>/dev/null || true
+  # Group-readable for the edge proxy user only: it must read the key to
+  # terminate TLS, but no other non-root user may.
+  chmod 0640 "$key_file"
+  chown root:"${EDGE_APP_USER}" "$key_file"
+
+  # The edge proxy picks up TLS material on SIGHUP.
+  signal_edge_reload || log_info "SIGHUP to alo-edge not delivered"
+
+  local issuer not_before not_after
+  issuer=$(openssl x509 -in "$cert_file" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+  not_before=$(openssl x509 -in "$cert_file" -noout -startdate 2>/dev/null | cut -d= -f2 || echo "")
+  not_after=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+
+  json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"mode\":\"internal-ca\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"certPath\":\"${cert_dir}\",\"message\":\"Internal-CA certificate issued (NOT publicly trusted; for internal/managed-host use)\"}"
+}
+
+# Is ACME issuance possible for this domain on this host right now?
+acme_available() {
+  local domain="$1"
+  command -v certbot >/dev/null 2>&1 || return 1
+  # The ACME HTTP-01 challenge requires the domain to resolve publicly to a
+  # reachable address. Without a resolver answer, issuance cannot succeed.
+  if command -v dig >/dev/null 2>&1; then
+    [[ -n "$(dig +short "$domain" A 2>/dev/null | head -1)" ]] || return 1
+  else
+    return 1
+  fi
+  return 0
+}
+
 # ── action: issue ────────────────────────────────────────────────────────────
 action_issue() {
   if [[ $# -lt 1 ]]; then
@@ -50,9 +172,29 @@ action_issue() {
 
   validate_domain "$domain"
 
-  # Check if certificate already exists
+  # Existing certificates make issue idempotent, not an error: a retried
+  # lifecycle workflow must succeed against its own earlier work.
   if [[ -d "${CERT_BASE}/${domain}" ]]; then
-    die "issue" "Certificate already exists for ${domain}. Use renew or revoke first."
+    local cert_path="${CERT_BASE}/${domain}"
+    local not_after issuer
+    not_after=$(openssl x509 -in "${cert_path}/cert.pem" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+    issuer=$(openssl x509 -in "${cert_path}/cert.pem" -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+    if [[ -n "$not_after" ]] && (( $(date -d "$not_after" +%s 2>/dev/null || echo 0) > $(date +%s) )); then
+      install_acme_cert_for_edge "$domain" 2>/dev/null || true
+      json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"issuer\":\"${issuer}\",\"notAfter\":\"${not_after}\",\"certPath\":\"${cert_path}\",\"idempotent\":true,\"message\":\"Unexpired certificate already exists; returning it\"}"
+      return 0
+    fi
+    die "issue" "Existing certificate for ${domain} is expired; use renew"
+  fi
+  if [[ -d "${INTERNAL_TLS_BASE}/${domain}" && -f "${INTERNAL_TLS_BASE}/${domain}/privkey.pem" ]]; then
+    issue_internal_cert "$domain"
+    return 0
+  fi
+
+  if ! acme_available "$domain"; then
+    log_info "ACME unavailable for ${domain} (no certbot or no public resolution); issuing internal-CA certificate"
+    issue_internal_cert "$domain"
+    return 0
   fi
 
   # Ensure webroot directory exists
@@ -95,6 +237,10 @@ action_issue() {
 
   log_info "Certificate issued for ${domain}"
 
+  # The ALO Edge serves TLS only from its own directory; install the ACME
+  # material there too so verification and traffic use the issued certificate.
+  install_acme_cert_for_edge "$domain"
+
   # Read certificate details
   local cert_path="${CERT_BASE}/${domain}/cert.pem"
   local issuer=""
@@ -117,12 +263,43 @@ action_issue() {
   json_out "{\"success\":true,\"step\":\"issue\",\"domain\":\"${domain}\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"certPath\":\"${CERT_BASE}/${domain}\",\"message\":\"Certificate issued successfully\"}"
 }
 
+# Install an ACME certificate where the ALO Edge actually serves it from
+# (/etc/alo-hosting/tls/<domain>/), then nudge the edge to reload. Without this
+# the edge only ever serves its own TLS directory, not /etc/letsencrypt.
+install_acme_cert_for_edge() {
+  local domain="$1"
+  local src_dir="${CERT_BASE}/${domain}"
+  local dst_dir="${INTERNAL_TLS_BASE}/${domain}"
+  [[ -f "${src_dir}/privkey.pem" ]] || return 1
+  mkdir -p "$dst_dir"
+  # fullchain = leaf + chain exactly as browsers need it.
+  cat "${src_dir}/cert.pem" "${src_dir}/chain.pem" > "${dst_dir}/fullchain.pem" 2>/dev/null \
+    || cat "${src_dir}/cert.pem" > "${dst_dir}/fullchain.pem"
+  cp "${src_dir}/privkey.pem" "${dst_dir}/privkey.pem"
+  chown -R root:"${EDGE_APP_USER}" "$dst_dir"
+  chmod 0755 "$INTERNAL_TLS_BASE" "$dst_dir"
+  chmod 0644 "${dst_dir}/fullchain.pem"
+  chmod 0640 "${dst_dir}/privkey.pem"
+  runuser -u "$EDGE_APP_USER" -- env PM2_HOME="${EDGE_PM2_HOME}" PATH="/usr/local/bin:/usr/bin:/bin" \
+    signal_edge_reload || log_info "SIGHUP to alo-edge not delivered"
+  log_info "ACME certificate installed for the ALO Edge at ${dst_dir}"
+}
+
 # ── action: renew ────────────────────────────────────────────────────────────
 action_renew() {
   local domain="${1:-}"
 
   if [[ -n "$domain" ]]; then
     validate_domain "$domain"
+
+    # Internal-CA certificates renew by reissuing from the local CA.
+    if [[ -d "${INTERNAL_TLS_BASE}/${domain}" && -f "${INTERNAL_TLS_BASE}/${domain}/privkey.pem" ]]; then
+      log_info "Renewing internal-CA certificate for ${domain}..."
+      rm -rf "${INTERNAL_TLS_BASE:?}/${domain:?}"
+      issue_internal_cert "$domain"
+      return 0
+    fi
+
     log_info "Renewing certificate for ${domain}..."
     local output
     output=$(certbot renew --cert-name "$domain" --non-interactive 2>&1) || {
@@ -137,6 +314,11 @@ action_renew() {
 
   # Reload Caddy to pick up new certificates
   systemctl reload caddy 2>/dev/null || true
+
+  # Reinstall renewed ACME material where the ALO Edge serves it from.
+  if [[ -n "$domain" ]]; then
+    install_acme_cert_for_edge "$domain"
+  fi
 
   json_out "{\"success\":true,\"step\":\"renew\",\"domain\":\"${domain:-all}\",\"message\":\"Certificate renewed successfully\"}"
 }
@@ -179,6 +361,10 @@ action_info() {
   validate_domain "$domain"
 
   local cert_path="${CERT_BASE}/${domain}/cert.pem"
+  local internal_cert="${INTERNAL_TLS_BASE}/${domain}/cert.pem"
+  if [[ ! -f "$cert_path" && -f "$internal_cert" ]]; then
+    cert_path="$internal_cert"
+  fi
   if [[ ! -f "$cert_path" ]]; then
     die "info" "No certificate found for ${domain}"
   fi
@@ -200,13 +386,89 @@ action_info() {
     days_remaining=$(( (expiry_epoch - now_epoch) / 86400 ))
   fi
 
-  json_out "{\"success\":true,\"step\":\"info\",\"domain\":\"${domain}\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"serial\":\"${serial}\",\"san\":\"${san}\",\"daysRemaining\":${days_remaining}}"
+  local mode="acme"
+  if [[ "$cert_path" == "${INTERNAL_TLS_BASE}"* ]]; then mode="internal-ca"; fi
+  json_out "{\"success\":true,\"step\":\"info\",\"domain\":\"${domain}\",\"mode\":\"${mode}\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"serial\":\"${serial}\",\"san\":\"${san}\",\"daysRemaining\":${days_remaining}}"
+}
+
+# ── action: verify-tls ───────────────────────────────────────────────────────
+# Real end-to-end TLS verification: perform a handshake against the local edge
+# listener with SNI for <domain>, then parse the served certificate. Proves the
+# proxy is actually terminating TLS with the expected certificate.
+action_verify_tls() {
+  if [[ $# -lt 1 ]]; then
+    die "verify-tls" "Usage: verify-tls <domain> [port]"
+  fi
+  local domain="$1"
+  validate_domain "$domain"
+
+  # Default to THIS node's own edge https port (the edge writes it to
+  # state.json), so verification targets the listener that actually serves
+  # the domain even when the operator runs the edge on high ports.
+  local port="${2:-}"
+  if [[ -z "$port" ]]; then
+    port=$(jq -r '.httpsPort // empty' "${INTERNAL_TLS_BASE}/../edge/state.json" 2>/dev/null || true)
+    [[ "$port" =~ ^[0-9]+$ ]] || port="${ALO_EDGE_HTTPS_PORT:-443}"
+  fi
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 1 || port > 65535 )); then
+    die "verify-tls" "Invalid port: ${port}"
+  fi
+
+  local handshake
+  handshake=$(echo | openssl s_client -connect "127.0.0.1:${port}" -servername "$domain" 2>/dev/null) || {
+    die "verify-tls" "TLS handshake to 127.0.0.1:${port} (SNI ${domain}) failed"
+  }
+  if ! echo "$handshake" | grep -q "BEGIN CERTIFICATE"; then
+    die "verify-tls" "Handshake completed but no certificate was served for ${domain}"
+  fi
+
+  local verify_line subject issuer not_before not_after
+  verify_line=$(echo "$handshake" | grep -m1 "Verify return code" || echo "unknown")
+  subject=$(echo "$handshake" | openssl x509 -noout -subject 2>/dev/null | sed 's/subject=//' || echo "")
+  issuer=$(echo "$handshake" | openssl x509 -noout -issuer 2>/dev/null | sed 's/issuer=//' || echo "unknown")
+  not_before=$(echo "$handshake" | openssl x509 -noout -startdate 2>/dev/null | cut -d= -f2 || echo "")
+  not_after=$(echo "$handshake" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+
+  if [[ -z "$not_after" ]]; then
+    die "verify-tls" "Served certificate could not be parsed"
+  fi
+  local expiry_epoch now_epoch days_remaining
+  expiry_epoch=$(date -d "$not_after" +%s 2>/dev/null || echo 0)
+  now_epoch=$(date +%s)
+  if (( expiry_epoch <= now_epoch )); then
+    die "verify-tls" "Served certificate for ${domain} is expired (${not_after})"
+  fi
+  days_remaining=$(( (expiry_epoch - now_epoch) / 86400 ))
+
+  json_out "{\"success\":true,\"step\":\"verify-tls\",\"domain\":\"${domain}\",\"port\":${port},\"subject\":\"${subject}\",\"issuer\":\"${issuer}\",\"notBefore\":\"${not_before}\",\"notAfter\":\"${not_after}\",\"daysRemaining\":${days_remaining},\"verifyReturnCode\":\"${verify_line}\",\"verifiedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 }
 
 # ── action: list ─────────────────────────────────────────────────────────────
 action_list() {
   local certs_json="["
   local first=true
+
+  # Internal-CA certificates first (labelled), then ACME ones.
+  if [[ -d "$INTERNAL_TLS_BASE" ]]; then
+    for cert_dir in "${INTERNAL_TLS_BASE}"/*/; do
+      [[ -d "$cert_dir" ]] || continue
+      local domain
+      domain=$(basename "$cert_dir")
+      [[ "$domain" == "ca" ]] && continue
+      local cert_file="${cert_dir}cert.pem"
+      [[ -f "$cert_file" ]] || continue
+      local not_after days_remaining=0
+      not_after=$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "")
+      if [[ -n "$not_after" ]]; then
+        local expiry_epoch now_epoch
+        expiry_epoch=$(date -d "$not_after" +%s 2>/dev/null || echo "0")
+        now_epoch=$(date +%s)
+        days_remaining=$(( (expiry_epoch - now_epoch) / 86400 ))
+      fi
+      if [[ "$first" == true ]]; then first=false; else certs_json+=","; fi
+      certs_json+="{\"domain\":\"${domain}\",\"mode\":\"internal-ca\",\"expiry\":\"${not_after}\",\"daysRemaining\":${days_remaining}}"
+    done
+  fi
 
   if [[ -d "$CERT_BASE" ]]; then
     for cert_dir in "${CERT_BASE}"/*/; do
@@ -226,7 +488,7 @@ action_list() {
         fi
 
         if [[ "$first" == true ]]; then first=false; else certs_json+=","; fi
-        certs_json+="{\"domain\":\"${domain}\",\"expiry\":\"${not_after}\",\"daysRemaining\":${days_remaining}}"
+        certs_json+="{\"domain\":\"${domain}\",\"mode\":\"acme\",\"expiry\":\"${not_after}\",\"daysRemaining\":${days_remaining}}"
       fi
     done
   fi
@@ -242,6 +504,7 @@ case "$ACTION" in
   renew)  action_renew "$@" ;;
   revoke) action_revoke "$@" ;;
   info)   action_info "$@" ;;
+  verify-tls) action_verify_tls "$@" ;;
   list)   action_list "$@" ;;
   *)      die "dispatch" "Unknown action: ${ACTION}" ;;
 esac

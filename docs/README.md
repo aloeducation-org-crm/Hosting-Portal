@@ -17,6 +17,13 @@ reports: use the commands below.
 | [`DEPLOYMENT-AND-ROLLBACK.md`](DEPLOYMENT-AND-ROLLBACK.md) | release activation and rollback runbook |
 | [`GIT-AUTODEPLOY.md`](GIT-AUTODEPLOY.md) | GitHub push → verified release pipeline |
 | [`DATABASE-RECOVERY-RUNBOOK.md`](DATABASE-RECOVERY-RUNBOOK.md) | SQLite recovery and drift handling |
+| [`DATABASE-ARCHITECTURE.md`](DATABASE-ARCHITECTURE.md) | ADR-001: control-plane database decision (SQLite/libSQL now, PostgreSQL path) |
+| [`BUILD-ISOLATION.md`](BUILD-ISOLATION.md) | build sandboxing: unshare/bwrap/sandbox-exec, rlimits, host checklist |
+| [`RUNTIME-ADAPTERS.md`](RUNTIME-ADAPTERS.md) | framework detection rules, confidence/ambiguity handling, manual override |
+| [`SECURITY-THREAT-MODEL.md`](SECURITY-THREAT-MODEL.md) | platform-wide threat model tied to code and tests (2026-11-16) |
+| [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) | accepted, bounded gaps; what closes each one |
+| [`DOCUMENTATION-INDEX.md`](DOCUMENTATION-INDEX.md) | maps the 24 required documents to actual files with honest status |
+| [`PHASE-0-VERIFIED-BASELINE-2026-11-16.md`](PHASE-0-VERIFIED-BASELINE-2026-11-16.md) | this-cycle verified baseline: commands, outputs, capability classes A–F |
 | [`ROADMAP-STATUS.md`](ROADMAP-STATUS.md) | honest capability status |
 | [`APP-CENTER.md`](APP-CENTER.md) | tenant app catalog, installation and branding model |
 | [`TEAM-CHAT.md`](TEAM-CHAT.md) | implemented self-hosted text-chat scope, security and API contract |

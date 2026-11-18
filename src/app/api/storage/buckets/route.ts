@@ -2,7 +2,7 @@ import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiSuccess, apiError, type ApiResponse } from "@/lib/response";
-import { isAdminRole, requireSession } from "@/lib/auth";
+import { isAdminRole, requirePermission, requireSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { sealSecretValue } from "@/lib/secret-store";
 
@@ -138,6 +138,46 @@ export async function POST(request: NextRequest) {
       },
     });
     return NextResponse.json(apiSuccess(presentBucket(bucket, isAdminRole(auth.role)), "Storage bucket created", 201), { status: 201 });
+  } catch (e) {
+    return handleErr(e);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const auth = await requireSession(request);
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json(apiError("Bucket ID is required", "VALIDATION_ERROR", undefined, 400), { status: 400 });
+    }
+
+    const bucket = await db.storageBucket.findUnique({ where: { id } });
+    if (!bucket) {
+      return NextResponse.json(apiError("Bucket not found", "NOT_FOUND", undefined, 404), { status: 404 });
+    }
+
+    if (!isAdminRole(auth.role) && bucket.userId !== auth.id) {
+      return NextResponse.json(apiError("Forbidden", "FORBIDDEN", undefined, 403), { status: 403 });
+    }
+
+    await db.storageBucket.delete({ where: { id } });
+
+    await db.auditLog.create({
+      data: {
+        actorUserId: auth.id,
+        actorEmail: auth.email,
+        actorRole: auth.role,
+        action: "STORAGE_BUCKET_DELETED",
+        resourceType: "StorageBucket",
+        resourceId: id,
+        domain: "storage",
+        result: "SUCCESS",
+      },
+    });
+
+    return NextResponse.json(apiSuccess(null, "Storage bucket deleted"));
   } catch (e) {
     return handleErr(e);
   }

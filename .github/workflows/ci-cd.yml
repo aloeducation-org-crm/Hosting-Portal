@@ -52,6 +52,19 @@ on:
         required: false
         default: ''
         type: string
+      # Diagnostics for the `verify-routing` job. They only choose what that
+      # read-only job inspects; no other job reads them, so a dispatch with
+      # these filled and release_approval empty verifies without deploying.
+      routing_domain:
+        description: 'Apex domain for the read-only routing check (default hosting.alolabs.net).'
+        required: false
+        default: 'hosting.alolabs.net'
+        type: string
+      routing_port:
+        description: 'Loopback port the panel listens on for the read-only routing check (default 3051).'
+        required: false
+        default: '3051'
+        type: string
 
 permissions:
   contents: read
@@ -90,16 +103,12 @@ permissions:
 # there. If it is older, those two jobs fail immediately with GitHub's own
 # "runs.using: node24 requires a newer runner" error — loudly, before any change
 # to production, which is the correct failure mode; no release is attempted.
-# UBUNTU RUNNER MIGRATION: `verify` and `build` use `ubuntu-latest`, which GitHub
-# is migrating to a newer Ubuntu image (annotation on run 41338154769:
-# "ubuntu-latest will migrate to Ubuntu 26 beginning October 19, 2026"). Those two
-# jobs depend only on Node 22 (installed by setup-node), git, and the POSIX tools
-# in the shell-syntax gate — find/head/grep/xargs/sort — all of which exist on every
-# image GitHub ships. They deliberately do not pin an image version, because a pin
-# only moves the same retirement problem elsewhere, and they do not invoke any
-# runner-specific path or preinstalled language runtime. The notice is
-# informational; nothing in this workflow reads `ImageOS`, `RUNNER_*` internals or
-# a runner-provided toolchain.
+# UBUNTU RUNNER IMAGE: `verify` and `build` run on `ubuntu-24.04` (pinned LTS
+# rather than `ubuntu-latest`, which GitHub began migrating to Ubuntu 26 on
+# October 19, 2026 — see annotation on run 41338154769). Those two jobs depend
+# only on Node 22 (installed by setup-node), git, and the POSIX tools in the
+# shell-syntax gate — find/head/grep/xargs/sort — and do not invoke any
+# runner-specific path or preinstalled language runtime.
 
 # CI concurrency is per-ref and cancellable for PRs, so a force-push does not
 # leave two runs racing. Production deployment has its own single-flight group
@@ -113,7 +122,13 @@ jobs:
     name: Lint, typecheck, and tests
     runs-on: ubuntu-24.04
     steps:
+      # Full history is required by `npm run audit:merges`, which walks every
+      # merge commit to prove no file introduced by a merged PR was silently
+      # dropped later. A depth-1 checkout makes that audit skip itself, which
+      # would turn a real gate into a no-op that still reports green.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 22
@@ -144,10 +159,13 @@ jobs:
           [ "$checked" -ge 40 ] || { echo "::error::only ${checked} shell programs were found; the syntax gate is not covering the repository"; exit 1; }
           exit "$failed"
       - run: npm ci --include=dev
-      - run: npx prisma generate
+      - run: npm run db:generate
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run audit:repo
+      - name: Merge integrity (no merged file may be silently lost)
+        run: npm run audit:merges
 
   build:
     name: Production build
@@ -163,9 +181,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=dev
-      - run: npx prisma generate
+      - run: npm run db:generate
       - name: Build with non-production CI credentials
-        run: npm run build
+        run: npm run build && npm run build:worker
         env:
           NODE_ENV: production
           NEXTAUTH_URL: http://127.0.0.1:3101
@@ -174,8 +192,28 @@ jobs:
           APP_ENCRYPTION_KEY: ci-only-not-a-real-key-0123456789abcdef0123456789abcdef01234567
           INTERNAL_SECRET: ci-only-not-a-real-internal-0123456789abcdef
           DATABASE_URL: file:/tmp/alo-hosting-ci.db
-      - name: Check standalone entrypoint
-        run: test -s .next/standalone/server.js
+      - name: Check standalone entrypoints
+        run: |
+          test -s .next/standalone/server.js
+          test -s .next/standalone/automation-worker.cjs
+          test -s .next/standalone/deploy-worker.cjs
+          node --check .next/standalone/automation-worker.cjs
+          node --check .next/standalone/deploy-worker.cjs
+          # Every shipped unit must point at a bundle this build produced. A unit
+          # whose ExecStart target is missing fails at start, after a release has
+          # already been activated.
+          # Units use the installed path (/opt/alo-hosting/current/.next/standalone/x.cjs);
+          # map that back to the build output before checking it exists.
+          for unit in deploy/systemd/*.service; do
+            target="$(sed -n 's|^ExecStart=/usr/bin/node \([^ ]*\).*|\1|p' "$unit")"
+            [ -n "$target" ] || continue
+            case "$target" in
+              *.cjs)
+                relative="${target#/opt/alo-hosting/current/}"
+                test -s "$relative" || { echo "::error::$unit points at missing $target (expected $relative from this build)"; exit 1; }
+                ;;
+            esac
+          done
       # The digest travels inside the artifact and is also published as a job
       # output, so the host can prove the payload it received is the payload CI
       # built — and the two values can be compared in the run summary.
@@ -220,6 +258,42 @@ jobs:
             scripts/deploy-preflight.sh
             scripts/decide-release-target.mjs
             .deploy-digest
+
+  # Read-only routing diagnostic, deliberately separate from `deploy-preflight`.
+  # Preflight only runs for an approved release dispatch, so it cannot answer
+  # "is the public domain healthy right now?" during an incident — this job can.
+  # It mutates nothing: no install, no build, no migration, no restart, and it
+  # never writes config. `continue-on-error` is set because several findings
+  # depend on infrastructure this job cannot change (the Cloudflare SSL/TLS
+  # mode is a dashboard setting), so a failure must be reported, not block a
+  # release that the operator has separately approved.
+  verify-routing:
+    name: Verify public routing (read-only)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: self-hosted
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that the public domain reaches the panel
+        env:
+          DOMAIN: ${{ github.event.inputs.routing_domain || 'hosting.alolabs.net' }}
+          APP_PORT: ${{ github.event.inputs.routing_port || '3051' }}
+          # Optional. Without them the Cloudflare SSL/TLS mode check reports
+          # NOT VERIFIABLE instead of guessing, which is the honest outcome —
+          # 'flexible' is the setting that produces the 530 redirect loop.
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: |
+          set -Eeuo pipefail
+          bash scripts/verify-production-routing.sh | tee routing-report.txt
+      - name: Upload the routing report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: routing-report-${{ github.sha }}
+          path: routing-report.txt
+          if-no-files-found: ignore
 
   # Read-only. Runs only for an explicitly approved production dispatch, before
   # the mutating job. It changes nothing on the host: no checkout, no install
@@ -370,6 +444,13 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # Scripts in the release guard (decide-release-activation.mjs,
+      # canonical-release-check.mjs) import TypeScript policy modules via tsx,
+      # so workspace dependencies must be installed before they execute.
+      - run: npm ci --include=dev
       # This job waited in the `hosting-production-deploy` single-flight queue to
       # get here, and a run can sit in that queue for hours (run #62 waited two).
       # Re-check the head of main after acquiring the slot, so a release that was

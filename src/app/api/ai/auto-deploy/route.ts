@@ -20,6 +20,7 @@ import {
   generateShareableProjectBriefYaml,
   type PortRegistryEntry,
 } from "@/lib/deploy/server-spec";
+import { assertBaselineDeploySettings, HostLevelSettingError } from "@/lib/deploy/host-settings";
 import { evaluateUbuntuCisBaseline } from "@/lib/security/ubuntu-cis-baseline";
 import {
   AUTO_DEPLOY_BLUEPRINTS,
@@ -311,9 +312,22 @@ export async function POST(request: NextRequest) {
     }
 
     const validatedConfig = validateDeployConfig(parsed.deployConfig);
+    // SEC-11: reserved platform ports and unit names are refused here, before
+    // any provisioning. assertTenantPortAllowed only knew about the control
+    // plane's documented port; this checks the full reserved set.
     try {
       assertTenantPortAllowed(validatedConfig.port);
+      assertBaselineDeploySettings({
+        port: validatedConfig.port,
+        serviceName: validatedConfig.serviceName ?? null,
+      });
     } catch (portErr) {
+      if (portErr instanceof HostLevelSettingError) {
+        return NextResponse.json(
+          apiError(portErr.message, "RESERVED_PORT", { field: portErr.field }, 400),
+          { status: 400 },
+        );
+      }
       return NextResponse.json(
         apiError(
           portErr instanceof Error ? portErr.message : "Reserved or invalid port",
@@ -472,6 +486,24 @@ export async function POST(request: NextRequest) {
               autoDeploy: parsed.autoDeployOnPush,
               requiresApproval: false,
               config: JSON.stringify(validatedConfig),
+              // The operator explicitly chose the framework, runtime and start
+              // command in this request — that IS the confirmed detection. Store
+              // it so the lifecycle's detect step uses the operator's decision
+              // instead of re-detecting from the raw manifests (a generic Node
+              // repo without a lockfile is ambiguous by design).
+              detection: JSON.stringify({
+                workloadCategory: parsed.workloadCategory,
+                language: "javascript",
+                framework: parsed.framework,
+                runtime: parsed.runtime,
+                confidence: "high",
+                installCmd: validatedConfig.installCmd,
+                buildCmd: validatedConfig.buildCmd,
+                startCmd: validatedConfig.startCmd,
+                outputDir: validatedConfig.outputDir,
+                ambiguous: false,
+                warnings: [],
+              }),
               detectionStatus: "confirmed",
               healthPath: validatedConfig.healthPath,
               serviceManager: validatedConfig.serviceManager,
