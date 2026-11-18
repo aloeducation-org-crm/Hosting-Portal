@@ -22,6 +22,18 @@ checks, 0 failed), `docs/GIT-AUTODEPLOY.md`.
 | Bluehost-style marketing AI (`marketing.alolabs.net`) | **BLOCKED** | Existing CRM/email-campaign models and APIs | Separate `marketing.alolabs.net` app not present in this checkout; no campaign publishing integration |
 | GCP-inspired scaling | **PARTIAL** | Multiple projects each with its own port, release root and immutable releases (two projects verified live simultaneously); queue serializes per project | No container orchestration, no autoscaling, no hardware-capacity planner; single-host process-local lock only |
 
+## Update 2026-11-11 — self-hosted Team Chat
+
+| Capability | Status | Evidence | Still missing |
+|---|---|---|---|
+| Tenant text chat | **PASS (code + isolated tests, not deployed)** | `/dashboard/communications`; `chat_conversations`, `chat_participants`, `chat_messages`; `tests/communications.test.ts` | Production migration/rehearsal |
+| Direct and group rooms | **PASS** | Company-member invite validation, participant-only reads, stable direct-room deduplication | Participant management after room creation |
+| Message UX | **PASS** | Persisted text, message search, cursor pagination, unread counts, exact-message read-through, five-second polling | Attachments, reactions, editing, push notifications, WebSockets |
+| Voice/video/streaming | **NOT IMPLEMENTED** | Camera/microphone remain blocked by `Permissions-Policy`; no WebRTC claim | Deliberate media architecture, consent, TURN/SFU, storage and retention controls |
+
+The module is first-party and does not embed or claim MirrorFly. Scope and
+security details are in `docs/TEAM-CHAT.md`.
+
 ## Update 2026-10-27 — unified platform layer (orchestrator, agents, topology)
 
 Branch `arena/b2ec9268-hosting-portal`. Full plan and stage sequence:

@@ -55,6 +55,7 @@ import {
   Archive,
   Workflow,
   Gift,
+  MessageCircle,
 } from "lucide-react";
 import AIChatWidget from "@/components/alolabs/AIChatWidget";
 
@@ -62,6 +63,7 @@ const clientNavItems = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
   { label: "Cloud Projects (BaaS)", href: "/cloud", icon: Layers },
   { label: "App Center", href: "/apps", icon: LayoutGrid },
+  { label: "Team Chat", href: "/dashboard/communications", icon: MessageCircle },
   { label: "Free for Dev", href: "/dashboard/free-for-dev", altPrefix: "/dashboard/free-for-dev", icon: Gift },
   { label: "Bill Agent AI", href: "/ai/operator", icon: Cpu },
   { label: "Sites", href: "/sites", altPrefix: "/dashboard/websites", icon: Monitor },

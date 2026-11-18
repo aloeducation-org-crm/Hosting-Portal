@@ -25,6 +25,8 @@ reports: use the commands below.
 | [`DOCUMENTATION-INDEX.md`](DOCUMENTATION-INDEX.md) | maps the 24 required documents to actual files with honest status |
 | [`PHASE-0-VERIFIED-BASELINE-2026-11-16.md`](PHASE-0-VERIFIED-BASELINE-2026-11-16.md) | this-cycle verified baseline: commands, outputs, capability classes A–F |
 | [`ROADMAP-STATUS.md`](ROADMAP-STATUS.md) | honest capability status |
+| [`APP-CENTER.md`](APP-CENTER.md) | tenant app catalog, installation and branding model |
+| [`TEAM-CHAT.md`](TEAM-CHAT.md) | implemented self-hosted text-chat scope, security and API contract |
 | `../.env.example`, `../deploy/env/alo-hosting-panel.env.example` | the two environment templates |
 
 ## Historical records (do not read as current status)

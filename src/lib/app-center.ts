@@ -21,6 +21,7 @@ export const APP_CATEGORIES = [
   { id: "sales", label: "Sales" },
   { id: "people", label: "People" },
   { id: "projects", label: "Projects" },
+  { id: "communication", label: "Communication" },
   { id: "support", label: "Support" },
   { id: "ai", label: "AI" },
   { id: "content", label: "Content" },
@@ -484,6 +485,20 @@ export const BUILTIN_APPS: BuiltinApp[] = [
       { ...autoInvoice },
     ],
     defaultSettings: { senderName: "The Team", sendWindow: "Business hours", autoInvoice: false },
+  },
+  {
+    slug: "team-chat",
+    name: "Team Chat",
+    summary: "Self-hosted direct and group messaging for company teams",
+    description:
+      "Tenant-scoped direct and group conversations with participant-only access, message search, unread counts and a responsive workspace inside the portal.",
+    category: "communication",
+    icon: "MessageCircle",
+    accentColor: "#E8501A",
+    version: "1.0.0",
+    route: "/dashboard/communications",
+    configSchema: [],
+    defaultSettings: {},
   },
   {
     slug: "cloud-baas",
