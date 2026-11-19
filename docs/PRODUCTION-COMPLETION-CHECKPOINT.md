@@ -54,3 +54,16 @@ itself). The digest covers all regular files with paths relative to the payload
 root and a `./` prefix. This is not the legacy workflow's digest format. The
 script publishes a separate directory without starting PM2 or touching the DB;
 it does not replace the legacy activation or rollback workflow yet.
+
+## Immutable PM2 activation update
+
+The opt-in CI staging/production path, standalone PM2 activator, and known-good
+rollback command are described in [PM2 immutable releases](PM2-IMMUTABLE-RELEASES.md).
+The old Actions activation jobs are disabled. Sandbox evidence now includes a
+real dedicated PM2 daemon, disposable SQLite, successful startup on 3062,
+replacement with a synthetic candidate, manual rollback, and a named PM2
+restart followed by `/api/ready` returning `ready: true`. This did not exercise
+representative Nginx, HTTPS, reboot, external webhook or production data.
+The failed-candidate rehearsal also passed: a deliberately non-starting test
+candidate timed out, returned a nonzero activation status, and the prior PM2
+release recovered with `ready: true`. No production process was contacted.

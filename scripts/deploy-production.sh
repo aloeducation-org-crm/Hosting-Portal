@@ -2,6 +2,8 @@
 # Activate an already-built standalone Next.js payload on the production host.
 # Intended for the repository's self-hosted GitHub Actions runner only.
 set -Eeuo pipefail
+printf '%s\n' 'Legacy portal activation is disabled; use scripts/activate-pm2-release.sh.' >&2
+exit 1
 umask 027
 
 fail() { printf 'deploy: ERROR: %s\n' "$*" >&2; exit 1; }

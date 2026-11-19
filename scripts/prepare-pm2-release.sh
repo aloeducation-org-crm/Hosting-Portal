@@ -5,6 +5,7 @@ set -Eeuo pipefail
 umask 027
 fail() { printf 'prepare-pm2-release: %s\n' "$*" >&2; exit 1; }
 [[ $# == 4 ]] || fail 'usage: prepare-pm2-release.sh SHA EXPECTED_DIGEST PAYLOAD RELEASES_DIR'
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 sha=$1 digest=$2 payload=$3 releases=$4
 [[ $sha =~ ^[0-9a-f]{40}$ && $digest =~ ^[0-9a-f]{64}$ ]] || fail 'invalid SHA or digest'
 [[ -d $payload && -d $releases ]] || fail 'payload and releases directory must exist'
@@ -36,6 +37,8 @@ mkdir -p "$work/.next/standalone/.next"
 cp -a -- "$work/.next/static" "$work/.next/standalone/.next/static"
 cp -a -- "$work/public" "$work/.next/standalone/public"
 [[ ! -e $work/.next/standalone/prepared-release.json ]] || fail 'artifact contains preinstalled release identity'
-printf '{"commitSha":"%s","artifactSha256":"%s"}\n' "$sha" "$digest" > "$work/.next/standalone/prepared-release.json"
+[[ ! -e $work/.next/standalone/release-identity.json ]] || fail 'payload contains an activation identity'
+prepared_digest=$(bash "$script_dir/pm2-release-digest.sh" "$work")
+node -e 'const [commitSha,artifactSha256,preparedDigest]=process.argv.slice(1); console.log(JSON.stringify({releaseId:commitSha,commitSha,artifactSha256,preparedDigest,preparedAt:new Date().toISOString(),status:"prepared"}))' "$sha" "$digest" "$prepared_digest" > "$work/.next/standalone/prepared-release.json"
 mv -T -- "$work" "$releases/$sha"
 printf 'Prepared %s; not activated\n' "$releases/$sha"

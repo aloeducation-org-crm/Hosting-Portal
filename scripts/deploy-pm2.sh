@@ -95,6 +95,8 @@ if [[ "$check_only" -eq 1 ]]; then
   exit 0
 fi
 
+fail 'in-place PM2 deployment is disabled; use scripts/activate-pm2-release.sh'
+
 # One deploy at a time.
 exec 9>"${ROOT}/.deploy-pm2.lock"
 flock -n 9 || fail "another deploy-pm2 run holds ${ROOT}/.deploy-pm2.lock"

@@ -173,6 +173,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       artifact-digest: ${{ steps.digest.outputs.value }}
+      pm2-digest: ${{ steps.pm2-package.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -266,6 +267,26 @@ jobs:
             scripts/decide-release-target.mjs
             .deploy-digest
 
+      - name: Package isolated PM2 release candidate
+        id: pm2-package
+        run: |
+          set -Eeuo pipefail
+          mkdir -p pm2-candidate/payload/.next
+          cp -aL .next/standalone .next/static pm2-candidate/payload/.next/
+          cp -a public pm2-candidate/payload/
+          digest=$(bash scripts/pm2-release-digest.sh pm2-candidate/payload)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          node -e 'const [commitSha,artifactSha256]=process.argv.slice(1); console.log(JSON.stringify({commitSha,artifactSha256,buildTimestamp:new Date().toISOString(),applicationVersion:require("./package.json").version,nodeVersion:process.version,prismaVersion:require("@prisma/client/package.json").version,status:"candidate"}))' "$GITHUB_SHA" "$digest" | tee pm2-candidate/manifest.json
+          tar -C pm2-candidate -czf pm2-candidate.tar.gz manifest.json payload
+      - name: Upload isolated PM2 release candidate
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v6
+        with:
+          name: pm2-candidate-${{ github.sha }}
+          path: pm2-candidate.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   # Read-only routing diagnostic, deliberately separate from `deploy-preflight`.
   # Preflight only runs for an approved release dispatch, so it cannot answer
   # "is the public domain healthy right now?" during an incident — this job can.
@@ -314,7 +335,7 @@ jobs:
     # condition requires main. The typed approval and ticket are explicit
     # dispatch-time decisions, never a stored variable that can be forgotten.
     if: >-
-      github.ref == 'refs/heads/main' &&
+      false && github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
       github.event.inputs.release_approval == 'APPROVED' &&
       github.event.inputs.release_ticket != ''
@@ -417,7 +438,7 @@ jobs:
     name: Deploy canonical root portal to production server
     needs: [build, deploy-preflight]
     if: >-
-      github.ref == 'refs/heads/main' &&
+      false && github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
       github.event.inputs.release_approval == 'APPROVED' &&
       github.event.inputs.release_ticket != ''
@@ -517,3 +538,64 @@ jobs:
           #     exact commit SHA plus database and schema health
           #   - restores the previous commit and re-verifies when that fails
           bash scripts/deploy-release.sh
+
+  pm2-staging:
+    name: Activate and smoke-test candidate on portal staging
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.ALO_PM2_STAGING_ENABLED == '1' && github.event.inputs.allow_rollback != '1'
+    runs-on: [self-hosted, alo-portal-staging]
+    environment: staging
+    concurrency: alo-portal-staging-activation
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: pm2-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Activate on isolated staging and verify readiness
+        env:
+          PORTAL_ROOT: ${{ vars.ALO_PM2_ROOT }}
+          PORTAL_ENV_FILE: ${{ vars.ALO_PM2_ENV_FILE }}
+          PM2_DIGEST: ${{ needs.build.outputs.pm2-digest }}
+          PM2_ARCHIVE: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}/pm2-candidate.tar.gz
+        run: bash scripts/activate-ci-pm2-candidate.sh
+
+  pm2-production:
+    name: Activate the staged candidate on portal production
+    needs: [build, pm2-staging]
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' &&
+      vars.ALO_PM2_PRODUCTION_ENABLED == '1' && github.event.inputs.release_approval == 'APPROVED' &&
+      github.event.inputs.release_ticket != '' && github.event.inputs.allow_rollback != '1'
+    runs-on: [self-hosted, alo-portal-production]
+    environment: production
+    concurrency: hosting-production-deploy
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: pm2-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Activate reviewed candidate and verify readiness
+        env:
+          PORTAL_ROOT: ${{ vars.ALO_PM2_ROOT }}
+          PORTAL_ENV_FILE: ${{ vars.ALO_PM2_ENV_FILE }}
+          PM2_DIGEST: ${{ needs.build.outputs.pm2-digest }}
+          PM2_ARCHIVE: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}/pm2-candidate.tar.gz
+          RELEASE_TICKET: ${{ github.event.inputs.release_ticket }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_TICKET" =~ ^[A-Za-z0-9._:/-]{3,120}$ ]]
+          [[ "$(git ls-remote https://github.com/aloeducation-org-crm/Hosting-Portal.git refs/heads/main | cut -f1)" == "$GITHUB_SHA" ]]
+          echo "Release approval reference: $RELEASE_TICKET; SHA: $GITHUB_SHA"
+          bash scripts/activate-ci-pm2-candidate.sh
