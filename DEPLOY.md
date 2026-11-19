@@ -6,10 +6,12 @@ tree, one `helpers/` tree and one `deploy/` tree. The legacy snapshot,
 duplicate helper/config/installer trees and duplicate Docker files were removed
 on 2026-11-09; see [AUDIT-REPORT.md](AUDIT-REPORT.md).
 
-> This document describes configuration that exists in the repository. Running
-> it requires a real Ubuntu 22.04/24.04 host, DNS control, a certificate and an
-> authorized operator. **None of the host-level operations below have been
-> executed or verified inside the development sandbox.**
+> **Legacy guidance:** Some host-bootstrap and systemd instructions below describe
+> a retired deployment path and must not be used for production activation.
+> Use [the PM2 immutable release runbook](docs/PM2-IMMUTABLE-RELEASES.md)
+> and the guarded CI workflow instead. A production change requires host access,
+> verified port ownership, backups and explicit authorization; it has not been
+> executed or verified inside the development sandbox.
 
 ---
 
@@ -85,12 +87,15 @@ npm run db:generate
 npm run build
 cp -r .next/static .next/standalone/.next/static
 cp -r public .next/standalone/public
-PORT=3051 HOSTNAME=127.0.0.1 node .next/standalone/server.js
+PORT=3062 HOSTNAME=127.0.0.1 node .next/standalone/server.js
 ```
 
+This manual command is for local verification, not production activation.
 `next.config.ts` uses `output: "standalone"`; `next start` is not supported.
-The systemd unit `deploy/systemd/alo-hosting-panel.service` launches the
-standalone server on loopback `3051` with `EnvironmentFile=/etc/alo-hosting/panel.env`.
+The supported production PM2 profile uses loopback port 3062 by default; see
+`docs/PM2-IMMUTABLE-RELEASES.md` before deploying. The older systemd unit uses
+3051 and is not the current PM2 deployment path. Verify port ownership and
+existing tenant assignments before changing a live listener or proxy.
 `scripts/resolve-start-entry.mjs` resolves the exact entrypoint used by the
 release pipeline; never publish a shell pipeline as a PM2 start command.
 
@@ -99,7 +104,7 @@ release pipeline; never publish a shell pipeline as a PM2 start command.
 ## 4. Reverse proxy, TLS and tunnel
 
 - Canonical production proxy: `deploy/nginx/hosting.alolabs.net.conf` (ACME
-  challenge on 80, 301 to 443, TLS vhost proxying to `127.0.0.1:3051`, 50 MB
+  challenge on 80, 301 to 443, TLS vhost proxying to `127.0.0.1:3062`, 50 MB
   body limit, WebSocket upgrade, security headers).
 - Certificates: `sudo certbot --nginx -d hosting.alolabs.net`; the config already
   references `/etc/letsencrypt/live/hosting.alolabs.net/*`. Renewal is handled by
