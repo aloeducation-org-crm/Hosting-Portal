@@ -7,7 +7,7 @@ umask 077
 root=$(realpath -e -- "$PORTAL_ROOT")
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
-tar --no-same-owner --no-same-permissions -xzf "$PM2_ARCHIVE" -C "$work"
+bash scripts/verify-pm2-candidate.sh "$PM2_ARCHIVE" "${PM2_ARCHIVE_SHA256:-}" "$GITHUB_SHA" "$PM2_DIGEST" "$work"
 if [[ ! -e "$root/releases/$GITHUB_SHA" ]]; then
   bash scripts/prepare-pm2-release.sh "$GITHUB_SHA" "$PM2_DIGEST" "$work/payload" "$root/releases"
 fi

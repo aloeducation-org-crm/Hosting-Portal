@@ -67,3 +67,6 @@ representative Nginx, HTTPS, reboot, external webhook or production data.
 The failed-candidate rehearsal also passed: a deliberately non-starting test
 candidate timed out, returned a nonzero activation status, and the prior PM2
 release recovered with `ready: true`. No production process was contacted.
+
+See the [production acceptance gate evidence](PRODUCTION-ACCEPTANCE-GATES.md)
+for the GitHub environment API findings and the remaining host-specific gates.

@@ -68,3 +68,21 @@ the full acceptance record attached to `release_ticket`.
 Run `bash scripts/audit-pm2-release-host.sh ROOT ENV_FILE` for a read-only
 inventory without exposing env values. The host audit does not verify DNS, TLS
 renewal, firewall policy, or alert delivery; check those separately.
+
+### Promotion and GitHub administration
+
+The build publishes independent SHA-256 values for the archive and its payload.
+The hosted build rehearses extraction and preparation even for PRs. Only a
+`main` run uploads a promotable candidate. Staging and production consume the
+same archive and digests from the same run; neither rebuilds. The runner hashes
+a private copy before extraction, then checks the manifest commit and payload.
+
+The production job additionally depends on a GitHub-hosted policy check. It
+requires a nonempty required-reviewer rule with self-review disallowed, and
+exactly one deployment-branch rule: `main` (no tag rule). An inaccessible
+policy API fails closed. Configure these settings through a repository admin;
+keep `ALO_PM2_PRODUCTION_ENABLED` unset until all acceptance evidence is signed
+off. Put staging and production runners in separately restricted runner groups
+and non-root accounts; do not put production credentials on either staging or
+routing runners. Public-routing diagnostics additionally require
+`ALO_PM2_ROUTING_ENABLED=1` and a dedicated `alo-portal-routing` runner.
