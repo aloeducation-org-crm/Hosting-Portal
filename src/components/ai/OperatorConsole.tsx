@@ -322,10 +322,10 @@ export function OperatorConsole() {
               <Server className="h-4 w-4 text-sky-600" />
             </div>
             <div className="text-2xl font-bold mt-2 font-mono">
-              :{snapshot?.hosting.nextAvailablePort ?? 3062}
+              :{snapshot?.hosting.nextAvailablePort ?? 3063}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {snapshot?.hosting.siteCount ?? 0} sites · :3051 protected
+              {snapshot?.hosting.siteCount ?? 0} sites · :{snapshot?.hosting.reservedControlPlanePort ?? 3062} protected
             </p>
           </CardContent>
         </Card>

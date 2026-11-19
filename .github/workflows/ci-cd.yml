@@ -61,9 +61,9 @@ on:
         default: 'hosting.alolabs.net'
         type: string
       routing_port:
-        description: 'Loopback port the panel listens on for the read-only routing check (default 3051).'
+        description: 'Loopback port the panel listens on for the read-only routing check (default 3062).'
         required: false
-        default: '3051'
+        default: '3062'
         type: string
 
 permissions:
@@ -276,7 +276,7 @@ jobs:
   # release that the operator has separately approved.
   verify-routing:
     name: Verify public routing (read-only)
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: self-hosted
     continue-on-error: true
     timeout-minutes: 10
@@ -285,7 +285,7 @@ jobs:
       - name: Check that the public domain reaches the panel
         env:
           DOMAIN: ${{ github.event.inputs.routing_domain || 'hosting.alolabs.net' }}
-          APP_PORT: ${{ github.event.inputs.routing_port || '3051' }}
+          APP_PORT: ${{ github.event.inputs.routing_port || '3062' }}
           # Optional. Without them the Cloudflare SSL/TLS mode check reports
           # NOT VERIFIABLE instead of guessing, which is the honest outcome —
           # 'flexible' is the setting that produces the 530 redirect loop.

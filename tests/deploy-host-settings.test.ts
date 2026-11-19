@@ -110,8 +110,9 @@ describe("SEC-11: reserved platform ports", () => {
   });
 
   it("allows a normal application port", () => {
-    expect(() => assertBaselineDeploySettings({ port: 3062 })).not.toThrow();
-    expect(isReservedPlatformPort(3062)).toBe(false);
+    expect(() => assertBaselineDeploySettings({ port: 3064 })).not.toThrow();
+    expect(isReservedPlatformPort(3062)).toBe(true);
+    expect(() => assertBaselineDeploySettings({ port: 3062 })).toThrow(HostLevelSettingError);
   });
 
   it("does not reject a port an application declares in its own manifest", () => {
@@ -139,7 +140,7 @@ describe("SEC-11: operator requirement for host-level changes", () => {
 
   it("refuses a tenant changing the port", () => {
     expect(() =>
-      assertDeploySettingsChangeAllowed({ port: 3063 }, { port: 3062 }, TENANT_ROLE),
+      assertDeploySettingsChangeAllowed({ port: 3063 }, { port: 3064 }, TENANT_ROLE),
     ).toThrow(/requires an operator/);
   });
 
@@ -166,7 +167,7 @@ describe("SEC-11: operator requirement for host-level changes", () => {
 
   it("allows a tenant to keep the values an operator already set", () => {
     // Editing a build command must not require re-confirming the port.
-    const current = { port: 3062, serviceName: "alo-site-blog.example.com", serviceManager: "systemd" };
+    const current = { port: 3064, serviceName: "alo-site-blog.example.com", serviceManager: "systemd" };
     expect(() =>
       assertDeploySettingsChangeAllowed({ ...current }, current, TENANT_ROLE),
     ).not.toThrow();
@@ -174,7 +175,7 @@ describe("SEC-11: operator requirement for host-level changes", () => {
 
   it("allows an operator to change host-level settings", () => {
     expect(() =>
-      assertDeploySettingsChangeAllowed({ port: 3063 }, { port: 3062 }, "ADMIN"),
+      assertDeploySettingsChangeAllowed({ port: 3063 }, { port: 3064 }, "ADMIN"),
     ).not.toThrow();
     expect(() =>
       assertDeploySettingsChangeAllowed(
@@ -195,13 +196,13 @@ describe("SEC-11: operator requirement for host-level changes", () => {
       ),
     ).toThrow(/belongs to the hosting platform/);
     expect(() =>
-      assertDeploySettingsChangeAllowed({ port: 3051 }, { port: 3062 }, "SUPER_ADMIN"),
+      assertDeploySettingsChangeAllowed({ port: 3051 }, { port: 3064 }, "SUPER_ADMIN"),
     ).toThrow(/reserved for the hosting platform/);
   });
 
   it("reports which field was refused, so the UI can point at it", () => {
     try {
-      assertDeploySettingsChangeAllowed({ port: 3063 }, { port: 3062 }, TENANT_ROLE);
+      assertDeploySettingsChangeAllowed({ port: 3063 }, { port: 3064 }, TENANT_ROLE);
       throw new Error("expected a HostLevelSettingError");
     } catch (e) {
       expect(e).toBeInstanceOf(HostLevelSettingError);
@@ -220,8 +221,8 @@ describe("SEC-11: operator requirement for host-level changes", () => {
 describe("SEC-11: stripHostLevelChanges", () => {
   it("preserves the stored value when a tenant tries to change it", () => {
     const patch = { buildCmd: "npm run build", port: 3051 };
-    const out = stripHostLevelChanges(patch, { port: 3062 }, TENANT_ROLE);
-    expect(out.port).toBe(3062);
+    const out = stripHostLevelChanges(patch, { port: 3064 }, TENANT_ROLE);
+    expect(out.port).toBe(3064);
     expect(out.buildCmd).toBe("npm run build");
   });
 
@@ -233,13 +234,13 @@ describe("SEC-11: stripHostLevelChanges", () => {
 
   it("leaves an operator's patch untouched", () => {
     const patch = { port: 3063, serviceName: "alo-site-x" };
-    expect(stripHostLevelChanges(patch, { port: 3062 }, "ADMIN")).toEqual(patch);
+    expect(stripHostLevelChanges(patch, { port: 3064 }, "ADMIN")).toEqual(patch);
   });
 
   it("leaves an unchanged tenant value alone", () => {
-    const patch = { port: 3062, buildCmd: "npm run build" };
-    const out = stripHostLevelChanges(patch, { port: 3062 }, TENANT_ROLE);
-    expect(out.port).toBe(3062);
+    const patch = { port: 3064, buildCmd: "npm run build" };
+    const out = stripHostLevelChanges(patch, { port: 3064 }, TENANT_ROLE);
+    expect(out.port).toBe(3064);
   });
 });
 

@@ -11,7 +11,7 @@
 # Request path under test:
 #
 #   browser → Cloudflare edge → Cloudflare Tunnel (cloudflared)
-#           → https://127.0.0.1:443 (nginx) → http://127.0.0.1:3051 (Next.js)
+#           → https://127.0.0.1:443 (nginx) → http://127.0.0.1:3062 (Next.js)
 #
 # Read-only. It sends GET/HEAD requests and reads local config. It never
 # restarts anything, never writes a config file, and never prints a secret —
@@ -21,11 +21,11 @@
 # Usage:
 #   bash scripts/verify-production-routing.sh
 #   bash scripts/verify-production-routing.sh --json
-#   DOMAIN=hosting.alolabs.net APP_PORT=3051 bash scripts/verify-production-routing.sh
+#   DOMAIN=hosting.alolabs.net APP_PORT=3062 bash scripts/verify-production-routing.sh
 #
 # Optional environment:
 #   DOMAIN            apex domain (default hosting.alolabs.net)
-#   APP_PORT          panel's loopback port (default 3051)
+#   APP_PORT          panel's loopback port (default 3062)
 #   CF_API_TOKEN      Cloudflare API token with Zone:SSL and DNS read (optional)
 #   CF_ZONE_ID        Cloudflare zone id (optional)
 #   CF_ACCOUNT_ID     Cloudflare account id (optional; enables tunnel lookup)
@@ -38,7 +38,7 @@ set -Eeuo pipefail
 
 DOMAIN="${DOMAIN:-hosting.alolabs.net}"
 WWW_HOST="www.${DOMAIN}"
-APP_PORT="${APP_PORT:-3051}"
+APP_PORT="${APP_PORT:-3062}"
 JSON_ONLY=0
 [[ "${1:-}" == "--json" ]] && JSON_ONLY=1
 

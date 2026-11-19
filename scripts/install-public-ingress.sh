@@ -21,7 +21,7 @@
 #
 # Optional env:
 #   DOMAIN                   — default: hosting.alolabs.net
-#   PANEL_PORT               — default: 3051
+#   PANEL_PORT               — default: 3062
 #   KIT_ADMIN_EMAIL          — for Let's Encrypt cert registration
 #
 # Run on alo-server-lap:
@@ -36,7 +36,7 @@ set -Eeuo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PANEL_ENV=/etc/alo-hosting/panel.env
 DOMAIN="${DOMAIN:-hosting.alolabs.net}"
-PANEL_PORT="${PANEL_PORT:-3051}"
+PANEL_PORT="${PANEL_PORT:-3062}"
 PANEL_HOST=127.0.0.1
 TUNNEL_NAME="alo-hosting"
 TUNNEL_CONF=/etc/cloudflared/config.yml

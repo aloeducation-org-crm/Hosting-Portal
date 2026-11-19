@@ -310,33 +310,34 @@ describe("AI Auto-Deploy Studio Architect & API Route", () => {
     expect(reservedPortRes.status).toBe(400);
   });
 
-  it("allocates ports from 3062+, protects 3051 (alo-hosting), and generates alo-server-lap brief & Nginx config", () => {
+  it("allocates ports from 3063+, protects 3051 and 3062, and generates alo-server-lap brief & Nginx config", () => {
     expect(ALO_SERVER_SPEC.publicIp).toBe("103.231.239.79");
     expect(ALO_SERVER_SPEC.controlPlane).toEqual({
       domain: "hosting.alolabs.net",
-      pm2App: "alo-hosting",
-      port: 3051,
+      pm2App: "alo-hosting-panel",
+      port: 3062,
     });
-    expect(allocateNextAvailablePort([])).toBe(3062);
+    expect(allocateNextAvailablePort([])).toBe(3063);
     expect(allocateNextAvailablePort([3062, 3063])).toBe(3064);
     expect(() => assertTenantPortAllowed(3051)).toThrow(/reserved/i);
 
-    const nginx = generateNginxSiteConfig({ domain: "blog.alolabs.net", port: 3062 });
+    expect(() => assertTenantPortAllowed(3062)).toThrow(/reserved/i);
+    const nginx = generateNginxSiteConfig({ domain: "blog.alolabs.net", port: 3063 });
     expect(nginx).toContain("server_name blog.alolabs.net;");
-    expect(nginx).toContain("proxy_pass http://127.0.0.1:3062;");
+    expect(nginx).toContain("proxy_pass http://127.0.0.1:3063;");
     expect(() => generateNginxSiteConfig({ domain: "bad;rm -rf /", port: 3062 })).toThrow();
 
     const brief = generateShareableProjectBriefYaml({
       projectName: "Blog Portal",
       appSlug: "blog",
       domain: "blog.alolabs.net",
-      port: 3062,
+      port: 3063,
       workloadCategory: "web",
       framework: "nextjs",
       runtime: "node",
     });
     expect(brief).toContain("Deploy Target: alo-server-lap (103.231.239.79)");
-    expect(brief).toContain("Allocated Port: 3062 (next available)");
+    expect(brief).toContain("Allocated Port: 3063 (next available)");
     expect(brief).toContain("Logs: /home/alamin/.pm2/logs/blog-*.log");
   });
 });

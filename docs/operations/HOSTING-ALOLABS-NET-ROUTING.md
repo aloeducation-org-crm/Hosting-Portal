@@ -14,14 +14,14 @@ browser
   → Cloudflare edge            (DNS is proxied; SSL mode must be Full)
   → Cloudflare Tunnel          (cloudflared, running on the origin host)
   → https://127.0.0.1:443      (nginx, TLS terminated with a Let's Encrypt cert)
-  → http://127.0.0.1:3051      (Next.js standalone, bound to loopback only)
+  → http://127.0.0.1:3062      (Next.js standalone, bound to loopback only)
 ```
 
 | Layer | Value | Source |
 |---|---|---|
 | Domain | `hosting.alolabs.net` | `.env.example` (`APP_URL`, `NEXTAUTH_URL`) |
 | Origin host | `alo-server-lap` @ `103.231.239.79` | `src/lib/deploy/server-spec.ts` |
-| App port | `3051` | `server-spec.ts` → `controlPlane.port`; `.env.example` `PORT=3051` |
+| App port | `3062` | `server-spec.ts` → `controlPlane.port`; `.env.example` `PORT=3062` |
 | Process manager | PM2 app `alo-hosting` | `server-spec.ts` |
 | Reverse proxy | nginx | `deploy/nginx/hosting.alolabs.net.conf` |
 | Tunnel | cloudflared → `https://127.0.0.1:443`, `noTLSVerify: true` | `deploy/cloudflared/config.yml` |
@@ -32,7 +32,7 @@ Two detail that are easy to get wrong and are load-bearing:
 - `noTLSVerify: true` is **required**, not laziness. cloudflared dials `127.0.0.1` while the certificate
   is issued for `hosting.alolabs.net`, so the loopback name never matches a SAN. The connection does not
   leave the host. The alternative is `originServerName: hosting.alolabs.net`.
-- Reserved ports include `3051`, so a tenant app is never allocated the control-plane port
+- Reserved ports include `3062`, so a tenant app is never allocated the control-plane port
   (`assertTenantPortAllowed`).
 
 ---
@@ -40,7 +40,7 @@ Two detail that are easy to get wrong and are load-bearing:
 ## 2. The failure this configuration exists to prevent
 
 The symptom is a browser reporting **HTTP 530** or `ERR_TOO_MANY_REDIRECTS` while
-`curl http://127.0.0.1:3051` on the server cheerfully returns 200. The app is healthy; the *path to it* is not.
+`curl http://127.0.0.1:3062` on the server cheerfully returns 200. The app is healthy; the *path to it* is not.
 
 Two independent settings each reproduce it:
 
@@ -158,7 +158,7 @@ uploaded as the `routing-report-<sha>` artifact.
 
 ## 7. What this document does not cover
 
-- Whether the panel is currently **running** on `3051` (needs host access).
+- Whether the panel is currently **running** on `3062` (needs host access).
 - Whether the Cloudflare tunnel currently has healthy **connectors** (needs `cloudflared tunnel info`).
 - The tenant-app path (`3062`+ → per-domain nginx vhosts), which is separate from the control plane.
 - Cloudflare account-level settings beyond SSL/TLS mode (WAF, caching, page rules).

@@ -6,7 +6,7 @@
 # Usage:
 #   ./scripts/deploy-new-site.sh <project-name> <domain> <port|auto>
 # Example:
-#   ./scripts/deploy-new-site.sh blog blog.alolabs.net 3062
+#   ./scripts/deploy-new-site.sh blog blog.alolabs.net 3063
 #   ./scripts/deploy-new-site.sh crm-web crm.alolabs.net auto
 #
 # Note: You can also deploy Web, Server & Mobile projects with zero SSH from
@@ -19,7 +19,8 @@ DOMAIN="${2:-}"
 PORT_ARG="${3:-}"
 PROJECTS_ROOT="${ALO_PROJECTS_DIR:-$HOME/projects}"
 PUBLIC_IP="${ALO_PUBLIC_IP:-103.231.239.79}"
-RESERVED_PORT_PORTAL=3051
+RESERVED_PORT_PORTAL=3062
+RESERVED_PORT_LEGACY_PORTAL=3051
 
 HEALTH_PATH="${ALO_HEALTH_PATH:-${4:-/}}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +30,7 @@ fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
 if [[ -z "$APP" || -z "$DOMAIN" || -z "$PORT_ARG" ]]; then
   echo "Usage: $0 <app-name> <domain> <port|auto> [health-path]" >&2
-  echo "Example: $0 blog blog.alolabs.net 3062 /api/health" >&2
+  echo "Example: $0 blog blog.alolabs.net 3063 /api/health" >&2
   exit 1
 fi
 
@@ -48,7 +49,7 @@ if [[ ! "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; th
 fi
 
 if [[ "$DOMAIN" == "hosting.alolabs.net" ]]; then
-  echo "Error: 'hosting.alolabs.net' is the reserved ALO Hosting Portal domain (port 3051)." >&2
+  echo "Error: 'hosting.alolabs.net' is the reserved ALO Hosting Portal domain (port 3062)." >&2
   exit 1
 fi
 
@@ -61,11 +62,11 @@ is_port_in_use() {
   fi
 }
 
-# 2. Port validation or automatic next-available allocation starting at 3062
+# 2. Port validation or automatic next-available allocation starting at 3063
 if [[ "$PORT_ARG" == "auto" ]]; then
-  PORT=3062
+  PORT=3063
   while [[ "$PORT" -le 3999 ]]; do
-    if [[ "$PORT" -ne "$RESERVED_PORT_PORTAL" && "$PORT" -ne 3000 && "$PORT" -ne 5432 && "$PORT" -ne 6379 && "$PORT" -ne 8080 ]]; then
+    if [[ "$PORT" -ne "$RESERVED_PORT_PORTAL" && "$PORT" -ne "$RESERVED_PORT_LEGACY_PORTAL" && "$PORT" -ne 3000 && "$PORT" -ne 5432 && "$PORT" -ne 6379 && "$PORT" -ne 8080 ]]; then
       if ! is_port_in_use "$PORT"; then
         break
       fi
@@ -85,8 +86,8 @@ if (( PORT < 1024 || PORT > 65535 )); then
   exit 1
 fi
 
-if (( PORT == RESERVED_PORT_PORTAL )); then
-  echo "Error: port 3051 is reserved for 'alo-hosting' (hosting.alolabs.net)." >&2
+if (( PORT == RESERVED_PORT_PORTAL || PORT == RESERVED_PORT_LEGACY_PORTAL )); then
+  echo "Error: port $PORT is reserved for the hosting platform." >&2
   exit 1
 fi
 

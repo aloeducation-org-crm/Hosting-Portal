@@ -1,15 +1,9 @@
 # PM2 production runbook — hosting.alolabs.net on alo-server-lap
 
-**Status:** the files this runbook uses were built and exercised in a sandbox
-on 2026-11-14 (build, backup, start, health check, static asset check, with a
-stand-in for `pm2`). **Nothing here has been run on 103.231.239.79**, and
-`prisma db push` could not be run in the sandbox at all (the Prisma schema
-engine could not be downloaded there). The server facts below are as reported
-by the operator, not measured.
-
-This is the layout the server actually runs today. It is a different shape from
-the systemd / `/opt/alo-hosting` / Cloudflare Tunnel / port 3051 layout described
-in `docs/DEPLOYMENT-AND-ROLLBACK.md`. See [§7](#7-how-this-relates-to-the-rest-of-the-repository).
+**Status:** Repository target for the PM2 rollout, not a verified live configuration.
+The `3062` bind, active ingress profile, database identity, and process ownership
+must be checked on the target host before any production changes. Install only
+one ingress profile for `hosting.alolabs.net`.
 
 ## 1. Facts
 
@@ -19,7 +13,7 @@ in `docs/DEPLOYMENT-AND-ROLLBACK.md`. See [§7](#7-how-this-relates-to-the-rest-
 | URL | https://hosting.alolabs.net |
 | Checkout | `/home/alamin/Hosting-Portal` |
 | Process manager | PM2, user `alamin` — never root |
-| PM2 app | `alo-hosting-panel` on `127.0.0.1:3000` |
+| PM2 app | `alo-hosting-panel` on `127.0.0.1:3062` |
 | Environment | `/etc/alo-hosting/panel.env` |
 | Database | SQLite, `file:/var/lib/alo-hosting/production.db` (not PostgreSQL) |
 | TLS | Cloudflare Origin certificate, `/etc/nginx/ssl/alolabs.net.{pem,key}` |
@@ -36,12 +30,12 @@ below only ever name `alo-hosting-panel`, `alo-deploy-worker` and
 
 | File | Purpose |
 |---|---|
-| `scripts/deploy-pm2.sh` | Preflight, backup, schema, build, static copy, PM2 reload, health check |
+| `scripts/deploy-pm2.sh` | Preflight, backup, build, static copy, PM2 reload, health check |
 | `deploy/pm2/ecosystem.config.cjs` | PM2 apps; reads `panel.env` itself |
 | `deploy/pm2/panel-env.cjs` | Parser for `panel.env` (tested in `tests/pm2-profile.test.ts`) |
 | `deploy/nginx/hosting.alolabs.net.pm2-origin-cert.conf` | nginx site for this layout |
 
-## 3. Routine deploy
+## 3. Staging rehearsal / explicitly approved rollout
 
 ```bash
 su - alamin -c "cd /home/alamin/Hosting-Portal && bash scripts/deploy-pm2.sh"
@@ -58,24 +52,22 @@ What the script does, in order, and where it stops:
 1. Refuses to run as root. Checks `panel.env` is readable, the four secrets are
    present and at least 32 characters, `DATABASE_URL` is an absolute `file:` URL
    outside the checkout, and `alamin` can write the database and its directory.
-2. Moves `.env`, `.env.production`, `.env.local`, `.env.production.local` in the
-   checkout to `*.placeholder`.
+2. Refuses checkout-local Next.js env files without moving or overwriting them.
 3. `git fetch` + fast-forward to `origin/main` (`--no-pull` skips; refuses if
    tracked files have local changes).
 4. `npm ci --include=dev`.
 5. Takes a verified SQLite snapshot (`scripts/db-backup.mjs`: `VACUUM INTO`,
    integrity check, checksum) into `~/storage/backups/hosting-predeploy/`.
    If the backup fails, nothing further happens.
-6. `prisma db push --skip-generate` (`--skip-schema` skips). It is run **without**
-   `--accept-data-loss`: if a schema change would drop data, Prisma stops and the
-   running application is not restarted.
+6. Does not change the schema. Rehearse any required migration separately on an
+   isolated restore; production migration requires backup evidence and explicit approval.
 7. `npm run build` and `npm run build:worker`, with `panel.env` in the
    environment.
 8. Copies `.next/static` **and** `public` into `.next/standalone`.
-9. `pm2 startOrReload deploy/pm2/ecosystem.config.cjs --update-env`, `pm2 save`.
-10. Waits up to 60 s for `http://127.0.0.1:3000/api/health` to return 200, then
+9. `pm2 startOrReload deploy/pm2/ecosystem.config.cjs --update-env`.
+10. Waits up to 60 s for `http://127.0.0.1:3062/api/health` to return 200, then
     requests one real `/_next/static/chunks/*.js` file. Either failing makes the
-    script exit non-zero and print the last panel log lines.
+    script exit non-zero and print the last panel log lines. Saves PM2 only after both checks pass.
 
 **Known limit — not zero-downtime.** The build rewrites `.next` in place while
 the old process is still serving from it. For the length of the build some
@@ -98,7 +90,7 @@ set +H
 # 4.1 Audit — read-only
 uname -a; free -h; df -h /; nproc
 node -v; npm -v; nginx -v; su - alamin -c "pm2 -v"
-ss -tlnp | grep -E ':(3000|80|443)\b'      # 3000 must be free or be alo-hosting-panel
+ss -tlnp | grep -E ':(3062|80|443)\b'      # 3062 must be free or be alo-hosting-panel
 
 # 4.2 Checkout (as alamin)
 su - alamin -c "cd /home/alamin && git clone https://github.com/aloeducation-org-crm/Hosting-Portal.git"
@@ -132,7 +124,7 @@ su - alamin -c "pm2 startup systemd -u alamin --hp /home/alamin"
 | `NEXTAUTH_SECRET`, `JWT_SECRET`, `APP_ENCRYPTION_KEY`, `INTERNAL_SECRET` | real random values | `src/lib/env.ts` exits at startup if any is a known placeholder. |
 
 `PORT` and `HOSTNAME` in `panel.env` are ignored for the panel: the ecosystem
-file always sets `PORT=3000` (or `PANEL_PORT`) and `HOSTNAME=127.0.0.1`, because
+file always sets `PORT=3062` (or `PANEL_PORT`) and `HOSTNAME=127.0.0.1`, because
 that is where nginx proxies. The repository's env templates carry `PORT=3051`,
 and letting that value win would produce a 502.
 
@@ -146,7 +138,7 @@ and letting that value win would produce a 502.
 | 4 | Standalone output has no `.next/static` → all JS/CSS 404. | The script copies `.next/static` and `public`, removing the targets first so a re-run cannot create `static/static`, then requests a real chunk. |
 | 5 | nginx `alias` into `/home/alamin` → 403 (www-data cannot read it). | The nginx file proxies everything; a test forbids `alias`/`root`. |
 | 6 | Cloudflare "Flexible" + `return 301 https://` on port 80 → redirect loop. | Port 80 proxies. See §6 for the better fix. |
-| 7 | `prisma db push` had no `DATABASE_URL`. | The script reads it from `panel.env` and passes it explicitly. |
+| 7 | `prisma db push` had no `DATABASE_URL`. | The PM2 deploy script no longer runs schema changes. |
 | 8 | Bash history expansion on `!`. | `set +H` in the script and in §4. |
 | 9 | Deployments queued in the panel were never processed when `DEPLOY_INLINE_WORKER=false` and no worker ran. | The ecosystem file starts `alo-deploy-worker` and `alo-automation-worker` when their bundles exist, and turns the in-process worker off so nothing is processed twice. |
 
@@ -239,6 +231,6 @@ su - alamin -c "cd /home/alamin/Hosting-Portal && bash scripts/deploy-pm2.sh --n
 |---|---|
 | `[SECURITY] FATAL: … placeholder value` | A placeholder secret is reaching the process: check `panel.env` and that no `.env*` exists in the checkout or in `.next/standalone`. |
 | `Invalid environment variables` | A required key is missing from `panel.env`. |
-| 502 from nginx | Panel not listening on 3000: `ss -tlnp \| grep :3000`. |
+| 502 from nginx | Panel not listening on 3062: `ss -tlnp \| grep :3062`. |
 | Page loads without styling, JS 404 | Static copy missing: re-run the script. |
 | `ERR_TOO_MANY_REDIRECTS` | Something redirects on port 80 while Cloudflare is "Flexible": see §6. |

@@ -90,7 +90,7 @@ async function uniqueDomain(repository: string): Promise<string> {
  * live OS-level TCP bind probe. The previous implementation only checked
  * GitProject ports, started at 4100, and could hand out a port an OS process
  * already owned. `DEPLOY_STATIC_PORT_BASE` (if set) is honored as the preferred
- * starting port, otherwise the host registry base (3062) is used.
+ * starting port, otherwise the host registry base (3063) is used.
  */
 async function allocatePort(): Promise<number> {
   const preferred = Number(process.env.DEPLOY_STATIC_PORT_BASE || 0);

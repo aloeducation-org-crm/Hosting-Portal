@@ -501,7 +501,7 @@ export async function POST(request: NextRequest) {
         throw new Error("Valid domain required for auto_deploy_site (e.g., shop.alolabs.net)");
       }
       if (rawDomain === ALO_SERVER_SPEC.controlPlane.domain) {
-        throw new Error("hosting.alolabs.net (port 3051) is protected and cannot be overwritten");
+        throw new Error("hosting.alolabs.net is protected and cannot be overwritten");
       }
 
       const usedPorts = await collectUsedPorts();
