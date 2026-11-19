@@ -143,6 +143,8 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
 
   const detection = await detectFramework(detectionSource ?? memoryReader(manifests));
   const config = configFromDetection(detection);
+  // Surface detection warnings at the top level of the import response too.
+  warnings.push(...detection.warnings);
   const port = input.port ?? (await allocatePort());
   config.port = port;
 
@@ -164,7 +166,9 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
       guard++;
     }
     config.serviceName = serviceName;
-    config.requiresApproval = detection.ambiguous;
+    // Preserve any approval gate added by configFromDetection (for example,
+    // when the detected environment names exceed the build allowlist limit).
+    config.requiresApproval = config.requiresApproval || detection.ambiguous;
     warnings.push(`${detection.framework} will be served by a PM2 process managed by the panel`);
   } else if (["django", "fastapi", "flask", "python", "php-composer", "laravel"].includes(detection.framework)) {
     config.serviceManager = "none"; // operator must wire pm2/systemd before enabling
@@ -203,7 +207,7 @@ export async function importRepository(input: ImportInput): Promise<ImportResult
       requiresApproval: config.requiresApproval,
       detection: JSON.stringify(detection),
       config: JSON.stringify(validateDeployConfig(config)),
-      detectionStatus: detection.ambiguous ? "ambiguous" : "detected",
+      detectionStatus: config.requiresApproval ? "ambiguous" : "detected",
       healthPath: config.healthPath,
       healthUrl: input.healthUrl ?? null,
       serviceManager: config.serviceManager,

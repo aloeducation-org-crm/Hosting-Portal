@@ -22,6 +22,7 @@ import {
 import { redact, redactCommand, collectSecrets, matchesPlatformSecretName } from "./redact";
 import { planBuildIsolation, assertIsolationAvailable, describeIsolation, type IsolationPlan, type ResolvedIsolation } from "./sandbox";
 import { cloneUrlFor, resolveToken } from "./github";
+import { isCommitSha } from "./commit-sha";
 import type { DeployStage, DeployConfig, ReleaseMarker } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -169,7 +170,7 @@ export async function runIsolatedCommand(
 }
 
 async function gitCheckout(cloneUrl: string, sha: string, workdir: string, secrets: string[]): Promise<string> {
-  if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("Invalid commit SHA");
+  if (!isCommitSha(sha)) throw new Error("Invalid commit SHA");
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
     HOME: process.env.HOME ?? os.tmpdir(),
@@ -181,6 +182,26 @@ async function gitCheckout(cloneUrl: string, sha: string, workdir: string, secre
     timeout: 5 * 60_000,
     env: env as NodeJS.ProcessEnv,
   });
+  // A full clone only contains objects reachable from advertised refs. A queued
+  // SHA may have disappeared from those refs after a force-push; try fetching
+  // that exact object, never a newer branch tip. Some servers refuse such a
+  // fetch or have already pruned it, in which case the deployment fails closed.
+  try {
+    await execFileAsync("git", ["-C", workdir, "cat-file", "-e", `${sha}^{commit}`], {
+      timeout: 60_000,
+      env: env as NodeJS.ProcessEnv,
+    });
+  } catch {
+    try {
+      await execFileAsync("git", ["-C", workdir, "fetch", "--quiet", "--no-tags", "origin", sha], {
+        timeout: 5 * 60_000,
+        env: env as NodeJS.ProcessEnv,
+      });
+    } catch {
+      // Do not persist git's stderr: the remote URL can contain credentials.
+      throw new Error(`Pinned commit ${sha} is unavailable from the repository. It may have been removed or pruned, or the fetch may have failed due to access or network issues. Check the repository and retry with an available commit.`);
+    }
+  }
   await execFileAsync("git", ["-C", workdir, "checkout", "--quiet", "--detach", sha], {
     timeout: 60_000,
     env: env as NodeJS.ProcessEnv,
@@ -371,7 +392,7 @@ export async function runDeployment(deploymentId: string): Promise<void> {
     }
 
     const sha = deployment.commitHash || project.lastCommitSha;
-    if (!sha || !/^[0-9a-f]{40}$/.test(sha)) {
+    if (!isCommitSha(sha)) {
       throw new DeploymentFailure("checkout", "No valid commit SHA pinned for this deployment");
     }
 

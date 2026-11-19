@@ -4,6 +4,7 @@ import { enqueueDeployment } from "./queue";
 import { validateRepositoryName } from "./github";
 import { verifyGitHubSignature } from "./signature";
 import { decryptSecret } from "@/lib/encryption";
+import { isCommitSha } from "./commit-sha";
 
 export { verifyGitHubSignature };
 
@@ -177,6 +178,10 @@ export async function handleGitHubWebhook(rawBody: string, headers: Headers): Pr
   if (push.deleted) {
     await update({ result: "ignored", reason: "branch deleted" });
     return { status: 200, body: { ...common, result: "ignored", reason: "branch deleted", signatureValid: true } };
+  }
+  if (!isCommitSha(push.sha)) {
+    await update({ result: "rejected", reason: "invalid commit SHA" });
+    return { status: 400, body: { ...common, result: "rejected", reason: "invalid commit SHA", signatureValid: true } };
   }
 
   const project = await db.gitProject.findFirst({

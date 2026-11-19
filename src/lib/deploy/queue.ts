@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import type { EnqueueInput } from "./types";
+import { isCommitSha } from "./commit-sha";
 
 /**
  * A persisted deployment queue.
@@ -45,7 +46,7 @@ export interface EnqueueResult {
 export async function enqueueDeployment(input: EnqueueInput): Promise<EnqueueResult> {
   const project = await db.gitProject.findUnique({ where: { id: input.projectId } });
   if (!project) throw new Error("Project not found");
-  if (!/^[0-9a-f]{40}$/.test(input.commitSha)) throw new Error("Invalid commit SHA");
+  if (!isCommitSha(input.commitSha)) throw new Error("Invalid commit SHA");
 
   const queuedAhead = await db.deployment.count({
     where: { projectId: project.id, status: { in: ["PENDING", "RUNNING"] } },

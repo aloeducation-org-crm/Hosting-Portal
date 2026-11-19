@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import path from "node:path";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { setupHarness, makeGitRepo, pushPayload, signedHeaders, WEBHOOK_SECRET, type Harness } from "./helpers/deploy-harness";
 import { detectFramework, memoryReader } from "../src/lib/deploy/detect";
 import { configFromDetection, validateDeployConfig } from "../src/lib/deploy/config";
@@ -71,6 +74,18 @@ describe("GitHub push → verified deploy → rollback (real git/DB/HTTP)", () =
     expect(await h.db.deployment.count({ where: { projectId } })).toBe(0);
     const delivery = await h.db.webhookDelivery.findUnique({ where: { deliveryId: "delivery-invalid" } });
     expect(delivery?.signatureValid).toBe(false);
+  });
+
+  it("ignores branch deletions and rejects non-deletion zero SHAs without queuing", async () => {
+    const zero = "0".repeat(40);
+    const deletion = JSON.stringify({ ...pushPayload(repository, zero), deleted: true });
+    expect((await h.webhook.handleGitHubWebhook(deletion, signedHeaders(deletion, "delivery-deleted"))).body.result).toBe("ignored");
+    const invalid = JSON.stringify(pushPayload(repository, zero));
+    const rejected = await h.webhook.handleGitHubWebhook(invalid, signedHeaders(invalid, "delivery-zero"));
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.reason).toBe("invalid commit SHA");
+    await expect(h.queue.enqueueDeployment({ projectId, commitSha: zero, trigger: "manual" })).rejects.toThrow("Invalid commit SHA");
+    expect(await h.db.deployment.count({ where: { projectId } })).toBe(0);
   });
 
   it("queues exactly one deployment for a valid push and deduplicates retries", async () => {
@@ -191,6 +206,52 @@ describe("GitHub push → verified deploy → rollback (real git/DB/HTTP)", () =
     expect(await h.queue.waitForDeployment(queued.deploymentId, 20_000)).toBe("SUCCESS");
     expect((await marker()).commitSha).toBe(shas.sha2);
   }, 60_000);
+
+  it("fetches an unadvertised pinned commit when the remote permits it", async () => {
+    const source = path.join(h.root, "source");
+    const git = (args: string[]) => execFileSync("git", args, { cwd: source, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.com" } }).trim();
+    const tree = git(["rev-parse", `${shas.sha1}^{tree}`]);
+    const orphan = git(["commit-tree", tree, "-m", "unadvertised commit"]);
+    // file:// uses Git's transport instead of local clone's object hardlinks.
+    await h.db.gitProject.update({ where: { id: projectId }, data: { cloneUrl: pathToFileURL(source).href } });
+    const queued = await h.queue.enqueueDeployment({ projectId, commitSha: orphan, branch: "main", trigger: "manual" });
+    await h.queue.processPendingDeployments();
+    expect(await h.queue.waitForDeployment(queued.deploymentId, 20_000)).toBe("SUCCESS");
+    expect((await marker()).commitSha).toBe(orphan);
+  }, 60_000);
+
+  it("fails closed when a pinned commit cannot be fetched", async () => {
+    const before = await marker();
+    const missing = "a".repeat(40);
+    const queued = await h.queue.enqueueDeployment({ projectId, commitSha: missing, branch: "main", trigger: "manual" });
+    await h.queue.processPendingDeployments();
+    expect(await h.queue.waitForDeployment(queued.deploymentId, 20_000)).toBe("FAILED");
+    const deployment = await h.db.deployment.findUnique({ where: { id: queued.deploymentId } });
+    expect(deployment?.failureStage).toBe("checkout");
+    expect(deployment?.buildOutput).toContain(`Pinned commit ${missing} is unavailable`);
+    expect((await marker()).commitSha).toBe(before.commitSha);
+  }, 60_000);
+
+  it("imports a Node project with an oversized environment list only behind approval", async () => {
+    const source = path.join(h.root, "many-env");
+    await fs.mkdir(source, { recursive: true });
+    await fs.writeFile(path.join(source, "package.json"), JSON.stringify({ dependencies: { express: "^4" }, scripts: { start: "node server.js" } }));
+    await fs.writeFile(path.join(source, ".env.example"), Array.from({ length: 101 }, (_, i) => `VAR_${i}=value`).join("\n"));
+    const user = await h.db.user.findFirst();
+    expect(user).toBeTruthy();
+    const { importRepository } = await import("../src/lib/deploy/projects");
+    const result = await importRepository({
+      userId: user.id, user: user as never, repository: "acme/many-env",
+      cloneUrlOverride: source, port: h.port + 1,
+    });
+    const config = JSON.parse(result.project.config);
+    expect(result.project.requiresApproval).toBe(true);
+    expect(result.project.autoDeploy).toBe(false);
+    expect(result.project.detectionStatus).toBe("ambiguous");
+    expect(config.requiresApproval).toBe(true);
+    expect(config.envNames).toEqual([]);
+    expect(result.warnings.join(" ")).toMatch(/operator must choose/i);
+  });
 
   it("does not disclose secrets in persisted deployment logs", async () => {
     const logs = await h.db.deploymentLog.findMany({

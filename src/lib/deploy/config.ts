@@ -2,6 +2,7 @@ import { z } from "zod";
 import path from "node:path";
 import type { DeployConfig, DetectionResult, ServiceManager } from "./types";
 import { assertReservedServiceName } from "./host-settings";
+import { MAX_DEPLOY_ENV_NAMES } from "./limits";
 
 /**
  * Commands are NEVER shell strings. They are parsed into argv and the executable
@@ -105,7 +106,7 @@ export const deployConfigSchema = z.object({
   buildCmd: z.string().max(512).nullable().default(null),
   startCmd: z.string().max(512).nullable().default(null),
   outputDir: z.string().min(1).max(256).default("."),
-  envNames: z.array(z.string().regex(/^[A-Z_][A-Z0-9_]*$/)).max(100).default([]),
+  envNames: z.array(z.string().regex(/^[A-Z_][A-Z0-9_]*$/)).max(MAX_DEPLOY_ENV_NAMES).default([]),
   port: z.number().int().min(1).max(65535).default(3100),
   healthPath: z.string().regex(/^\/[A-Za-z0-9/._-]*$/).max(200).default("/"),
   serviceManager: z.enum(["static", "pm2", "systemd", "none"]).default("static"),
@@ -156,6 +157,10 @@ export function validateDeployConfig(raw: unknown): DeployConfig {
 
 /** Turn a detection result into an editable, validated starting configuration. */
 export function configFromDetection(d: DetectionResult): DeployConfig {
+  // Never silently select the first 100 names: that would both omit potentially
+  // required variables and implicitly authorize an arbitrary subset. Require
+  // an operator to choose the allowlist when detection exceeds the limit.
+  const envNeedsReview = d.envNames.length > MAX_DEPLOY_ENV_NAMES;
   return validateDeployConfig({
     version: 1,
     installCmd: d.installCmd,
@@ -165,11 +170,11 @@ export function configFromDetection(d: DetectionResult): DeployConfig {
     buildCmd: d.buildCmd,
     startCmd: d.startCmd,
     outputDir: d.outputDir,
-    envNames: d.envNames,
+    envNames: envNeedsReview ? [] : d.envNames,
     port: d.port,
     healthPath: d.healthPath,
     serviceManager: "static" as ServiceManager,
-    requiresApproval: d.ambiguous,
+    requiresApproval: d.ambiguous || envNeedsReview,
     source: "detected",
   });
 }
@@ -198,9 +203,11 @@ export function resolveConfig(
   currentDetection: DetectionResult,
 ): DeployConfig {
   const stored = validateDeployConfig(storedConfig);
-  const proposedNow = configFromDetection(currentDetection);
   if (!importDetection) return stored;
-  const proposedAtImport = configFromDetection(importDetection);
+  // Environment names are not re-resolved here: the stored allowlist remains
+  // authoritative. A large scan must not invalidate unrelated command updates.
+  const proposedNow = configFromDetection({ ...currentDetection, envNames: [] });
+  const proposedAtImport = configFromDetection({ ...importDetection, envNames: [] });
   const resolved: Record<string, unknown> = { ...stored };
   for (const key of COMMAND_KEYS) {
     if (stored[key] === proposedAtImport[key]) resolved[key] = proposedNow[key];
