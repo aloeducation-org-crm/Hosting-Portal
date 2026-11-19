@@ -15,6 +15,7 @@ import { db } from "@/lib/db";
 import { detectFramework, fsReader } from "./detect";
 import { configFromDetection, validateDeployConfig } from "./config";
 import { runDeployment } from "./engine";
+import { isCommitSha } from "./commit-sha";
 
 const execFileAsync = promisify(execFile);
 
@@ -29,7 +30,6 @@ export interface DeployOptions {
 }
 
 const SAFE_BRANCH = /^[A-Za-z0-9][A-Za-z0-9/._-]{0,127}$/;
-const SAFE_SHA = /^[0-9a-f]{40}$/;
 
 function repositoryFromUrl(raw: string): string {
   const value = raw.trim().replace(/\.git$/, "");
@@ -43,7 +43,7 @@ function repositoryFromUrl(raw: string): string {
 export async function executeDeployment(options: DeployOptions) {
   if (!options.websiteId) throw new Error("websiteId is required");
   if (!SAFE_BRANCH.test(options.branch)) throw new Error("Unsafe branch name");
-  if (!SAFE_SHA.test(options.commitHash)) throw new Error("commitHash must be a 40-character SHA");
+  if (!isCommitSha(options.commitHash)) throw new Error("commitHash must be a non-zero 40-character SHA");
 
   const repository = repositoryFromUrl(options.repositoryUrl);
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "alo-compat-detect-"));
@@ -68,7 +68,7 @@ export async function executeDeployment(options: DeployOptions) {
         lastCommitMessage: options.commitMessage,
         lastCommitAuthor: options.commitAuthor,
         detection: JSON.stringify(detection),
-        detectionStatus: detection.ambiguous ? "ambiguous" : "detected",
+        detectionStatus: config.requiresApproval ? "ambiguous" : "detected",
         config: JSON.stringify(config),
         healthPath: config.healthPath,
         requiresApproval: config.requiresApproval,

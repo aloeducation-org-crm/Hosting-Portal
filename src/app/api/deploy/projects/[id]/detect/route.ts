@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     config.port = project.port ?? config.port;
     await db.gitProject.update({
       where: { id },
-      data: { detection: JSON.stringify(detection), config: JSON.stringify(config), detectionStatus: detection.ambiguous ? "ambiguous" : "detected", requiresApproval: detection.ambiguous },
+      data: { detection: JSON.stringify(detection), config: JSON.stringify(config), detectionStatus: config.requiresApproval ? "ambiguous" : "detected", requiresApproval: config.requiresApproval },
     });
     return NextResponse.json(apiSuccess({ detection, config, truncated }));
   } catch (error) {

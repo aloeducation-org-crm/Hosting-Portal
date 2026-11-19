@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import nodeCrypto from "node:crypto";
-import { parseCommand, tokenize, validateDeployConfig, UnsafeCommandError, filterBuildEnv } from "../src/lib/deploy/config";
+import { parseCommand, tokenize, validateDeployConfig, UnsafeCommandError, filterBuildEnv, configFromDetection, resolveConfig } from "../src/lib/deploy/config";
+import { detectFramework, memoryReader } from "../src/lib/deploy/detect";
 import { redact, collectSecrets, redactCommand } from "../src/lib/deploy/redact";
 import { verifyGitHubSignature } from "../src/lib/deploy/signature";
 
@@ -57,6 +58,21 @@ describe("command allowlist (no arbitrary shell execution)", () => {
   it("only passes explicitly named build variables", () => {
     const filtered = filterBuildEnv({ API_URL: "https://x", SECRET_TOKEN: "nope" }, ["API_URL"]);
     expect(filtered).toEqual({ API_URL: "https://x" });
+  });
+});
+
+describe("config resolution", () => {
+  it("keeps the operator env allowlist when either detection contains more than 100 names", async () => {
+    const initial = await detectFramework(memoryReader({ "index.html": "hello" }));
+    const stored = validateDeployConfig({ ...configFromDetection(initial), envNames: ["APP_URL"] });
+    const manyNames = Array.from({ length: 150 }, (_, i) => `VARIABLE_${i}`);
+    const oldDetection = { ...initial, envNames: manyNames };
+    const current = { ...initial, buildCmd: "npm run build", envNames: manyNames };
+    const resolved = resolveConfig(stored, oldDetection, current);
+    expect(resolved.buildCmd).toBe("npm run build");
+    expect(resolved.envNames).toEqual(["APP_URL"]);
+    expect(resolveConfig(stored, null, current)).toEqual(stored);
+    expect(() => validateDeployConfig({ envNames: manyNames })).toThrow();
   });
 });
 

@@ -160,6 +160,20 @@ describe("framework detection from real-shaped manifests", () => {
     expect(d.confidence).toBe("low");
   });
 
+  it("requires explicit review rather than silently truncating an oversized environment allowlist", async () => {
+    const envExample = Array.from({ length: 101 }, (_, i) => `VAR_${i}=value`).join("\n");
+    const d = await detectFramework(memoryReader({ "index.html": "<h1>x</h1>", ".env.example": envExample }));
+    expect(d.ambiguous).toBe(false); // the framework itself is unambiguous
+    expect(d.envNames).toHaveLength(101);
+    expect(d.warnings.join(" ")).toMatch(/101 environment names.*operator must choose/i);
+    const config = configFromDetection(d);
+    expect(config.requiresApproval).toBe(true);
+    expect(config.envNames).toEqual([]);
+    const reviewed = { ...config, envNames: ["VAR_1"], requiresApproval: false, confirmedBy: "operator" };
+    expect(configFromDetection({ ...d, envNames: d.envNames.slice(0, 100) }).envNames).toHaveLength(100);
+    expect(reviewed.envNames).toEqual(["VAR_1"]);
+  });
+
   it("turns detection into a validated, editable config", async () => {
     const d = await detectFramework(memoryReader({ "index.html": "<h1>x</h1>" }));
     const config = configFromDetection(d);

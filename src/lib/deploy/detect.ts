@@ -2,6 +2,7 @@ import path from "node:path";
 import { readFile, stat, readdir } from "node:fs/promises";
 import type { DetectionResult } from "./types";
 import { resolveNodeStartCommand } from "./start-command";
+import { MAX_DEPLOY_ENV_NAMES } from "./limits";
 
 /**
  * Framework/build detection from repository manifests.
@@ -192,6 +193,9 @@ export async function detectFramework(fs: FsReader): Promise<DetectionResult> {
   }
   // Never return an env var that could be a secret VALUE by accident.
   result.envNames = [...envNames].filter((n) => n.length <= 64).sort();
+  if (result.envNames.length > MAX_DEPLOY_ENV_NAMES) {
+    warnings.push(`Detected ${result.envNames.length} environment names, exceeding the ${MAX_DEPLOY_ENV_NAMES}-name build limit. An operator must choose the build allowlist before deployment.`);
+  }
 
   // ── Node / JS / TS ─────────────────────────────────────────────────────────
   if (pkg) {
