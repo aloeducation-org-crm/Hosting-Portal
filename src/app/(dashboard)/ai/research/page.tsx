@@ -49,8 +49,8 @@ export default function ResearchWorkspace() {
       <div className="grid gap-3 lg:grid-cols-2">
         {EXTERNAL_AI_TOOL_CATALOG.map((entry) => <article key={entry.id} className="space-y-2 rounded-lg border bg-background p-4 text-sm">
           <div className="flex flex-wrap items-center gap-2"><strong>{entry.suppliedLabel}</strong><span className="rounded border px-2 py-0.5 text-xs">{entry.admissionState}</span><span className="text-xs text-muted-foreground">{entry.executionState.replaceAll("_", " ")}</span></div>
-          <p className="text-xs text-muted-foreground">{entry.track} • {entry.license} • pinned {entry.pinnedCommit ? entry.pinnedCommit.slice(0, 12) : "n/a"}</p>
-          <p className="break-all text-xs">{entry.canonicalRef}</p>
+          <p className="text-xs text-muted-foreground">{entry.track} • {entry.license} • {entry.pinnedCommit ? `pinned ${entry.pinnedCommit.slice(0, 12)}` : "discovery link (not pinned)"}</p>
+          <a href={entry.canonicalRef} target="_blank" rel="noopener noreferrer" className="break-all text-xs text-primary underline">{entry.canonicalRef}</a>
           <p className="text-xs">{entry.notes}</p>
           <details><summary className="cursor-pointer text-xs">Candidate features and gates</summary><div className="mt-2 space-y-2 break-words text-xs"><p><strong>Features:</strong> {entry.candidateFeatures.length ? entry.candidateFeatures.join("; ") : "None — excluded"}</p><p><strong>Gates:</strong> {entry.gates.join("; ")}</p></div></details>
         </article>)}

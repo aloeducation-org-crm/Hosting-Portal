@@ -24,6 +24,15 @@ const EXPECTED_IDS = [
   "container",
   "treg",
   "wifi-password-cracker-pro",
+  "metagpt-topic",
+  "awesome-agent-orchestration",
+  "metagpt",
+  "autogen",
+  "crewai",
+  "langgraph",
+  "ollama",
+  "llama-cpp",
+  "qwen3-coder",
 ] as const;
 
 describe("external AI capability intake", () => {
@@ -45,7 +54,13 @@ describe("external AI capability intake", () => {
       expect(entry.gates.length).toBeGreaterThan(0);
       expect(entry.notes.length).toBeGreaterThan(10);
       expect(entry.license.length).toBeGreaterThan(0);
-      expect(entry.pinnedCommit).toMatch(/^[a-f0-9]{40}$/);
+      if (entry.repository) {
+        expect(entry.pinnedCommit).toMatch(/^[a-f0-9]{40}$/);
+      } else {
+        expect(entry.id).toBe("metagpt-topic");
+        expect(entry.pinnedCommit).toBeNull();
+        expect(entry.canonicalRef).toBe("https://github.com/topics/metagpt");
+      }
       for (const ref of [entry.suppliedRef, entry.canonicalRef]) {
         const url = new URL(ref);
         expect(url.protocol).toBe("https:");
