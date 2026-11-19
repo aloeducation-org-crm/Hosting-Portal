@@ -82,7 +82,7 @@ export function isPortFree(port: number, host = "127.0.0.1"): Promise<boolean> {
 /**
  * Yield candidate application ports, skipping reserved platform ports and
  * ports already claimed by a stored project/website. Starts at the configured
- * base (default 3062, matching `alo-server-lap`'s registry) and walks upward.
+ * base (default 3063, matching `alo-server-lap`'s registry) and walks upward.
  */
 export function* portCandidates(
   used: Iterable<number>,

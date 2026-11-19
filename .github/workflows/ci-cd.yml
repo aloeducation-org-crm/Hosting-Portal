@@ -61,9 +61,9 @@ on:
         default: 'hosting.alolabs.net'
         type: string
       routing_port:
-        description: 'Loopback port the panel listens on for the read-only routing check (default 3051).'
+        description: 'Loopback port the panel listens on for the read-only routing check (default 3062).'
         required: false
-        default: '3051'
+        default: '3062'
         type: string
 
 permissions:
@@ -90,9 +90,7 @@ permissions:
 # forcing an undeclared runtime. They are also the majors that require a
 # self-hosted runner >= 2.327.1.
 #
-# They are pinned by major tag rather than by SHA, which is the convention this
-# repository already used for @v4 and matches its "reviewable, upgradeable"
-# intent. All jobs use the same families, so the artifact produced by upload@v6 is
+# Actions are pinned to immutable commits; comments note their major release. All jobs use the same families, so the artifact produced by upload@v6 is
 # downloaded by download@v7 — v5/v6 of these actions changed only the runtime and
 # dependencies, not the artifact backend.
 #
@@ -126,10 +124,10 @@ jobs:
       # merge commit to prove no file introduced by a merged PR was silently
       # dropped later. A depth-1 checkout makes that audit skip itself, which
       # would turn a real gate into a no-op that still reports green.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
           cache: npm
@@ -173,9 +171,11 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       artifact-digest: ${{ steps.digest.outputs.value }}
+      pm2-digest: ${{ steps.pm2-package.outputs.digest }}
+      pm2-archive-sha256: ${{ steps.pm2-package.outputs.archive-sha256 }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
           cache: npm
@@ -246,7 +246,7 @@ jobs:
           github.event_name == 'workflow_dispatch' &&
           github.event.inputs.release_approval == 'APPROVED' &&
           github.event.inputs.release_ticket != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: hosting-release-${{ github.sha }}
           include-hidden-files: true
@@ -266,6 +266,33 @@ jobs:
             scripts/decide-release-target.mjs
             .deploy-digest
 
+      - name: Package isolated PM2 release candidate
+        id: pm2-package
+        run: |
+          set -Eeuo pipefail
+          mkdir -p pm2-candidate/payload/.next
+          cp -aL .next/standalone .next/static pm2-candidate/payload/.next/
+          cp -a public pm2-candidate/payload/
+          digest=$(bash scripts/pm2-release-digest.sh pm2-candidate/payload)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          node -e 'const [commitSha,artifactSha256]=process.argv.slice(1); console.log(JSON.stringify({commitSha,artifactSha256,buildTimestamp:new Date().toISOString(),applicationVersion:require("./package.json").version,nodeVersion:process.version,prismaVersion:require("@prisma/client/package.json").version,status:"candidate"}))' "$GITHUB_SHA" "$digest" | tee pm2-candidate/manifest.json
+          tar -C pm2-candidate -czf pm2-candidate.tar.gz manifest.json payload
+          archive_digest=$(sha256sum pm2-candidate.tar.gz | cut -d' ' -f1)
+          echo "archive-sha256=$archive_digest" >> "$GITHUB_OUTPUT"
+          rehearsal=$(mktemp -d)
+          trap 'rm -rf -- "$rehearsal"' EXIT
+          mkdir "$rehearsal/payload" "$rehearsal/releases"
+          bash scripts/verify-pm2-candidate.sh pm2-candidate.tar.gz "$archive_digest" "$GITHUB_SHA" "$digest" "$rehearsal/payload"
+          bash scripts/prepare-pm2-release.sh "$GITHUB_SHA" "$digest" "$rehearsal/payload/payload" "$rehearsal/releases"
+      - name: Upload isolated PM2 release candidate
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pm2-candidate-${{ github.sha }}
+          path: pm2-candidate.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
   # Read-only routing diagnostic, deliberately separate from `deploy-preflight`.
   # Preflight only runs for an approved release dispatch, so it cannot answer
   # "is the public domain healthy right now?" during an incident — this job can.
@@ -276,16 +303,16 @@ jobs:
   # release that the operator has separately approved.
   verify-routing:
     name: Verify public routing (read-only)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: self-hosted
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.ALO_PM2_ROUTING_ENABLED == '1'
+    runs-on: [self-hosted, alo-portal-routing]
     continue-on-error: true
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Check that the public domain reaches the panel
         env:
           DOMAIN: ${{ github.event.inputs.routing_domain || 'hosting.alolabs.net' }}
-          APP_PORT: ${{ github.event.inputs.routing_port || '3051' }}
+          APP_PORT: ${{ github.event.inputs.routing_port || '3062' }}
           # Optional. Without them the Cloudflare SSL/TLS mode check reports
           # NOT VERIFIABLE instead of guessing, which is the honest outcome —
           # 'flexible' is the setting that produces the 530 redirect loop.
@@ -296,7 +323,7 @@ jobs:
           bash scripts/verify-production-routing.sh | tee routing-report.txt
       - name: Upload the routing report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: routing-report-${{ github.sha }}
           path: routing-report.txt
@@ -314,7 +341,7 @@ jobs:
     # condition requires main. The typed approval and ticket are explicit
     # dispatch-time decisions, never a stored variable that can be forgotten.
     if: >-
-      github.ref == 'refs/heads/main' &&
+      false && github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
       github.event.inputs.release_approval == 'APPROVED' &&
       github.event.inputs.release_ticket != ''
@@ -324,8 +351,8 @@ jobs:
       mode: ${{ steps.decide.outputs.mode }}
       decision: ${{ steps.decide.outputs.reason }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
       # Installed in the ephemeral workspace only, never in the app checkout.
@@ -358,7 +385,7 @@ jobs:
           fi
           echo "::error::Obsolete run: main has moved to ${latest}. Only the current head of main may reach production. Re-run the workflow for ${latest}."
           exit 1
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
@@ -417,7 +444,7 @@ jobs:
     name: Deploy canonical root portal to production server
     needs: [build, deploy-preflight]
     if: >-
-      github.ref == 'refs/heads/main' &&
+      false && github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
       github.event.inputs.release_approval == 'APPROVED' &&
       github.event.inputs.release_ticket != ''
@@ -448,10 +475,10 @@ jobs:
       # on commits outside the graft, and `git fetch origin main` leaves
       # `origin/main` pointing at this run's own commit, which makes a staleness
       # comparison silently pass for the stale run it exists to reject.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
       # Scripts in the release guard (decide-release-activation.mjs,
@@ -480,7 +507,7 @@ jobs:
           fi
           echo "::error::Superseded release: main has moved to ${latest} while this run waited to deploy. Refusing to activate ${DEPLOY_COMMIT_SHA}."
           exit 1
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: hosting-release-${{ github.sha }}
           path: .deploy-artifact
@@ -517,3 +544,92 @@ jobs:
           #     exact commit SHA plus database and schema health
           #   - restores the previous commit and re-verifies when that fails
           bash scripts/deploy-release.sh
+
+  pm2-staging:
+    name: Activate and smoke-test candidate on portal staging
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && vars.ALO_PM2_STAGING_ENABLED == '1' && github.event.inputs.allow_rollback != '1'
+    runs-on: [self-hosted, alo-portal-staging]
+    environment: staging
+    concurrency: alo-portal-staging-activation
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: pm2-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Activate on isolated staging and verify readiness
+        env:
+          PORTAL_ROOT: ${{ vars.ALO_PM2_ROOT }}
+          PORTAL_ENV_FILE: ${{ vars.ALO_PM2_ENV_FILE }}
+          PM2_DIGEST: ${{ needs.build.outputs.pm2-digest }}
+          PM2_ARCHIVE_SHA256: ${{ needs.build.outputs.pm2-archive-sha256 }}
+          PM2_ARCHIVE: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}/pm2-candidate.tar.gz
+        run: bash scripts/activate-ci-pm2-candidate.sh
+
+  pm2-production-policy:
+    name: Verify production environment protection without host access
+    needs: pm2-staging
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' &&
+      vars.ALO_PM2_PRODUCTION_ENABLED == '1' && github.event.inputs.release_approval == 'APPROVED' &&
+      github.event.inputs.release_ticket != '' && github.event.inputs.allow_rollback != '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require independent reviewers and main-only environment policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          environment="repos/$GITHUB_REPOSITORY/environments/production"
+          gh api "$environment" | jq -e '
+            .deployment_branch_policy.custom_branch_policies == true and
+            .deployment_branch_policy.protected_branches == false and
+            any(.protection_rules[]; .type == "required_reviewers" and
+              .prevent_self_review == true and (.reviewers | length) > 0)
+          ' >/dev/null
+          gh api "$environment/deployment-branch-policies?per_page=100" | jq -e '
+            .total_count == 1 and .branch_policies[0].name == "main" and .branch_policies[0].type == "branch"
+          ' >/dev/null
+
+  pm2-production:
+    name: Activate the staged candidate on portal production
+    needs: [build, pm2-staging, pm2-production-policy]
+    if: >-
+      github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' &&
+      vars.ALO_PM2_PRODUCTION_ENABLED == '1' && github.event.inputs.release_approval == 'APPROVED' &&
+      github.event.inputs.release_ticket != '' && github.event.inputs.allow_rollback != '1'
+    runs-on: [self-hosted, alo-portal-production]
+    environment: production
+    concurrency: hosting-production-deploy
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          clean: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: pm2-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Activate reviewed candidate and verify readiness
+        env:
+          PORTAL_ROOT: ${{ vars.ALO_PM2_ROOT }}
+          PORTAL_ENV_FILE: ${{ vars.ALO_PM2_ENV_FILE }}
+          PM2_DIGEST: ${{ needs.build.outputs.pm2-digest }}
+          PM2_ARCHIVE_SHA256: ${{ needs.build.outputs.pm2-archive-sha256 }}
+          PM2_ARCHIVE: ${{ runner.temp }}/alo-pm2-${{ github.run_id }}-${{ github.run_attempt }}/pm2-candidate.tar.gz
+          RELEASE_TICKET: ${{ github.event.inputs.release_ticket }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$RELEASE_TICKET" =~ ^[A-Za-z0-9._:/-]{3,120}$ ]]
+          [[ "$(git ls-remote https://github.com/aloeducation-org-crm/Hosting-Portal.git refs/heads/main | cut -f1)" == "$GITHUB_SHA" ]]
+          echo "Release approval reference: $RELEASE_TICKET; SHA: $GITHUB_SHA"
+          bash scripts/activate-ci-pm2-candidate.sh

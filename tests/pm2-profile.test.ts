@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -96,7 +97,7 @@ describe("PM2 ecosystem profile", () => {
     const [panel] = loadEcosystem({ PANEL_ENV_FILE: path.join(dir, "panel.env"), PANEL_APP_DIR: dir });
     expect(panel.name).toBe("alo-hosting-panel");
     expect(panel.exec_mode).toBe("fork");
-    expect(panel.env.PORT).toBe("3000");
+    expect(panel.env.PORT).toBe("3062");
     expect(panel.env.HOSTNAME).toBe("127.0.0.1");
     expect(panel.env.NODE_ENV).toBe("production");
     expect(panel.env.NEXTAUTH_SECRET).toBe("from-panel-env");
@@ -140,7 +141,7 @@ describe("PM2 profile files stay consistent", () => {
   const script = fs.readFileSync(path.join(repo, "scripts/deploy-pm2.sh"), "utf8");
 
   it("nginx proxies both ports to the PM2 port and never redirects or aliases", () => {
-    expect(directives.filter((line) => line === "proxy_pass http://127.0.0.1:3000;")).toHaveLength(2);
+    expect(directives.filter((line) => line === "proxy_pass http://127.0.0.1:3062;")).toHaveLength(2);
     expect(directives.some((line) => line.startsWith("return 301"))).toBe(false);
     expect(directives.some((line) => line.startsWith("alias ") || line.startsWith("root "))).toBe(false);
     expect(directives).toContain("proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;");
@@ -148,7 +149,7 @@ describe("PM2 profile files stay consistent", () => {
     expect(directives).not.toContain("http2 on;");
   });
 
-  it("the deploy script backs up before the schema step and restarts only after the build", () => {
+  it("the deploy script backs up before build, never writes schema, and saves PM2 after health checks", () => {
     const commands = script
       .split("\n")
       .filter((line) => !line.trim().startsWith("#"))
@@ -159,12 +160,12 @@ describe("PM2 profile files stay consistent", () => {
       return index;
     };
     const backup = at("node scripts/db-backup.mjs");
-    const schema = at("npx prisma db push --skip-generate");
     const build = at("with_panel_env npm run build\n");
     const copy = at('cp -R "$ROOT/.next/static"');
     const restart = at("pm2 startOrReload");
-    expect(backup).toBeLessThan(schema);
-    expect(schema).toBeLessThan(build);
+    expect(backup).toBeLessThan(build);
+    expect(commands).not.toMatch(/prisma (db push|migrate)/);
+    expect(restart).toBeLessThan(at("pm2 save"));
     expect(build).toBeLessThan(copy);
     expect(copy).toBeLessThan(restart);
     expect(commands).not.toContain("--accept-data-loss");
@@ -172,4 +173,35 @@ describe("PM2 profile files stay consistent", () => {
     // The env file is parsed as data; it must never be sourced by the shell.
     expect(script).not.toMatch(/^\s*(source|\.)\s+"?\$ENV_FILE/m);
   });
+});
+
+
+it("loads the root PM2 profile and binds the standalone panel to loopback on 3062", () => {
+  const dir = scratch({ "panel.env": "PORT=3051\nHOSTNAME=0.0.0.0\n" });
+  Object.assign(process.env, { PANEL_ENV_FILE: path.join(dir, "panel.env"), PANEL_APP_DIR: dir });
+  delete process.env.PANEL_PORT;
+  const { apps } = require("../ecosystem.config.cjs") as { apps: App[] };
+  expect(apps[0]).toMatchObject({
+    name: "alo-hosting-panel",
+    cwd: path.join(dir, ".next/standalone"),
+    env: { PORT: "3062", HOSTNAME: "127.0.0.1" },
+  });
+});
+
+it("targets the PM2 port from the tunnel ingress template and routing diagnostic", () => {
+  const nginx = fs.readFileSync(path.join(repo, "deploy/nginx/hosting.alolabs.net.conf"), "utf8");
+  expect(nginx.match(/proxy_pass http:\/\/127\.0\.0\.1:3062;/g)).toHaveLength(2);
+  const workflow = fs.readFileSync(path.join(repo, ".github/workflows/ci-cd.yml"), "utf8");
+  expect(workflow).toContain("github.event.inputs.routing_port || '3062'");
+  expect(workflow).toMatch(/verify-routing:[\s\S]*?if: github.event_name == 'workflow_dispatch' && github.ref == 'refs\/heads\/main'/);
+});
+
+
+it.each(["3051", "3062"])("rejects reserved port %s before tenant shell provisioning", (port) => {
+  const result = spawnSync("bash", ["scripts/deploy-new-site.sh", "test", "test.example.com", port], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain(`port ${port} is reserved`);
 });

@@ -615,9 +615,10 @@ describe("guard placement and workflow wiring", () => {
       "actions/download-artifact": 7,
     };
     const yaml = read(".github/workflows/ci-cd.yml");
-    const uses = [...yaml.matchAll(/uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@v(\d+)/g)];
+    const uses = [...yaml.matchAll(/^\s*- uses:\s*([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)@([0-9a-f]{40}) # v(\d+)/gm)];
     expect(uses.length).toBeGreaterThanOrEqual(4);
-    for (const [, action, major] of uses) {
+    expect(uses.length).toBe([...yaml.matchAll(/^\s*- uses:/gm)].length);
+    for (const [, action, , major] of uses) {
       const minimum = minimumMajor[action];
       expect(minimum, `${action} is not covered by this policy; extend it deliberately`).toBeTypeOf(
         "number",

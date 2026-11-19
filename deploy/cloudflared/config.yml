@@ -16,7 +16,7 @@
 #   301 Location: https://hosting.alolabs.net/
 # The browser follows it, Cloudflare routes it back into the same tunnel, nginx
 # 301s again — an infinite loop. The edge then reports HTTP 530 and
-# ERR_TOO_MANY_REDIRECTS, while `curl http://127.0.0.1:3051` on the server
+# ERR_TOO_MANY_REDIRECTS, while `curl http://127.0.0.1:3062` on the server
 # returns 200 and everything looks fine locally. That is exactly the symptom
 # that was reported.
 #
@@ -48,7 +48,7 @@ ingress:
   # useful: `curl https://origin-hosting.alolabs.net/api/health` tells you
   # whether a 5xx is nginx or the panel.
   # - hostname: origin-hosting.alolabs.net
-  #   service: http://127.0.0.1:3051
+  #   service: http://127.0.0.1:3062
 
   # Required catch-all — cloudflared refuses to start without it.
   - service: http_status:404

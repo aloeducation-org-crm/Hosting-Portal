@@ -29,6 +29,8 @@
 #   --tunnel <uuid>  rewrite ~/.cloudflared/config.yml to ingress on 443
 #
 set -euo pipefail
+printf '%s\n' 'Legacy systemd portal provisioning is disabled; see docs/PM2-IMMUTABLE-RELEASES.md.' >&2
+exit 1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_DIR="/etc/alo-hosting"

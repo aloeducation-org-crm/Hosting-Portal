@@ -318,8 +318,8 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     const snapJson = await snapRes.json();
     expect(snapRes.status).toBe(200);
     expect(snapJson.data.authMode).toBe("api_key");
-    expect(snapJson.data.hosting.reservedControlPlanePort).toBe(3051);
-    expect(snapJson.data.hosting.nextAvailablePort).toBeGreaterThanOrEqual(3062);
+    expect(snapJson.data.hosting.reservedControlPlanePort).toBe(3062);
+    expect(snapJson.data.hosting.nextAvailablePort).toBeGreaterThanOrEqual(3063);
 
     // 2. Headless invoice generation + mark paid
     const invReq = new NextRequest("http://localhost:3000/api/ai/operator", {
@@ -386,7 +386,7 @@ describe("Digital Marketing Command Center, Bill Agent AI Operator & Open-Source
     const deployJson = await deployRes.json();
     expect(deployRes.status).toBe(200);
     expect(deployJson.data.executedCommand).toBe("auto_deploy_site");
-    expect(deployJson.data.result.website.applicationPort).toBeGreaterThanOrEqual(3062);
+    expect(deployJson.data.result.website.applicationPort).toBeGreaterThanOrEqual(3063);
     createdIds.websites.push(deployJson.data.result.website.id);
 
     const latestRuns = await db.aiAgentRun.findMany({

@@ -9,11 +9,11 @@
 # Order of work — the database is backed up before anything can change it, and
 # the running processes are only touched after the new build is complete:
 #   1. preflight (user, env file, secrets present, database location)
-#   2. move stray .env files out of the checkout
+#   2. refuse checkout-local env files (leave them untouched)
 #   3. git pull --ff-only            (skip with --no-pull)
 #   4. npm ci
 #   5. verified database backup
-#   6. prisma db push                (skip with --skip-schema)
+#   6. no schema changes (separate audited, approved operation)
 #   7. next build + worker bundles
 #   8. copy .next/static and public into the standalone output
 #   9. pm2 startOrReload + pm2 save
@@ -25,7 +25,7 @@
 #
 # Options:
 #   --no-pull       build the checkout as it is
-#   --skip-schema   do not run prisma db push
+#   --skip-schema   compatibility flag; schema writes are always disabled
 #   --check         run the preflight only and change nothing
 #
 # Environment overrides: PANEL_ENV_FILE, PANEL_PORT, PANEL_BACKUP_DIR,
@@ -39,7 +39,7 @@ fail() { printf 'deploy-pm2: ERROR: %s\n' "$*" >&2; exit 1; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PANEL_ENV_FILE:-/etc/alo-hosting/panel.env}"
-PORT="${PANEL_PORT:-3000}"
+PORT="${PANEL_PORT:-3062}"
 BRANCH="${PANEL_BRANCH:-main}"
 BACKUP_DIR="${PANEL_BACKUP_DIR:-${HOME}/storage/backups/hosting-predeploy}"
 ECOSYSTEM="${ROOT}/deploy/pm2/ecosystem.config.cjs"
@@ -47,12 +47,11 @@ ENV_READER="${ROOT}/deploy/pm2/panel-env.cjs"
 HEALTH_URL="http://127.0.0.1:${PORT}/api/health"
 
 do_pull=1
-do_schema=1
 check_only=0
 for arg in "$@"; do
   case "$arg" in
     --no-pull) do_pull=0 ;;
-    --skip-schema) do_schema=0 ;;
+    --skip-schema) : ;;
     --check) check_only=1 ;;
     -h|--help) sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) fail "unknown option: $arg" ;;
@@ -96,6 +95,8 @@ if [[ "$check_only" -eq 1 ]]; then
   exit 0
 fi
 
+fail 'in-place PM2 deployment is disabled; use scripts/activate-pm2-release.sh'
+
 # One deploy at a time.
 exec 9>"${ROOT}/.deploy-pm2.lock"
 flock -n 9 || fail "another deploy-pm2 run holds ${ROOT}/.deploy-pm2.lock"
@@ -105,9 +106,8 @@ flock -n 9 || fail "another deploy-pm2 run holds ${ROOT}/.deploy-pm2.lock"
 # the standalone output. Template values there are what made the production
 # secret check in src/lib/env.ts refuse to start. panel.env is the only source.
 for name in .env .env.production .env.local .env.production.local; do
-  if [[ -e "$ROOT/$name" ]]; then
-    mv -f "$ROOT/$name" "$ROOT/$name.placeholder"
-    log "moved $name aside to $name.placeholder"
+  if [[ -e "$ROOT/$name" || -L "$ROOT/$name" ]]; then
+    fail "$name exists; use an isolated release checkout without local env files"
   fi
 done
 
@@ -146,14 +146,6 @@ node scripts/db-backup.mjs --db "$DB_URL" --out "$BACKUP_DIR" --label "predeploy
   || fail "database backup failed; nothing has been changed"
 log "database backup written to $BACKUP_DIR"
 
-# ── 6. Schema ────────────────────────────────────────────────────────────────
-# No --accept-data-loss: if Prisma would have to drop data it stops here, and
-# the running application is left exactly as it was.
-if [[ "$do_schema" -eq 1 ]]; then
-  DATABASE_URL="$DB_URL" npx prisma db push --skip-generate \
-    || fail "prisma db push failed; the running application was not restarted. Backup: $BACKUP_DIR"
-fi
-
 # ── 7. Build ─────────────────────────────────────────────────────────────────
 with_panel_env npm run build
 with_panel_env npm run build:worker
@@ -176,7 +168,6 @@ rm -f "$STANDALONE"/.env "$STANDALONE"/.env.production "$STANDALONE"/.env.local 
 # ── 9. PM2 ───────────────────────────────────────────────────────────────────
 PANEL_ENV_FILE="$ENV_FILE" PANEL_PORT="$PORT" PANEL_APP_DIR="$ROOT" \
   pm2 startOrReload "$ECOSYSTEM" --update-env
-pm2 save
 
 # ── 10. Health ───────────────────────────────────────────────────────────────
 code=000
@@ -196,4 +187,5 @@ if [[ -n "$asset" ]]; then
   [[ "$asset_code" == "200" ]] || fail "static chunk returned HTTP $asset_code; static assets are not being served"
 fi
 
+pm2 save
 log "ok: commit ${SHA:0:12} is healthy on 127.0.0.1:${PORT}"

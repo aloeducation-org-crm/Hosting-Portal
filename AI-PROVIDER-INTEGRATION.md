@@ -212,3 +212,20 @@ disabled by default until deliberately enabled — no free-tier or quality claim
 ## GLM-5 (`zai-org/GLM-5` — Apache-2.0)
 
 Set `GLM_API_KEY` (or `ZHIPU_API_KEY`) and `GLM_BASE_URL=https://api.z.ai/api/paas/v4` (or `http://127.0.0.1:8000/v1` for local vLLM/SGLang).
+
+## Open-source coding and agent orchestration references
+
+Administrators can browse these under **AI Research & Evolution → External AI
+capability intake** (`/ai/research`). Authenticated workflows can read the same
+entries with the **External AI Capability Review** template. The MetaGPT topic
+and Awesome Agent Orchestration are discovery sources, not install lists.
+Compare MetaGPT or CrewAI for role-based handoffs, LangGraph for approval steps,
+and AutoGen for agent coordination. For local inference, review Ollama or
+llama.cpp separately from the selected model (for example, Qwen3-Coder).
+
+For a pilot, choose one non-sensitive project, one bounded task, one model, and
+one human reviewer. Evaluate in an isolated environment before enabling any
+connector. The portal already has an optional Ollama provider profile, but a
+catalog entry does not start a server, download weights, or turn on a provider.
+Check checkpoint licensing, hardware, storage, and hosted inference costs before
+selection. Open-source framework code does not make every model or service free.

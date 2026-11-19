@@ -23,14 +23,14 @@ export const ALO_SERVER_SPEC = {
   primaryFramework: "Next.js 16.x (App Router)",
   controlPlane: {
     domain: "hosting.alolabs.net",
-    pm2App: "alo-hosting",
-    port: 3051,
+    pm2App: "alo-hosting-panel",
+    port: 3062,
   },
   portAllocation: {
-    nextStartPort: 3062,
+    nextStartPort: 3063,
     rangeEnd: 3999,
     /** Ports reserved by system services or the control plane; never allocate to tenant apps. */
-    reservedPorts: [80, 443, 22, 3000, 3051, 5432, 6379, 7011, 8080] as readonly number[],
+    reservedPorts: [80, 443, 22, 3000, 3051, 3062, 5432, 6379, 7011, 8080] as readonly number[],
   },
   paths: {
     projectsDirPattern: "~/projects/[app-name]",
@@ -51,7 +51,7 @@ export interface PortRegistryEntry {
 
 /**
  * Allocates the next available loopback TCP port on `alo-server-lap`, starting
- * at 3062 by default and skipping reserved ports (including 3051 `alo-hosting`).
+ * at 3063 by default and skipping reserved ports.
  */
 export function allocateNextAvailablePort(
   usedPorts: Iterable<number> = [],
@@ -84,7 +84,7 @@ export function assertTenantPortAllowed(port: number): void {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     throw new Error(`Invalid port ${port}: must be an integer between 1024 and 65535`);
   }
-  if (port === ALO_SERVER_SPEC.controlPlane.port) {
+  if (port === 3051 || port === ALO_SERVER_SPEC.controlPlane.port) {
     throw new Error(
       `Port ${port} is reserved for control-plane "${ALO_SERVER_SPEC.controlPlane.pm2App}" (${ALO_SERVER_SPEC.controlPlane.domain})`,
     );

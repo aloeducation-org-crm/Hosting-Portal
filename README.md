@@ -136,7 +136,7 @@ generated for SQLite cannot open a `postgresql://` URL.
 npm run build
 cp -r .next/static .next/standalone/.next/static
 cp -r public .next/standalone/public
-PORT=3051 HOSTNAME=127.0.0.1 node .next/standalone/server.js
+PORT=3062 HOSTNAME=127.0.0.1 node .next/standalone/server.js
 ```
 
 `output: "standalone"` and `next start` are mutually exclusive; `npm start`
@@ -151,7 +151,7 @@ npm run audit:repo      # 16 repository invariants (single tree, imports, env, D
 npm run config:validate # production env/secret/DB preflight (read-only)
 npm audit               # dependency advisories
 bash scripts/server-doctor.sh
-node scripts/e2e-smoke.mjs http://127.0.0.1:3051   # needs PANEL_PASSWORD
+node scripts/e2e-smoke.mjs http://127.0.0.1:3062   # needs PANEL_PASSWORD
 ```
 
 `npm test` runs 87 Vitest suites. Tests that touch the database use

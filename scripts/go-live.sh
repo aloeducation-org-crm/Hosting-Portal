@@ -37,6 +37,8 @@
 # only applies migrations that have not yet been applied.
 #
 set -Eeuo pipefail
+printf '%s\n' 'Legacy systemd portal provisioning is disabled; see docs/PM2-IMMUTABLE-RELEASES.md.' >&2
+exit 1
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"

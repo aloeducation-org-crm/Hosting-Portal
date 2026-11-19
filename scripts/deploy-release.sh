@@ -163,6 +163,10 @@ GUARD_DECISION="$(printf '{"facts":%s,"authorization":%s}' "$GUARD_FACTS" "$GUAR
 GUARD_ROLLBACK="$(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(String(JSON.parse(s).rollback===true))})' <<<"$GUARD_DECISION")"
 log "release guard: $(node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s);process.stdout.write(d.code+" — "+d.reason)})' <<<"$GUARD_DECISION")"
 
+# Retain the historical authorization checks above for diagnostics, but never
+# enter either legacy mutation path.
+fail 'legacy portal activation is disabled; use scripts/activate-pm2-release.sh'
+
 # ── 1. Read-only preflight decides the shape ─────────────────────────────────
 export DEPLOY_COMMIT_SHA="$SHA" DEPLOY_PAYLOAD_DIR="$PAYLOAD" ALO_INLINE_APP_DIR="$APP_DIR"
 

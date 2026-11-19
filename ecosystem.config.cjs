@@ -6,20 +6,12 @@
  * `.env.config` itself with `fs.readFileSync()` and merges the parsed values
  * into the process environment before the Next.js standalone server starts.
  *
- * Deploy (Rule 8b):
- *   npm ci
- *   npx prisma generate
- *   npx prisma db push
- *   npm run build
- *   chown -R alamin:alamin /path/to/project
- *   pm2 delete alo-hosting-panel 2>/dev/null || true
- *   pm2 start ecosystem.config.cjs
- *   pm2 save
+ * For rollout and database approval gates see docs/PM2-PRODUCTION-RUNBOOK.md.
  *
  * Overrides (set in the shell that runs pm2):
  *   PANEL_ENV_FILE   - path to the env file (default: ./.env.config)
  *   PANEL_APP_DIR    - project directory (default: this file's directory)
- *   PANEL_PORT       - listen port (default: PORT from .env.config, else 3054)
+ *   PANEL_PORT       - listen port (default: 3062; override for isolated staging)
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -59,14 +51,14 @@ function readEnvFile(filePath) {
 }
 
 const fileEnv = readEnvFile(envFile);
-const port = String(process.env.PANEL_PORT || fileEnv.PORT || 3054);
+const port = String(process.env.PANEL_PORT || 3062);
 
 // PORT / HOSTNAME are applied last on purpose so the server always listens
 // where nginx is configured to proxy (127.0.0.1:<PORT>).
 const panelEnv = Object.assign(
   { NODE_ENV: 'production' },
   fileEnv,
-  { PORT, HOSTNAME: '127.0.0.1' },
+  { PORT: port, HOSTNAME: '127.0.0.1' },
 );
 
 module.exports = {

@@ -57,7 +57,7 @@ export const RESERVED_SERVICE_NAMES: readonly string[] = [
   "alo-port-8080-validator",
   "alo-encrypted-backup",
   "alo-backup-monitor",
-  ALO_SERVER_SPEC.controlPlane.pm2App, // "alo-hosting"
+  "alo-hosting", // legacy process name remains protected
 ];
 
 /**

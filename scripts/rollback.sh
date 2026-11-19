@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+printf '%s\n' 'Legacy portal activation is disabled; use scripts/activate-pm2-release.sh.' >&2
+exit 1
 
 APP_DIR="/opt/application"
 RELEASES_DIR="${APP_DIR}/releases"
